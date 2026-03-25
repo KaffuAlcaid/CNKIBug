@@ -135,9 +135,8 @@ CNKIBug/
         <sub><b>Kaffu_Alcaid</b></sub>
       </a>
       <br />
-      核心开发 & 产品架构 (不要问我为什么在里边)
+      核心开发 & 产品架构（不要问我为什么在里边）
     </td>
-    
     <td align="center">
       <a href="https://github.com/Speechlessyc">
         <img src="https://github.com/Speechlessyc.png" width="80px;" alt="Speechlessyc"/>
