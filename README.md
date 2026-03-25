@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.0.4-orange)
+![Version](https://img.shields.io/badge/Version-0.0.5-orange)
 
 ---
 
@@ -24,7 +24,7 @@
 ```
 ==================================================
   CNKI_Bug_dev  |  copyright by Kaffu_Alcaid
-  Version 0.0.4
+  Version 0.0.5
 ==================================================
   本软件用于抓取中国知网的论文标题
 
