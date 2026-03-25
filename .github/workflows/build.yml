@@ -1,32 +1,29 @@
 name: Binary Build Nightly x64 Executables (3:00, UTC+8)
 
+name: Build and Auto-Release
+
 permissions:
-  contents: read
+  contents: write
 
 on:
-  schedule:
-    - cron: "00 19 * * *"
-  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
 
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.3.1
+        uses: astral-sh/setup-uv@v8
 
       - name: Install Dependencies
         run: |
@@ -34,12 +31,14 @@ jobs:
           uv run playwright install --with-deps chromium
           uv pip install pyinstaller --system
 
+      
       - name: Build With Pyinstaller
         run: |
-          pyinstaller --onefile --console --name CNKIBug main.py
+          pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --name CNKIBug CNKIBug.py
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+  
+      - name: Upload artifact to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          path: |
-            dist/CNKIBug.exe
+          files: dist/CNKIBug.exe
