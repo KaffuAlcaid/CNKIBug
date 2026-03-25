@@ -54,6 +54,7 @@
 1. 前往 [Releases](../../releases) 页面下载最新的 `CNKIBug.exe`
 2. 确保电脑已安装 **Microsoft Edge**（Win10/11 通常已预装）
 3. 双击 `CNKIBug.exe`，按提示输入关键词和页数即可
+4. 请注意：**一定要手动通过知网的滑块人机验证**
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装。
 
