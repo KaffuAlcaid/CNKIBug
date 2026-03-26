@@ -24,21 +24,21 @@
 <table border="0">
   <tr>
     <td align="center" width="50%">
-      <img src="assets/demo1.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/demo1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>启动演示1</b></sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/demo2.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/demo2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>2.输入关键词与设置</b></sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="assets/d3.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/d3.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>3. 抓取完成</b></sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/4.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/4.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>4. 抓取完成，结果保存至桌面</b></sub>
     </td>
   </tr>
