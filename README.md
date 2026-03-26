@@ -128,23 +128,43 @@ CNKIBug/
 
 <table>
   <tr>
-    <td align="center">
+    <td align="center" width="200px">
       <a href="https://github.com/KaffuAlcaid">
         <img src="https://github.com/KaffuAlcaid.png" width="80px;" alt="KaffuAlcaid"/>
         <br />
         <sub><b>Kaffu_Alcaid</b></sub>
       </a>
       <br />
-      核心开发 & 产品架构（不要问我为什么在里边）
+      核心开发 & 产品架构<br />(不要问我为什么在里边)
     </td>
-    <td align="center">
+    <td align="center" width="200px">
       <a href="https://github.com/Speechlessyc">
         <img src="https://github.com/Speechlessyc.png" width="80px;" alt="Speechlessyc"/>
         <br />
         <sub><b>Speechlessyc</b></sub>
       </a>
       <br />
-      图标设计 & 测试统筹（大佬跪谢了）
+      图标设计 & 测试统筹<br />(大佬跪谢了)
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="200px">
+      <a href="https://github.com/cloudw233">
+        <img src="https://github.com/cloudw233.png" width="80px;" alt="cloudw233"/>
+        <br />
+        <sub><b>cloudw233</b></sub>
+      </a>
+      <br />
+      自动化构建<br />(最强⑨级支持)
+    </td>
+    <td align="center" width="200px">
+      <a href="https://github.com/claude">
+        <img src="https://github.com/claude.png" width="80px;" alt=""/>
+        <br />
+        <sub><b>claude</b></sub>
+      </a>
+      <br />
+      文档润色 & 代码改进<br />(感谢一路陪伴)
     </td>
   </tr>
 </table>
