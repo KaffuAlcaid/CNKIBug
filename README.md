@@ -24,21 +24,21 @@
 <table border="0">
   <tr>
     <td align="center" width="50%">
-      <img src="assets/demo1.png" alt="步骤 1：启动程序" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>1. 启动程序与环境检查</b></sub>
+      <img src="assets/demo1.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>启动演示1</b></sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/demo2.png" alt="步骤 2：输入关键词" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>2. 输入关键词与设置</b></sub>
+      <img src="assets/demo2.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>2.输入关键词与设置</b></sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="assets/demo3.png" alt="步骤 3：自动抓取中" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>3. Microsoft Edge 自动化抓取中</b></sub>
+      <img src="assets/d3.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>3. 抓取完成</b></sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/demo4.png" alt="步骤 4：生成结果" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="assets/4.png" alt="" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>4. 抓取完成，结果保存至桌面</b></sub>
     </td>
   </tr>
