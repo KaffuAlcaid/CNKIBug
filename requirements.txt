@@ -1,3 +1,4 @@
 playwright
 openpyxl
 pywin32
+rich
