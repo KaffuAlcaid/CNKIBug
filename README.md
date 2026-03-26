@@ -5,21 +5,21 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.0.6-orange)
+![Version](https://img.shields.io/badge/Version-0.1.0-orange)
 
 ---
 
 ##  功能特性
 
--  输入关键词，自动批量抓取知网论文标题
--  结果自动导出为 `.xlsx` Excel 文件，保存至桌面
+-  输入关键词，自动批量抓取知网论文标题，支持多关键词抓取模式
+-  结果自动导出为 `.xlsx` Excel 文件，保存至桌面，用户可以选择多关键词保存策略
 -  优先调用系统自带的 **Microsoft Edge**，无需额外安装浏览器驱动
 -  完善的错误提示，缺少环境时弹出友好的引导窗口
 -  可打包为单文件 `.exe`，双击即用，无需 Python 环境
 
 ---
 
-##  使用演示
+##  使用演示（已过期，不再更新）
 
 ```
 ==================================================
@@ -161,7 +161,7 @@ CNKIBug/
       <a href="https://github.com/claude">
         <img src="https://github.com/claude.png" width="80px;" alt=""/>
         <br />
-        <sub><b>claude</b></sub>
+        <sub><b>Claude</b></sub>
       </a>
       <br />
       文档润色 & 代码改进<br />(感谢一路陪伴)
