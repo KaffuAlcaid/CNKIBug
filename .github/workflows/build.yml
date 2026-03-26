@@ -28,9 +28,8 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          uv pip sync requirements.txt --system
+          uv pip install playwright openpyxl pywin32 pyinstaller --system
           uv run playwright install --with-deps chromium
-          uv pip install pyinstaller --system
 
       - name: Build With Pyinstaller
         run: |
