@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.1.0-orange)
+![Version](https://img.shields.io/badge/Version-0.1.1-orange)
 
 ---
 
@@ -19,34 +19,31 @@
 
 ---
 
-##  使用演示（已过期，不再更新）
+##  运行截图 
 
-```
-==================================================
-  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid
-  Version 0.0.6
-==================================================
-  本软件用于抓取中国知网的论文标题
-
-请输入你要搜索的关键词: 机器学习
-请输入想抓取的总页数（纯数字）: 3
-
-[*] 已启动 Microsoft Edge 浏览器
-[*] 目标关键词：机器学习
-[*] 读取第 1 页...
-  -> 抓取到: 机器学习在医学影像诊断中的应用综述
-  -> 抓取到: 基于深度学习的自然语言处理研究进展
-  ...
-
-==================================================
-[*] 共抓取 60 条数据。
-[*] 文件已保存至：
-    >>> C:\Users\用户名\Desktop\cnki_titles_机器学习.xlsx <<<
-==================================================
-```
-
+<table border="0">
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/demo1.png" alt="步骤 1：启动程序" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>1. 启动程序与环境检查</b></sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/demo2.png" alt="步骤 2：输入关键词" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>2. 输入关键词与设置</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/demo3.png" alt="步骤 3：自动抓取中" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>3. Microsoft Edge 自动化抓取中</b></sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/demo4.png" alt="步骤 4：生成结果" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>4. 抓取完成，结果保存至桌面</b></sub>
+    </td>
+  </tr>
+</table>
 ---
-
 ##  快速开始
 
 ### 方式一：直接运行（推荐普通用户）
@@ -62,13 +59,13 @@
 
 ```bash
 # 1. 安装依赖
-pip install playwright openpyxl
+pip install playwright openpyxl rich
 
 # 2. 安装浏览器驱动（开发环境需要）
 playwright install chromium
 
 # 3. 运行
-python CNKIBug_v0.0.6.py
+python CNKIBug.py
 ```
 
 ### 方式三：自行打包为 exe
@@ -104,11 +101,19 @@ CNKIBug/
 ---
 
 ##  版本规划
+0.1.x阶段：
+[]1 .无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索
+[]2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
+[]3.超大页数拦截警告
+[]4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
+0.2.x阶段：
+[]5. 复合关键词查询:高级检索页面?解析用户输入的逻辑符（空格、+、AND），自动在知网基础搜索框触发复合检索?(未定)
+[]6.没想好
+0.3.x阶段：
+[]7. 参考文献/引证文献抓取(耗时、技术难度大大增加)（考虑中）
+[]8.SCI (Web of Science) 与校园 WebVPN 支持(拒绝)
+[]9.Web UI界面
 
-- [x] `v0.0.x` — 基础标题抓取，Edge 支持，exe 打包
-- [ ] `v0.1.x` — 支持多关键词批量抓取
-- [ ] `v0.2.x` — 抓取更多字段（作者、期刊、年份、引用数）
-- [ ] `v1.0` — 图形界面（GUI）
 
 ---
 
@@ -122,49 +127,50 @@ CNKIBug/
 
 **Kaffu_Alcaid** — 非计算机专业，业余开发，欢迎 Issue 和 PR。
 
+---
 ## 🌟 致谢 / Contributors
-
-感谢以下小伙伴对 CNKIBug 做出的突出贡献（包括核心代码、全平台测试等）：
 
 <table>
   <tr>
     <td align="center" width="200px">
       <a href="https://github.com/KaffuAlcaid">
         <img src="https://github.com/KaffuAlcaid.png" width="80px;" alt="KaffuAlcaid"/>
-        <br />
-        <sub><b>Kaffu_Alcaid</b></sub>
-      </a>
-      <br />
-      核心开发 & 产品架构<br />(不要问我为什么在里边)
+        <br /><sub><b>Kaffu_Alcaid</b></sub>
+      </a><br />核心开发
     </td>
     <td align="center" width="200px">
       <a href="https://github.com/Speechlessyc">
         <img src="https://github.com/Speechlessyc.png" width="80px;" alt="Speechlessyc"/>
-        <br />
-        <sub><b>Speechlessyc</b></sub>
-      </a>
-      <br />
-      图标设计 & 测试统筹<br />(大佬跪谢了)
+        <br /><sub><b>Speechlessyc</b></sub>
+      </a><br />图标设计 & 测试
+    </td>
+    <td align="center" width="200px">
+      <a href="https://github.com/cloudw233">
+        <img src="https://github.com/cloudw233.png" width="80px;" alt="cloudw233"/>
+        <br /><sub><b>cloudw233</b></sub>
+      </a><br />自动化构建(CI/CD)
     </td>
   </tr>
   <tr>
     <td align="center" width="200px">
-      <a href="https://github.com/cloudw233">
-        <img src="https://github.com/cloudw233.png" width="80px;" alt="cloudw233"/>
-        <br />
-        <sub><b>cloudw233</b></sub>
-      </a>
-      <br />
-      自动化构建<br />(最强⑨级支持)
-    </td>
-    <td align="center" width="200px">
       <a href="https://github.com/claude">
         <img src="https://github.com/claude.png" width="80px;" alt=""/>
+        <br /><sub><b>Claude</b></sub>
+      </a><br />文档润色 & 代码改进
+    </td>
+    <td align="center">
+      <a href="https://gemini.google.com/">
+        <img src="https://github.com/google.png" width="80px;" alt="Gemini"/>
         <br />
-        <sub><b>Claude</b></sub>
+        <sub><b>Gemini</b></sub>
       </a>
       <br />
-      文档润色 & 代码改进<br />(感谢一路陪伴)
+      结对编程 & 代码审查<br/>（全天候无休赛博打工AI）
+    </td>
+    <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
     </td>
   </tr>
 </table>
