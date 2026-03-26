@@ -24,17 +24,17 @@
 <table border="0">
   <tr>
     <td align="center" width="50%">
-      <img src="docs/demo1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>启动演示1</b></sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/demo2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>2.输入关键词与设置</b></sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/d3.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/3.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>3. 抓取完成</b></sub>
     </td>
     <td align="center" width="50%">
