@@ -1,5 +1,3 @@
-name: Binary Build Nightly x64 Executables (3:00, UTC+8)
-
 name: Build and Auto-Release
 
 permissions:
@@ -8,6 +6,9 @@ permissions:
 on:
   release:
     types: [published]
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
@@ -23,7 +24,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v5
 
       - name: Install Dependencies
         run: |
@@ -31,12 +32,10 @@ jobs:
           uv run playwright install --with-deps chromium
           uv pip install pyinstaller --system
 
-      
       - name: Build With Pyinstaller
         run: |
           pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --name CNKIBug CNKIBug.py
 
-  
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
