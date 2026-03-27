@@ -43,6 +43,8 @@
     </td>
   </tr>
 </table>
+
+
 ---
 
 
@@ -105,9 +107,9 @@ CNKIBug/
 
 ##  版本规划
 **0.1.x阶段：**
-- [ ] 1.无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索 
-- [ ] 2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
-- [ ] 3.超大页数拦截警告
+- [ x ] 1.无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索 
+- [ x ] 2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
+- [ x ] 3.超大页数拦截警告
 - [ ] 4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
 
 **0.2.x阶段：**
@@ -175,6 +177,26 @@ CNKIBug/
       结对编程 & 代码审查<br/>（全天候无休赛博打工AI）
     </td>
     <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+        <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+        <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+        <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+        <td align="center" width="200px">
       <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
