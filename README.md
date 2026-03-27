@@ -181,7 +181,9 @@ CNKIBug/
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-        <td align="center" width="200px">
+  </tr>
+    <tr>
+      <td align="center" width="200px">
       <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
@@ -196,7 +198,19 @@ CNKIBug/
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-        <td align="center" width="200px">
+    </tr>
+   <tr>
+      <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+     <td align="center" width="200px">
+      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+     <td align="center" width="200px">
       <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
