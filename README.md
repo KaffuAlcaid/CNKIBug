@@ -141,19 +141,19 @@ CNKIBug/
 
 <table>
   <tr>
-    <td align="center" width="200px">
+    <td align="center" valign="top" width="200px">
       <a href="https://github.com/KaffuAlcaid">
         <img src="https://github.com/KaffuAlcaid.png" width="80px;" alt="KaffuAlcaid"/>
         <br /><sub><b>Kaffu_Alcaid</b></sub>
       </a><br />核心开发
     </td>
-    <td align="center" width="200px">
+    <td align="center" valign="top" width="200px">
       <a href="https://github.com/Speechlessyc">
         <img src="https://github.com/Speechlessyc.png" width="80px;" alt="Speechlessyc"/>
         <br /><sub><b>Speechlessyc</b></sub>
       </a><br />图标设计 & 测试
     </td>
-    <td align="center" width="200px">
+    <td align="center" valign="top" width="200px">
       <a href="https://github.com/cloudw233">
         <img src="https://github.com/cloudw233.png" width="80px;" alt="cloudw233"/>
         <br /><sub><b>cloudw233</b></sub>
@@ -161,13 +161,13 @@ CNKIBug/
     </td>
   </tr>
   <tr>
-    <td align="center" width="200px">
+    <td align="center" valign="top" width="200px">
       <a href="https://github.com/claude">
         <img src="https://github.com/claude.png" width="80px;" alt=""/>
         <br /><sub><b>Claude</b></sub>
       </a><br />文档润色 & 代码改进
     </td>
-    <td align="center">
+    <td align="center" valign="top" width="200px">
       <a href="https://gemini.google.com/">
         <img src="https://github.com/google.png" width="80px;" alt="Gemini"/>
         <br />
@@ -176,42 +176,42 @@ CNKIBug/
       <br />
       结对编程 & 代码审查<br/>（全天候无休赛博打工AI）
     </td>
-    <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
   </tr>
-    <tr>
-      <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+  <tr>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-        <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-        <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-    </tr>
-   <tr>
-      <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-     <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-     <td align="center" width="200px">
-      <img src="https://via.placeholder.com/80?text=Waiting" width="80px;" alt="Placeholder"/>
+    <td align="center" valign="top" width="200px">
+      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
