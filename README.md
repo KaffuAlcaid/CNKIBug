@@ -174,44 +174,44 @@ CNKIBug/
         <sub><b>Gemini</b></sub>
       </a>
       <br />
-      结对编程 & 代码审查<br/>（全天候无休赛博打工AI）
+      结对编程 & 代码审查<br/>
     </td>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
   </tr>
   <tr>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
   </tr>
   <tr>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
     <td align="center" valign="top" width="200px">
-      <img src="https://picsum.photos/seed/contrib-pattern/80/80" width="80px;" alt="Placeholder"/>
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
