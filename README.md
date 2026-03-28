@@ -161,7 +161,49 @@ CNKIBug/
     </td>
   </tr>
   <tr>
+     <td align="center" valign="top" width="200px">
+      <a href="https://github.com/zirend666-prog">
+        <img src="https://github.com/zirend666-prog.png" width="80px;" alt="zirend666-prog"/>
+        <br /><sub><b>zirend666-prog</b></sub>
+      </a><br />产品经理（
+    </td>
     <td align="center" valign="top" width="200px">
+      <a href="https://github.com/LuisCotton">
+        <img src="https://github.com/LuisCotton.png" width="80px;" alt="LuisCotton"/>
+        <br /><sub><b>LuisCotton</b></sub>
+      </a><br />可爱群友（
+    </td>
+    td align="center" valign="top" width="200px">
+      <a href="https://github.com/clover1909">
+        <img src="https://github.com/clover1909.png" width="80px;" alt="clover1909"/>
+        <br /><sub><b>LuisCotton</b></sub>
+      </a><br />可爱群友（
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="200px">
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+    <td align="center" valign="top" width="200px">
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+    <td align="center" valign="top" width="200px">
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="200px">
+      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+      <br /><sub><b>虚位以待</b></sub>
+      <br />欢迎提交 PR
+    </td>
+      <td align="center" valign="top" width="200px">
       <a href="https://github.com/claude">
         <img src="https://github.com/claude.png" width="80px;" alt=""/>
         <br /><sub><b>Claude</b></sub>
@@ -175,45 +217,6 @@ CNKIBug/
       </a>
       <br />
       结对编程 & 代码审查<br/>
-    </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
-    </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
     </td>
   </tr>
 </table>
