@@ -173,7 +173,7 @@ CNKIBug/
         <br /><sub><b>LuisCotton</b></sub>
       </a><br />可爱群友（
     </td>
-    td align="center" valign="top" width="200px">
+    <td align="center" valign="top" width="200px">
       <a href="https://github.com/clover1909">
         <img src="https://github.com/clover1909.png" width="80px;" alt="clover1909"/>
         <br /><sub><b>LuisCotton</b></sub>
