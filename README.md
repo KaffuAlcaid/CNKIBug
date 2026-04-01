@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.1.1-orange)
+![Version](https://img.shields.io/badge/Version-0.1.4-orange)
 
 ---
 
@@ -51,7 +51,7 @@
 ##  快速开始
 
 
-### 方式一：直接运行（推荐普通用户）
+### 方式一：直接运行（推荐）
 
 1. 前往 [Releases](../../releases) 页面下载最新的 `CNKIBug.exe`
 2. 确保电脑已安装 **Microsoft Edge**（Win10/11 通常已预装）
@@ -108,9 +108,9 @@ CNKIBug/
 ##  版本规划
 **0.1.x阶段：**
 - [x] 1.无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索 
-- [x] 2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
+- [] 2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
 - [x] 3.超大页数拦截警告
-- [ ] 4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
+- [x] 4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
 
 **0.2.x阶段：**
 
