@@ -5,9 +5,9 @@ permissions:
 
 on:
   release:
-    types: [published] # 发布新的 Release 时触发
-  workflow_dispatch:   # 手动点击触发
-  # 移除了 push: main，避免每次推代码都构建，节省 Action 额度
+    types: [published] 
+  workflow_dispatch:  
+
 
 jobs:
   build:
@@ -24,6 +24,18 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\uv\cache
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('requirements.txt') }}
 
       - name: Install Dependencies
         shell: bash
@@ -43,12 +55,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 判断触发方式
+
           if [ "${{ github.event_name }}" == "release" ]; then
-            # 自动触发：直接拿当前 Release 的 Tag
+
             echo "TAG_NAME=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
           else
-            # 手动触发：通过 GitHub CLI 找到最新的 Release Tag
+
             LATEST_TAG=$(gh release view --json tagName --jq '.tagName')
             echo "TAG_NAME=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           fi
@@ -56,6 +68,6 @@ jobs:
       - name: Upload artifact to Release
         uses: softprops/action-gh-release@v2
         with:
-          # 使用上面动态获取到的 Tag，这样手动构建也能准确推送到 latest 页面
+
           tag_name: ${{ steps.get_tag.outputs.TAG_NAME }}
           files: dist/CNKIBug.exe
