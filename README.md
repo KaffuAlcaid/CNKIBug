@@ -60,7 +60,7 @@
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装。
 
-### 方式二：源码运行（开发者）
+### 方式二：源码运行（开发者）**（不建议通过此方式）**
 
 ```bash
 # 1. 安装依赖
