@@ -204,10 +204,10 @@ CNKIBug/
       <br />欢迎提交 PR
     </td>
       <td align="center" valign="top" width="200px">
-      <a href="https://github.com/claude">
+      <a href="https://claude.ai">
         <img src="https://github.com/claude.png" width="80px;" alt=""/>
         <br /><sub><b>Claude</b></sub>
-      </a><br />文档润色 & 代码改进
+      </a><br /> 代码改进
     </td>
     <td align="center" valign="top" width="200px">
       <a href="https://gemini.google.com/">
@@ -216,7 +216,7 @@ CNKIBug/
         <sub><b>Gemini</b></sub>
       </a>
       <br />
-      结对编程 & 代码审查<br/>
+      代码审查<br/>
     </td>
   </tr>
 </table>
