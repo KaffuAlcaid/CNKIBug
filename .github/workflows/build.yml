@@ -1,0 +1,85 @@
+name: Build and Auto-Release
+
+permissions:
+  contents: write
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\uv\cache
+          key: ${{ runner.os }}-uv-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          uv pip install -r requirements.txt pyinstaller --system
+
+      # ── 改动 1：Windows 冒烟测试（新增）────────────────────────────────
+      # 你现在没有本地 Windows 环境了，这一步就是替代品：在真 windows-latest 上
+      # 编译全部源文件 + 真正 import 整个包。environment.py 顶部的 `import winreg`、
+      # 各模块之间的跨包 import、以及 rich/openpyxl/playwright 是否齐全，
+      # 任意一处写错都会在这里 30 秒内暴露，而不是白跑几分钟 PyInstaller 才发现。
+      # 注意：import playwright 不需要浏览器，仅需 pip 包，故此步无需装 chromium。
+      - name: Smoke test (compile + import on Windows)
+        shell: bash
+        run: |
+          python -m py_compile run.py cnkibug/*.py
+          python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+      # 后续：在此步之后加一步 `python -m pytest -q`，跑 tests/ 里 exporter 的纯函数
+      # 与 _save_multi_merge 的 sheet 名去重逻辑——浏览器链路别在 CI 跑（交互式+反爬）。
+
+      # ── 改动 2：打包入口 CNKIBug.py -> run.py（必须）─────────────────────
+      # PyInstaller 从 run.py 出发跟随 import，自动把整个 cnkibug/ 包收进单 exe，
+      # 无需 --paths 或 .spec：cnkibug/ 与 run.py 同在仓库根目录，会被自动发现。
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --name CNKIBug run.py
+
+      - name: Determine target release tag
+        id: get_tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "TAG_NAME=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            LATEST_TAG=$(gh release view --json tagName --jq '.tagName')
+            echo "TAG_NAME=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifact to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.TAG_NAME }}
+          files: dist/CNKIBug.exe
+
+# ── 改动 3：移除了 "Cache Playwright Chromium" 步 与 `playwright install
+#    --with-deps chromium` 步。理由：本程序不把浏览器打进 exe，运行时优先调用
+#    用户系统自带的 Edge（见 README「系统要求」），fallback 才用 chromium——而
+#    fallback 用的也是用户机器上的 chromium，不是构建机的。所以在 CI 装 chromium
+#    既不会进 exe、也不影响产物，纯属浪费几分钟构建时间。PyInstaller 的 playwright
+#    hook 收集的是驱动（node + 包内 JS），随 pip 包就有，同样不需要浏览器在场。
+#    若将来你决定把 chromium 一起打包分发，再加回来并配 --add-data 即可。
