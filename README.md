@@ -22,23 +22,23 @@
 
 ##  运行截图 
 
-<table border="0">
+<table style="border: none;">
   <tr>
-    <td align="center" width="50%">
+    <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>启动演示1</b></sub>
     </td>
-    <td align="center" width="50%">
+    <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>2.输入关键词与设置</b></sub>
     </td>
   </tr>
   <tr>
-    <td align="center" width="50%">
+    <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/3.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>3. 抓取完成</b></sub>
     </td>
-    <td align="center" width="50%">
+    <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/4.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>4. 抓取完成，结果保存至桌面</b></sub>
     </td>
@@ -127,18 +127,18 @@ CNKIBug/
 ##  版本规划
 **0.1.x阶段：**
 - [x] 1.无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索 
-- [x] 2. 强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
+- [x] 2.强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
 - [x] 3.超大页数拦截警告
 - [x] 4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
 - [ ] 5.开始抓取时，窗口置顶，展示底层过程
 
 **0.2.x阶段：**
 
-- [ ] 6. 复合关键词查询:高级检索页面?解析用户输入的逻辑符（空格、+、AND），自动在知网基础搜索框触发复合检索?(未定)
+- [ ] 6.复合关键词查询:高级检索页面?解析用户输入的逻辑符（空格、+、AND），自动在知网基础搜索框触发复合检索?(未定)
 
 **0.3.x阶段：**
 
-- [ ] 7. 参考文献/引证文献抓取(耗时、技术难度大大增加)（考虑中）
+- [ ] 7.参考文献/引证文献抓取(耗时、技术难度大大增加)（考虑中）
 - [ ] 8.SCI (Web of Science) 与校园 WebVPN 支持(拒绝)
 - [ ] 9.Web UI界面
 
@@ -158,79 +158,79 @@ CNKIBug/
 ---
 ## ♥️ 致谢 / Contributors
 
-<table>
+<table style="border: none;">
   <tr>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/KaffuAlcaid">
-        <img src="https://github.com/KaffuAlcaid.png" width="80px;" alt="KaffuAlcaid"/>
+        <img src="https://github.com/KaffuAlcaid.png" width="80px" alt="KaffuAlcaid"/>
         <br /><sub><b>Kaffu_Alcaid</b></sub>
       </a><br />核心开发
     </td>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/Speechlessyc">
-        <img src="https://github.com/Speechlessyc.png" width="80px;" alt="Speechlessyc"/>
+        <img src="https://github.com/Speechlessyc.png" width="80px" alt="Speechlessyc"/>
         <br /><sub><b>Speechlessyc</b></sub>
       </a><br />图标设计 & 测试
     </td>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/cloudw233">
-        <img src="https://github.com/cloudw233.png" width="80px;" alt="cloudw233"/>
+        <img src="https://github.com/cloudw233.png" width="80px" alt="cloudw233"/>
         <br /><sub><b>cloudw233</b></sub>
       </a><br />自动化构建(CI/CD)
     </td>
   </tr>
   <tr>
-     <td align="center" valign="top" width="200px">
+     <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/zirend666-prog">
-        <img src="https://github.com/zirend666-prog.png" width="80px;" alt="zirend666-prog"/>
+        <img src="https://github.com/zirend666-prog.png" width="80px" alt="zirend666-prog"/>
         <br /><sub><b>zirend666-prog</b></sub>
-      </a><br />产品经理（
+      </a><br />产品经理
     </td>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/LuisCotton">
-        <img src="https://github.com/LuisCotton.png" width="80px;" alt="LuisCotton"/>
+        <img src="https://github.com/LuisCotton.png" width="80px" alt="LuisCotton"/>
         <br /><sub><b>LuisCotton</b></sub>
       </a><br />特约吉祥物
     </td>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://github.com/clover1909">
-        <img src="https://github.com/clover1909.png" width="80px;" alt="clover1909"/>
+        <img src="https://github.com/clover1909.png" width="80px" alt="clover1909"/>
         <br /><sub><b>clover1909</b></sub>
       </a><br />可爱群友
     </td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+    <td style="text-align: center; vertical-align: top; width: 200px;">
+      <img src="./logo.png" width="80px" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+    <td style="text-align: center; vertical-align: top; width: 200px;">
+      <img src="./logo.png" width="80px" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+    <td style="text-align: center; vertical-align: top; width: 200px;">
+      <img src="./logo.png" width="80px" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="200px">
-      <img src="./logo.png" width="80px;" alt="Placeholder"/>
+    <td style="text-align: center; vertical-align: top; width: 200px;">
+      <img src="./logo.png" width="80px" alt="Placeholder"/>
       <br /><sub><b>虚位以待</b></sub>
       <br />欢迎提交 PR
     </td>
-      <td align="center" valign="top" width="200px">
+      <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://claude.ai">
-        <img src="https://github.com/claude.png" width="80px;" alt=""/>
+        <img src="https://github.com/claude.png" width="80px" alt="Claude"/>
         <br /><sub><b>Claude</b></sub>
       </a><br /> 代码改进
     </td>
-    <td align="center" valign="top" width="200px">
+    <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://gemini.google.com/">
-        <img src="https://github.com/google.png" width="80px;" alt="Gemini"/>
+        <img src="https://github.com/google.png" width="80px" alt="Gemini"/>
         <br />
         <sub><b>Gemini</b></sub>
       </a>
