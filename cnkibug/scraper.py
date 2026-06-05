@@ -25,7 +25,7 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-from .ui import _console
+from .ui import _console, print_browser_banner
 from .errors import _popup_error
 from .exporter import _save_single, _save_multi_split, _save_multi_merge
 
@@ -103,6 +103,29 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         page.click("input.search-btn")
         time.sleep(random.uniform(1, 2))
     _check_captcha(page)
+
+    # v0.1.7 Bug1: 翻页循环之前，一次性判定整词是否有结果。
+    # 原逻辑无结果时每页 wait_for_selector 各超时 15s，max_pages 页累计假死。
+    # 改为正向探测：同时 race 结果表与“暂无数据”空提示，谁先出现谁说话。
+    # 说明：no_content 只可能是“该词零命中”这一全局状态（要么第一页就有、
+    # 要么永远没有），故只在进入循环前判一次；“翻到尾页”是另一回事，由循环内
+    # 现有的 #PageNext 是否存在来决定，两套信号互不交叉。
+    try:
+        outcome = page.wait_for_function(
+            """() => {
+                if (document.querySelector('table.result-table-list tbody tr')) return 'has_results';
+                if (document.querySelector('#briefBox p.no-content')) return 'no_content';
+                return false;
+            }""",
+            timeout=15000,
+        ).json_value()
+    except PlaywrightTimeoutError:
+        _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
+        return results
+
+    if outcome == "no_content":
+        _console.print(f"[yellow][!] 知网无「{keyword}」的检索结果，跳过。[/yellow]")
+        return results
 
     # v0.1.5: Progress 改为 bouncingBar + magenta 配色
     with Progress(
@@ -211,7 +234,11 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 "[bold magenta]少女祈祷中...[/bold magenta]",
                 spinner="bouncingBar",
             ):
-                browser = p.chromium.launch(channel="msedge", headless=False)
+                browser = p.chromium.launch(
+                    channel="msedge",
+                    headless=False,
+                    args=["--start-maximized"],  # v0.1.7 置顶第一层：窗口最大化
+                )
             _console.print("[dim][*] 已启动 Microsoft Edge[/dim]")
         except Exception as _e1:
             _console.print(f"[yellow][!] Edge 启动失败 ({_e1})，尝试备用 Chromium...[/yellow]")
@@ -220,7 +247,10 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     "[bold magenta]少女祈祷中...[/bold magenta]",
                     spinner="bouncingBar",
                 ):
-                    browser = p.chromium.launch(headless=False)
+                    browser = p.chromium.launch(
+                        headless=False,
+                        args=["--start-maximized"],  # v0.1.7 置顶第一层：窗口最大化
+                    )
                 _console.print("[dim][*] 已启动备用 Chromium 浏览器[/dim]")
             except Exception as _e2:
                 if sys.platform == "win32":
@@ -248,6 +278,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
 
         try:
             context = browser.new_context(
+                no_viewport=True,  # v0.1.7 置顶第一层：不设固定视口，让 --start-maximized 生效
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -255,6 +286,9 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 )
             )
             page = context.new_page()
+
+            # v0.1.7 置顶第一层 + 建议3：浏览器已弹出，打印高亮横幅引导用户切过去
+            print_browser_banner()
 
             # 预热搜索：消耗首次 302 重定向
             # v0.1.5: 将 _check_captcha 调用移到 status 块外，避免 input() 在 Live 上下文中运行

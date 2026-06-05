@@ -2,6 +2,7 @@
 
 import os
 import re
+from datetime import datetime
 
 import openpyxl
 
@@ -55,7 +56,9 @@ def _save_single(keyword: str, results: list):
         return
 
     clean_keyword = _sanitize_name(keyword)
-    filepath = _get_output_path(f"cnki_titles_{clean_keyword}.xlsx")
+    # v0.1.7 Bug2: 文件名加时间戳，避免重复抓取同一关键词时覆盖旧文件
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "论文标题"
@@ -74,12 +77,14 @@ def _save_single(keyword: str, results: list):
 def _save_multi_split(all_results: dict[str, list]):
     total = 0
     saved_files = []
+    # v0.1.7 Bug2: 时间戳在循环外算一次，保证同一轮生成的多个文件同戳、能归组
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     for keyword, results in all_results.items():
         if not results:
             _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过生成文件。[/yellow]")
             continue
         clean_keyword = _sanitize_name(keyword)
-        filepath = _get_output_path(f"cnki_titles_{clean_keyword}.xlsx")
+        filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "论文标题"
@@ -104,7 +109,9 @@ def _save_multi_merge(all_results: dict[str, list]):
         _console.print("[yellow][!] 所有关键词均未抓取到数据，不生成文件。[/yellow]")
         return
 
-    filepath = _get_output_path("cnki_titles_多词汇总.xlsx")
+    # v0.1.7 Bug2: 原文件名写死“多词汇总”，两次 merge 必撞名覆盖——加时间戳修复
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.xlsx")
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 

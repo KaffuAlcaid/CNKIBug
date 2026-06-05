@@ -1,8 +1,12 @@
 """
 CNKI_Bug_dev - 中国知网论文标题爬虫
-版本: 0.1.6
+版本: 0.1.7
 作者: Kaffu_Alcaid
 打包说明: pyinstaller --onefile --console --name CNKIBug run.py
+
+说明：原单文件顶部的「依赖守卫」（捕获 playwright/openpyxl/rich 缺失并弹友好
+提示）随拆分迁移至此——入口第一件事是先 import 仅依赖标准库的 errors，再在
+守卫下 import 会拉起三方依赖的包模块。errors 必须保持零三方依赖，否则守卫失效。
 """
 
 import sys
@@ -14,6 +18,7 @@ try:
     from cnkibug.ui import _console
     from cnkibug.environment import check_env
     from cnkibug.scraper import scrape_cnki
+    from cnkibug.estimate import estimate_seconds, format_eta
 except ImportError as _err:
     if sys.platform == "win32":
         _popup_error([
@@ -41,10 +46,9 @@ def main():
         if sys.platform == "win32":
             os.system("cls")
 
-        # v0.1.5: 启动横幅
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
-        _console.print("  Version 0.1.5")
+        _console.print("  Version 0.1.7")
         _console.print("=" * 50)
         _console.print("  本软件用于抓取中国知网的论文标题\n")
         _console.print("按 Ctrl+C 可随时中断并保存已抓取数据")
@@ -72,6 +76,10 @@ def main():
                     keywords = [word]
                     save_mode = "single"
                 else:
+                    # v0.1.7 建议5：澄清“独立检索”与“交叉检索”的歧义
+                    print("\n[多关键词模式] 每个关键词将【独立检索、分别出结果】。")
+                    print("若想【交叉检索】（多个词作为一个整体一起搜），请改用单关键词模式，")
+                    print("在一个关键词框里用空格分隔多个词，例如：增材制造 316L 残余应力")
                     print("\n请依次输入关键词，每输入一个按回车确认；直接按回车结束输入：")
                     while True:
                         word = input("  关键词: ").strip()
@@ -95,7 +103,6 @@ def main():
                         print("[!] 无效选项，程序退出。")
                         sys.exit(0)
 
-                # 页数输入独立内层循环，ValueError 在此消化，不影响已选模式和关键词
                 while True:
                     try:
                         user_input_pages = input("\n请输入想抓取的总页数（纯数字，值不要太大）: ").strip()
@@ -120,6 +127,13 @@ def main():
                     else:
                         break
 
+                # v0.1.7 建议4：抓取前打印预计耗时区间（与上面的 >20 页警告组队劝退）
+                eta_low, eta_high = estimate_seconds(target_pages, len(keywords))
+                _console.print(
+                    f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
+                    f"（实际受网络与知网反爬等待波动，仅供参考）[/dim]"
+                )
+
                 scrape_cnki(keywords, max_pages=target_pages, save_mode=save_mode)
 
                 again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
@@ -128,7 +142,6 @@ def main():
                         os.system("cls")
                     continue
                 else:
-                    # v0.1.5: 退出提示
                     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
                     break
 
