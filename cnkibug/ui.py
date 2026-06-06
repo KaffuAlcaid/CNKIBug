@@ -26,3 +26,16 @@ def print_browser_banner():
             border_style="yellow",
         )
     )
+
+
+def print_verify_alert():
+    """检测到知网安全验证(/verify)时的高亮提醒（配合 window.bring_to_front 置顶）。"""
+    _console.print(
+        Panel.fit(
+            "[bold]检测到知网安全验证（滑块）[/bold]\n"
+            "· 浏览器已尝试置顶，请切换过去完成滑块验证\n"
+            "· 完成后[bold]无需操作本窗口[/bold]，程序会自动继续抓取",
+            title="[bold red]⚠ 需要手动验证[/bold red]",
+            border_style="red",
+        )
+    )

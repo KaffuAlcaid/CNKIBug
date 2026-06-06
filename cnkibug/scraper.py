@@ -25,7 +25,8 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-from .ui import _console, print_browser_banner
+from . import window
+from .ui import _console, print_browser_banner, print_verify_alert
 from .errors import _popup_error
 from .exporter import _save_single, _save_multi_split, _save_multi_merge
 
@@ -34,27 +35,36 @@ from .exporter import _save_single, _save_multi_split, _save_multi_merge
 _stop_requested = False
 
 
-def _check_captcha(page, progress: Progress | None = None) -> bool:
-    captcha_selectors = [
-        "div.captcha",
-        "div#captcha",
-        "iframe[src*='captcha']",
-        "div.slide-verify",
-        "div.passcode-area",
-    ]
-    # 用 progress.console.print 输出，不调用 stop()/start()，避免计时器归零
-    out = progress.console.print if progress else _console.print
-    for sel in captcha_selectors:
-        if page.query_selector(sel):
-            out("\n" + "!" * 50)
-            out("  [bold yellow][!] 检测到人机验证！请切换到浏览器窗口处理：[/bold yellow]")
-            out("  · 如果是【滑块验证】：按住滑块向右拖动到底")
-            out("  · 如果是【图片验证码】：按提示点击或输入字符")
-            out("  · 完成验证后，回到此窗口按 [回车键] 继续...")
-            out("!" * 50)
-            input()
+# v0.1.7: 验证监视 —— 替换旧的 _check_captcha（DOM 选择器检测 + 阻塞 input 等回车）。
+# 判据改为「URL 是否进入知网安全验证页 /verify」，比一堆脆弱的 div 选择器可靠。
+# 命中即把浏览器置顶(window.bring_to_front)并红框提醒，轮询等用户手动过验证
+# （URL 离开 /verify 即恢复），上限 _VERIFY_WAIT_TIMEOUT 秒；超时则放弃等待，
+# 交由上层保存已抓数据，绝不无限卡死。
+_VERIFY_WAIT_TIMEOUT = 300  # 等待用户完成安全验证的上限（秒）
+
+
+def _handle_verify(page) -> bool:
+    """若当前处于知网安全验证页(/verify)，置顶浏览器并等待用户完成。
+
+    返回 True 表示曾检测到验证并已处理（含等待超时）；False 表示无验证。
+    返回值用于循环内 timeout 分支：True 则验证刚过、值得重等结果；False 是真超时。
+    """
+    if "/verify" not in page.url:
+        return False
+
+    window.bring_to_front()
+    print_verify_alert()
+
+    waited = 0.0
+    interval = 1.0
+    while "/verify" in page.url:
+        if waited >= _VERIFY_WAIT_TIMEOUT:
+            _console.print("[yellow][!] 等待安全验证超时，将保存已抓取的数据。[/yellow]")
             return True
-    return False
+        time.sleep(interval)
+        waited += interval
+    _console.print("[green][*] 验证已通过，继续抓取。[/green]")
+    return True
 
 
 def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
@@ -76,7 +86,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
     except PlaywrightError as e:
         _console.print(f"[yellow][!] 预热请求失败: {e}，跳过该关键词。[/yellow]")
         return results
-    _check_captcha(page)
+    _handle_verify(page)
 
     try:
         with _console.status(
@@ -91,7 +101,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
     except PlaywrightError as e:
         _console.print(f"[yellow][!] 检索页加载失败: {e}，跳过该关键词。[/yellow]")
         return results
-    _check_captcha(page)
+    _handle_verify(page)
 
     # 输入关键词并发起检索，不捕获 KeyboardInterrupt
     with _console.status(
@@ -102,7 +112,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         time.sleep(random.uniform(0.5, 1.5))
         page.click("input.search-btn")
         time.sleep(random.uniform(1, 2))
-    _check_captcha(page)
+    _handle_verify(page)
 
     # v0.1.7 Bug1: 翻页循环之前，一次性判定整词是否有结果。
     # 原逻辑无结果时每页 wait_for_selector 各超时 15s，max_pages 页累计假死。
@@ -153,20 +163,21 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         "table.result-table-list tbody tr", timeout=15000
                     )
                 except PlaywrightTimeoutError:
-                    had_captcha = _check_captcha(page, progress)
-                    if had_captcha:
+                    # 超时先看是不是弹了安全验证；是则过验证后重等，否则当本页真超时跳过
+                    handled = _handle_verify(page)
+                    if handled:
                         page.wait_for_selector(
                             "table.result-table-list tbody tr", timeout=15000
                         )
                     else:
                         progress.console.print(
-                            f"[red][x] 第 {current_page} 页等待超时且未检测到验证码，跳过本页。[/red]"
+                            f"[red][x] 第 {current_page} 页等待超时（非验证），跳过本页。[/red]"
                         )
                         progress.advance(task)
                         continue
 
                 time.sleep(random.uniform(2, 5))
-                _check_captcha(page, progress)
+                _handle_verify(page)
 
                 rows = page.query_selector_all("table.result-table-list tbody tr")
                 for row in rows:
@@ -183,7 +194,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                     if next_btn:
                         next_btn.click()
                         time.sleep(random.uniform(4, 8))
-                        _check_captcha(page, progress)
+                        _handle_verify(page)
                     else:
                         progress.console.print(
                             "[yellow][!] 没找到下一页按钮，可能已到最后一页。[/yellow]"
@@ -291,7 +302,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             print_browser_banner()
 
             # 预热搜索：消耗首次 302 重定向
-            # v0.1.5: 将 _check_captcha 调用移到 status 块外，避免 input() 在 Live 上下文中运行
+            # v0.1.7: 验证检测改为 _handle_verify（URL /verify 判据 + 置顶），放 status 块外
             dummy_keyword = "焊接"
             try:
                 with _console.status(
@@ -300,7 +311,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 ):
                     page.goto("https://www.cnki.net/", timeout=30000)
                     page.wait_for_load_state("domcontentloaded", timeout=20000)
-                _check_captcha(page)
+                _handle_verify(page)
                 with _console.status(
                     "[bold magenta]少女祈祷中...[/bold magenta]",
                     spinner="bouncingBar",
@@ -311,7 +322,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     time.sleep(random.uniform(0.5, 1.5))
                     page.click("input.search-btn")
                     page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
-                _check_captcha(page)
+                _handle_verify(page)
                 _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
             except (PlaywrightTimeoutError, PlaywrightError) as warmup_err:
                 _console.print(f"[yellow][!] 预热搜索未完全成功 ({warmup_err})，继续正式抓取。[/yellow]")
