@@ -1,5 +1,3 @@
-"""结果导出 —— 文件名清洗、输出路径解析、写盘、三种保存模式。"""
-
 import os
 import re
 from datetime import datetime
