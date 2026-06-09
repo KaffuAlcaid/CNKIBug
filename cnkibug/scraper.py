@@ -40,7 +40,8 @@ _stop_requested = False
 # 命中即把浏览器置顶(window.bring_to_front)并红框提醒，轮询等用户手动过验证
 # （URL 离开 /verify 即恢复），上限 _VERIFY_WAIT_TIMEOUT 秒；超时则放弃等待，
 # 交由上层保存已抓数据，绝不无限卡死。
-_VERIFY_WAIT_TIMEOUT = 300  # 等待用户完成安全验证的上限（秒）
+_VERIFY_WAIT_TIMEOUT = 180  # 等待用户完成安全验证的上限（秒）
+_VERIFY_NOTICE_INTERVAL = 15  # 等待期间每隔多少秒打印一次剩余时间（避免“看起来卡死”）
 
 
 def _handle_verify(page) -> bool:
@@ -55,12 +56,23 @@ def _handle_verify(page) -> bool:
     window.bring_to_front()
     print_verify_alert()
 
+    # v0.1.8: 轮询期间每隔 _VERIFY_NOTICE_INTERVAL 秒打印一次剩余时间。
+    # 原实现是纯 time.sleep 静默忙等，又不在任何 spinner 内，最长 300s 没有任何
+    # 反馈——用户看到的就是“卡死”。这里用 _console.print 打心跳（在 Progress 活动
+    # 期间也安全，rich 会渲染在进度条上方），并把上限从 300s 降到 180s。
     waited = 0.0
     interval = 1.0
+    next_notice = float(_VERIFY_NOTICE_INTERVAL)
     while "/verify" in page.url:
         if waited >= _VERIFY_WAIT_TIMEOUT:
             _console.print("[yellow][!] 等待安全验证超时，将保存已抓取的数据。[/yellow]")
             return True
+        if waited >= next_notice:
+            remaining = int(_VERIFY_WAIT_TIMEOUT - waited)
+            _console.print(
+                f"[dim][*] 仍在等待手动完成安全验证…（剩余约 {remaining} 秒，完成后自动继续）[/dim]"
+            )
+            next_notice += _VERIFY_NOTICE_INTERVAL
         time.sleep(interval)
         waited += interval
     _console.print("[green][*] 验证已通过，继续抓取。[/green]")
@@ -108,9 +120,9 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         "[bold magenta]少女祈祷中...[/bold magenta]",
         spinner="bouncingBar",
     ):
-        page.fill("input.search-input", keyword)
+        page.fill("input.search-input", keyword, timeout=15000)
         time.sleep(random.uniform(0.5, 1.5))
-        page.click("input.search-btn")
+        page.click("input.search-btn", timeout=15000)
         time.sleep(random.uniform(1, 2))
     _handle_verify(page)
 
@@ -192,7 +204,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                 if current_page < max_pages:
                     next_btn = page.query_selector("a#PageNext")
                     if next_btn:
-                        next_btn.click()
+                        next_btn.click(timeout=15000)
                         time.sleep(random.uniform(4, 8))
                         _handle_verify(page)
                     else:
@@ -318,9 +330,9 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 ):
                     page.goto("https://kns.cnki.net/kns8s/", timeout=30000)
                     page.wait_for_load_state("load", timeout=20000)
-                    page.fill("input.search-input", dummy_keyword)
+                    page.fill("input.search-input", dummy_keyword, timeout=15000)
                     time.sleep(random.uniform(0.5, 1.5))
-                    page.click("input.search-btn")
+                    page.click("input.search-btn", timeout=15000)
                     page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
                 _handle_verify(page)
                 _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
