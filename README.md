@@ -1,9 +1,9 @@
 # CNKIBug 
 
-> 中国知网（CNKI）论文标题批量爬取工具，支持直接打包为 Windows 独立 `.exe`，无需用户安装任何环境。
+> 中国知网（CNKI）论文标题批量爬取工具。Windows 下可打包为独立 `.exe` 开箱即用，无需安装任何环境；Linux / macOS 可通过源码运行。
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
-![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Version](https://img.shields.io/badge/Version-0.1.6-orange)
 
@@ -13,7 +13,7 @@
 
 -  输入关键词，自动批量抓取知网论文标题，支持多关键词抓取模式
 -  结果自动导出为 `.xlsx` Excel 文件，保存至桌面，用户可以选择多关键词保存策略
--  优先调用系统自带的 **Microsoft Edge**，无需额外安装浏览器驱动
+-  优先调用系统自带的 **Microsoft Edge**（Windows）；找不到时自动回退到 Playwright 的 Chromium，故 Linux / macOS 亦可运行
 -  完善的错误提示，缺少环境时弹出友好的引导窗口
 -  抓取中途按 `Ctrl+C` 或关闭浏览器可安全中止，已抓取数据不丢失
 -  可打包为单文件 `.exe`，双击即用，无需 Python 环境
@@ -61,19 +61,25 @@
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装。
 
-### 方式二：源码运行（开发者）**（不建议通过此方式）**
+### 方式二：源码运行（Linux / macOS 用户，或开发者）
+
+> Windows 用户建议直接用方式一的 `.exe`；**Linux / macOS 用户请使用本方式**。
 
 ```bash
-# 1. 安装依赖
+# 1. 安装依赖（pywin32 已标记为仅 Windows 安装，Linux / macOS 会自动跳过）
 pip install -r requirements.txt
 # 或手动：pip install playwright openpyxl rich
 
-# 2. 安装浏览器驱动（开发环境需要）
+# 2. 安装浏览器内核
 playwright install chromium
 
 # 3. 从仓库根目录运行入口脚本
 python run.py
 ```
+
+> ⚠️ **必须有图形桌面**（X11 / Wayland）：知网会弹出滑块验证，需要人工手动通过，
+> 因此**无法在纯无头（headless）服务器上运行**。
+> 结果 `.xlsx` 保存到当前用户桌面目录（中文桌面会正确识别为 `~/桌面`）。
 
 ### 方式三：自行打包为 exe
 
@@ -90,9 +96,10 @@ pyinstaller --onefile --console --name CNKIBug run.py
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Windows 10 / 11 |
-| 浏览器 | Microsoft Edge（预装或手动安装） |
-| Python | 3.10+（仅源码运行需要） |
+| 操作系统 | Windows 10 / 11；或带图形桌面的 Linux / macOS（源码运行） |
+| 浏览器 | Windows：Microsoft Edge（预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
+| Python | 3.10+（源码运行需要） |
+| 图形界面 | 必需 —— 需人工通过知网滑块验证，无法在纯无头服务器运行 |
 
 ---
 

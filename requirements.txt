@@ -1,4 +1,4 @@
 playwright
 openpyxl
-pywin32
+pywin32; sys_platform == "win32"
 rich
