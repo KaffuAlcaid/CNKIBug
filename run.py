@@ -7,10 +7,12 @@ CNKI_Bug_dev - 中国知网论文标题爬虫
 说明：原单文件顶部的「依赖守卫」（捕获 playwright/openpyxl/rich 缺失并弹友好
 提示）随拆分迁移至此——入口第一件事是先 import 仅依赖标准库的 errors，再在
 守卫下 import 会拉起三方依赖的包模块。errors 必须保持零三方依赖，否则守卫失效。
+不敢动的ai注释
 """
 
 import sys
-import os
+# import os
+import subprocess
 
 from cnkibug.errors import _popup_error
 
@@ -44,7 +46,7 @@ except ImportError as _err:
 def main():
     try:
         if sys.platform == "win32":
-            os.system("cls")
+            subprocess.run("cls" if sys.platform == "win32" else "clear", shell=True)
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
@@ -76,7 +78,7 @@ def main():
                     keywords = [word]
                     save_mode = "single"
                 else:
-                    # v0.1.7 建议5：澄清“独立检索”与“交叉检索”的歧义
+
                     print("\n[多关键词模式] 每个关键词将【独立检索、分别出结果】。")
                     print("若想【交叉检索】（多个词作为一个整体一起搜），请改用单关键词模式，")
                     print("在一个关键词框里用空格分隔多个词，例如：增材制造 316L 残余应力")
@@ -102,7 +104,7 @@ def main():
                     else:
                         print("[!] 无效选项，程序退出。")
                         sys.exit(0)
-
+                target_pages = 0
                 while True:
                     try:
                         user_input_pages = input("\n请输入想抓取的总页数（纯数字，值不要太大）: ").strip()
@@ -127,7 +129,7 @@ def main():
                     else:
                         break
 
-                # v0.1.7 建议4：抓取前打印预计耗时区间（与上面的 >20 页警告组队劝退）
+                # v0.1.7 建议4：抓取前打印预计耗时区间
                 eta_low, eta_high = estimate_seconds(target_pages, len(keywords))
                 _console.print(
                     f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
@@ -139,7 +141,7 @@ def main():
                 again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
                     if sys.platform == "win32":
-                        os.system("cls")
+                        subprocess.run("cls" if sys.platform == "win32" else "clear", shell=True)
                     continue
                 else:
                     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
