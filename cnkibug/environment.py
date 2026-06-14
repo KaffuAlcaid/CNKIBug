@@ -36,7 +36,7 @@ def get_real_desktop_path() -> str:
     （如中文桌面的 ~/桌面），而不是写死 ~/Desktop。
     """
     if sys.platform == "win32":
-        import winreg  # Windows 专属标准库，仅在该分支按需导入
+        import winreg
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -60,14 +60,10 @@ def _xdg_desktop_path() -> str:
     home = os.path.expanduser("~")
     fallback = os.path.join(home, "Desktop")
 
-    # 1) 环境变量（部分桌面环境会主动 export）
     env_desktop = os.environ.get("XDG_DESKTOP_DIR")
     if env_desktop:
         return os.path.expandvars(env_desktop)
 
-    # 2) xdg-user-dir 命令：最权威，能解析本地化目录名（如「桌面」）。
-    #    注意它在无桌面配置时会回退返回 $HOME 本身，需排除该情况，
-    #    否则会把结果文件丢到 home 根目录。
     xdg_bin = shutil.which("xdg-user-dir")
     if xdg_bin:
         try:
@@ -81,7 +77,6 @@ def _xdg_desktop_path() -> str:
         except Exception:
             pass
 
-    # 3) 解析 ~/.config/user-dirs.dirs，形如 XDG_DESKTOP_DIR="$HOME/桌面"
     config = os.path.join(home, ".config", "user-dirs.dirs")
     try:
         with open(config, encoding="utf-8") as f:
@@ -99,10 +94,6 @@ def _xdg_desktop_path() -> str:
 
 def check_env():
     if sys.platform != "win32":
-        # Playwright 浏览器缓存路径按平台不同：Linux=~/.cache/ms-playwright，
-        # macOS=~/Library/Caches/ms-playwright。原代码硬编码 Windows 的
-        # ~/AppData/Local/ms-playwright，在 Linux/macOS 上永不存在，导致误判
-        # 「环境缺失」并 sys.exit(0)，程序在启动浏览器前就退出。
         _home = os.path.expanduser("~")
         if sys.platform == "darwin":
             playwright_path = os.path.join(_home, "Library", "Caches", "ms-playwright")

@@ -1,6 +1,5 @@
 import sys
-# import os
-import subprocess
+import os
 import logging
 
 from cnkibug.errors import _popup_error
@@ -40,20 +39,28 @@ logging.basicConfig(
 
 
 def _clear_screen() -> None:
-    """跨终端宿主彻底清屏（含滚动回溯缓冲）。
+    """清屏（含滚动回溯缓冲）。
 
-    现代终端用 ESC c（RIS，终端完全重置）一招清屏 + 清 scrollback，conhost 与
-    Windows Terminal 均认；同时再发一次 cls 给传统 conhost / 不识别 RIS 的环境兜底。
-    老 Windows（无 VT，legacy_windows=True）只发 cls，避免 ANSI 变乱码。
-    IDE 运行面板等非终端直接跳过（清不掉，也不留乱码）。
+    用 sys.stdout.isatty() 判断是否真终端——比 rich 的 is_terminal 在 PyInstaller
+    打包 exe 下更可靠（后者会误判为 False，导致清屏被整个跳过）。
+    Windows：cls 清整个控制台缓冲（传统 conhost 含 scrollback），再补 ANSI ESC[3J
+    清 Windows Terminal 的 scrollback。非 Windows：ESC c 终端重置。
+    IDE 运行面板 / 输出重定向（非 tty）直接跳过，避免乱码。
+
+    注意：Windows 下必须用 os.system("cls")，不能换成 subprocess.run——
+    PyInstaller 打包后 subprocess 起的子进程拿不到父进程的真实控制台句柄，
+    cls 会作用在错误的缓冲上、对可见窗口无效（实测踩坑）。命令是硬编码常量、
+    无注入风险，故 PyCharm「建议改用 subprocess」的提示在此不适用，可忽略。
     """
-    if not _console.is_terminal:
+    try:
+        if not sys.stdout.isatty():
+            return
+    except Exception:
         return
     if sys.platform == "win32":
-        subprocess.run("cls", shell=True)   # conhost / 老系统兜底：清整个缓冲
-        if not _console.legacy_windows:
-            sys.stdout.write("\033c")        # RIS：终端完全重置（清屏 + 清 scrollback）
-            sys.stdout.flush()
+        os.system("cls") 
+        sys.stdout.write("\033[3J")
+        sys.stdout.flush()
     else:
         sys.stdout.write("\033c")
         sys.stdout.flush()

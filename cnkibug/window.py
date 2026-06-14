@@ -44,7 +44,7 @@ def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bo
         logger.debug("获取 user32 句柄失败，跳过窗口置顶", exc_info=True)
         return False
 
-    matches = []  # [(hwnd, title)]
+    matches = []
 
     EnumWindowsProc = ctypes.WINFUNCTYPE(
         wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
@@ -86,9 +86,8 @@ def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bo
     hwnd = matches[0][0]
 
     try:
-        user32.ShowWindow(hwnd, _SW_RESTORE)  # 若最小化先还原
+        user32.ShowWindow(hwnd, _SW_RESTORE)
         flags = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW
-        # 先置顶抢注意力，随即取消 TOPMOST，不常驻压住浏览器
         user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, flags)
         user32.SetWindowPos(hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, flags)
         user32.SetForegroundWindow(hwnd)

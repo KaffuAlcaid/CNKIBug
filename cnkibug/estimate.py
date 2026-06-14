@@ -9,10 +9,9 @@
 届时只需改本文件，不影响调用方。
 """
 
-# 激进保守档：宁可高估，不让用户空等到怀疑卡死
 _SEC_PER_PAGE_LOW = 10
 _SEC_PER_PAGE_HIGH = 18
-_REDIRECT_OVERHEAD = 12  # 每个关键词重导航固定开销（秒）
+_REDIRECT_OVERHEAD = 12
 
 
 def estimate_seconds(pages: int, keyword_count: int = 1) -> tuple[int, int]:

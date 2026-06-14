@@ -77,7 +77,6 @@ def _save_single(keyword: str, results: list):
 def _save_multi_split(all_results: dict[str, list]):
     total = 0
     saved_files = []
-    # v0.1.7 Bug2: 时间戳在循环外算一次，保证同一轮生成的多个文件同戳、能归组
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     for keyword, results in all_results.items():
         if not results:
@@ -119,7 +118,6 @@ def _save_multi_merge(all_results: dict[str, list]):
 
     used_sheet_names: set[str] = set()
     for keyword, results in all_results.items():
-        # L2：跳过无数据的关键词，避免产出只有表头的空白 Sheet（与 split 模式行为一致）
         if not results:
             _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过该 Sheet。[/yellow]")
             continue
