@@ -99,9 +99,18 @@ def _xdg_desktop_path() -> str:
 
 def check_env():
     if sys.platform != "win32":
-        playwright_path = os.path.join(
-            os.path.expanduser("~"), "AppData", "Local", "ms-playwright"
-        )
+        # Playwright 浏览器缓存路径按平台不同：Linux=~/.cache/ms-playwright，
+        # macOS=~/Library/Caches/ms-playwright。原代码硬编码 Windows 的
+        # ~/AppData/Local/ms-playwright，在 Linux/macOS 上永不存在，导致误判
+        # 「环境缺失」并 sys.exit(0)，程序在启动浏览器前就退出。
+        _home = os.path.expanduser("~")
+        if sys.platform == "darwin":
+            playwright_path = os.path.join(_home, "Library", "Caches", "ms-playwright")
+        else:
+            playwright_path = os.path.join(_home, ".cache", "ms-playwright")
+        _override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+        if _override and _override != "0":
+            playwright_path = _override
         if not os.path.exists(playwright_path):
             _console.print("\n[yellow][环境缺失] 请先在终端运行: playwright install chromium[/yellow]\n")
             sys.exit(0)

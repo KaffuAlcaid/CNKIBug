@@ -10,6 +10,7 @@ _stop_requested 协作，finally 用 BaseException 兜底以免 Ctrl+C 逃出导
 import sys
 import time
 import random
+import logging
 
 from playwright.sync_api import (
     sync_playwright,
@@ -242,6 +243,11 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
       'multi_split'  -> 多关键词分文件保存
       'multi_merge'  -> 多关键词单文件多 Sheet 保存
     """
+    # M3：防御空关键词列表——避免 single 模式下 keywords[0] 抛 IndexError
+    if not keywords:
+        _console.print("[yellow][!] 未提供任何关键词，已跳过抓取。[/yellow]")
+        return
+
     all_results: dict[str, list] = {}
 
     # v0.1.6: 每次调用前重置标志位，防止同进程多轮运行时状态残留
@@ -263,7 +269,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     args=["--start-maximized"],  # v0.1.7 置顶第一层：窗口最大化
                 )
             _console.print("[dim][*] 已启动 Microsoft Edge[/dim]")
-        except Exception as _e1:
+        except PlaywrightError as _e1:
             _console.print(f"[yellow][!] Edge 启动失败 ({_e1})，尝试备用 Chromium...[/yellow]")
             try:
                 with _console.status(
@@ -275,7 +281,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                         args=["--start-maximized"],  # v0.1.7 置顶第一层：窗口最大化
                     )
                 _console.print("[dim][*] 已启动备用 Chromium 浏览器[/dim]")
-            except Exception as _e2:
+            except PlaywrightError as _e2:
                 if sys.platform == "win32":
                     _popup_error([
                         "==============================================",
@@ -298,6 +304,14 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 else:
                     _console.print(f"[red][FATAL] 浏览器启动失败: {_e2}[/red]")
                 raise RuntimeError(f"浏览器启动彻底失败: {_e2}")
+            except Exception:
+                # M4(方案B)：备用 Chromium 启动的非预期异常——记录后重抛，不伪装成启动失败
+                logging.exception("备用 Chromium 启动出现非预期异常")
+                raise
+        except Exception:
+            # M4(方案B)：Edge 启动的非预期异常——记录后重抛，不伪装成启动失败
+            logging.exception("Edge 启动出现非预期异常")
+            raise
 
         try:
             context = browser.new_context(

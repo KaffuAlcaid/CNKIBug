@@ -1,4 +1,4 @@
-playwright
-openpyxl
-pywin32; sys_platform == "win32"
-rich
+playwright==1.60.0
+openpyxl==3.1.5
+pywin32==311; sys_platform == "win32"
+rich==15.0.0

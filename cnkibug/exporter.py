@@ -119,6 +119,10 @@ def _save_multi_merge(all_results: dict[str, list]):
 
     used_sheet_names: set[str] = set()
     for keyword, results in all_results.items():
+        # L2：跳过无数据的关键词，避免产出只有表头的空白 Sheet（与 split 模式行为一致）
+        if not results:
+            _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过该 Sheet。[/yellow]")
+            continue
         clean_keyword = _sanitize_name(keyword)
         base_name = clean_keyword[:31]
         sheet_name = base_name
@@ -141,5 +145,7 @@ def _save_multi_merge(all_results: dict[str, list]):
         _console.print(f"[*] 已合并保存至：")
         _console.print(f"    [bold]>>> {os.path.abspath(filepath)} <<<[/bold]")
         for kw, results in all_results.items():
+            if not results:
+                continue
             _console.print(f"  · Sheet [cyan][{kw}][/cyan]：{len(results)} 条")
         _console.print("═" * 50 + "\n")

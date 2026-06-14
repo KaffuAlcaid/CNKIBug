@@ -10,6 +10,9 @@
 """
 
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 _HWND_TOPMOST = -1
 _HWND_NOTOPMOST = -2
@@ -32,11 +35,13 @@ def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bo
         import ctypes
         from ctypes import wintypes
     except Exception:
+        logger.debug("导入 ctypes 失败，跳过窗口置顶", exc_info=True)
         return False
 
     try:
         user32 = ctypes.windll.user32
     except Exception:
+        logger.debug("获取 user32 句柄失败，跳过窗口置顶", exc_info=True)
         return False
 
     matches = []  # [(hwnd, title)]
@@ -58,12 +63,13 @@ def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bo
             if any(h in title for h in title_hints):
                 matches.append((hwnd, title))
         except Exception:
-            pass
+            logger.debug("枚举窗口回调处理异常，忽略该窗口", exc_info=True)
         return True
 
     try:
         user32.EnumWindows(EnumWindowsProc(_cb), 0)
     except Exception:
+        logger.debug("EnumWindows 调用失败，跳过窗口置顶", exc_info=True)
         return False
 
     if not matches:
@@ -88,4 +94,5 @@ def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bo
         user32.SetForegroundWindow(hwnd)
         return True
     except Exception:
+        logger.debug("置顶窗口操作失败", exc_info=True)
         return False

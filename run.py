@@ -12,7 +12,7 @@ CNKI_Bug_dev - 中国知网论文标题爬虫
 
 import sys
 # import os
-import subprocess
+import logging
 
 from cnkibug.errors import _popup_error
 
@@ -43,10 +43,17 @@ except ImportError as _err:
     sys.exit(1)
 
 
+# M4(方案B)：统一日志配置——默认仅 ERROR 级输出，平时不打扰 UI，
+# 出现意外异常时由 logging.exception 打印完整 traceback，便于排错。
+logging.basicConfig(
+    level=logging.ERROR,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+
 def main():
     try:
-        if sys.platform == "win32":
-            subprocess.run("cls" if sys.platform == "win32" else "clear", shell=True)
+        _console.clear()
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
@@ -140,8 +147,7 @@ def main():
 
                 again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
-                    if sys.platform == "win32":
-                        subprocess.run("cls" if sys.platform == "win32" else "clear", shell=True)
+                    _console.clear()
                     continue
                 else:
                     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
@@ -156,6 +162,8 @@ def main():
                     break
 
             except Exception as ex:
+                # M4(方案B)：顶层兜底——意外异常记录完整 traceback，不丢失排错信息
+                logging.exception("程序遇到未知错误")
                 print("\n" + "!" * 40)
                 print(f"  程序遇到未知错误: {ex}")
                 print("!" * 40)
