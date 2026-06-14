@@ -1,17 +1,6 @@
-"""
-CNKI_Bug_dev - 中国知网论文标题爬虫
-版本: 0.1.7
-作者: Kaffu_Alcaid
-打包说明: pyinstaller --onefile --console --name CNKIBug run.py
-
-说明：原单文件顶部的「依赖守卫」（捕获 playwright/openpyxl/rich 缺失并弹友好
-提示）随拆分迁移至此——入口第一件事是先 import 仅依赖标准库的 errors，再在
-守卫下 import 会拉起三方依赖的包模块。errors 必须保持零三方依赖，否则守卫失效。
-不敢动的ai注释
-"""
-
 import sys
 # import os
+import subprocess
 import logging
 
 from cnkibug.errors import _popup_error
@@ -43,8 +32,7 @@ except ImportError as _err:
     sys.exit(1)
 
 
-# M4(方案B)：统一日志配置——默认仅 ERROR 级输出，平时不打扰 UI，
-# 出现意外异常时由 logging.exception 打印完整 traceback，便于排错。
+
 logging.basicConfig(
     level=logging.ERROR,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -53,7 +41,10 @@ logging.basicConfig(
 
 def main():
     try:
-        _console.clear()
+        # cls 清整个控制台缓冲（含滚动历史）；rich 的 clear 只清可见屏，故沿用 cls。
+        # 已去除原死代码三元（外层已判定 win32，else "clear" 永不可达）。
+        if sys.platform == "win32":
+            subprocess.run("cls", shell=True)
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
@@ -136,7 +127,6 @@ def main():
                     else:
                         break
 
-                # v0.1.7 建议4：抓取前打印预计耗时区间
                 eta_low, eta_high = estimate_seconds(target_pages, len(keywords))
                 _console.print(
                     f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
@@ -147,7 +137,8 @@ def main():
 
                 again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
-                    _console.clear()
+                    if sys.platform == "win32":
+                        subprocess.run("cls", shell=True)
                     continue
                 else:
                     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
@@ -162,7 +153,6 @@ def main():
                     break
 
             except Exception as ex:
-                # M4(方案B)：顶层兜底——意外异常记录完整 traceback，不丢失排错信息
                 logging.exception("程序遇到未知错误")
                 print("\n" + "!" * 40)
                 print(f"  程序遇到未知错误: {ex}")
