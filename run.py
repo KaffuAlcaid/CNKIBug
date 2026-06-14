@@ -39,12 +39,27 @@ logging.basicConfig(
 )
 
 
+def _clear_screen() -> None:
+    """跨环境清屏。
+
+    - IDE 运行面板等非终端：跳过（清不掉，且直接写 ANSI 会留转义乱码）。
+    - 老 Windows conhost（无 VT）：用 cls 清整个缓冲。
+    - 现代终端 / Win10+ conhost / Windows Terminal：ANSI 清屏 + 清滚动回溯缓冲，
+      解决 cls 与 rich.clear 都清不掉「向上滚仍可见旧内容」的问题。
+    """
+    if not _console.is_terminal:
+        return
+    if _console.legacy_windows:
+        subprocess.run("cls", shell=True)
+    else:
+        _console.clear()              # 清可见屏 + 光标归位（rich 已确保启用 VT）
+        sys.stdout.write("\033[3J")   # 清滚动回溯缓冲
+        sys.stdout.flush()
+
+
 def main():
     try:
-        # cls 清整个控制台缓冲（含滚动历史）；rich 的 clear 只清可见屏，故沿用 cls。
-        # 已去除原死代码三元（外层已判定 win32，else "clear" 永不可达）。
-        if sys.platform == "win32":
-            subprocess.run("cls", shell=True)
+        _clear_screen()
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
@@ -137,8 +152,7 @@ def main():
 
                 again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
-                    if sys.platform == "win32":
-                        subprocess.run("cls", shell=True)
+                    _clear_screen()
                     continue
                 else:
                     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
