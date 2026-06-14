@@ -40,20 +40,24 @@ logging.basicConfig(
 
 
 def _clear_screen() -> None:
-    """跨环境清屏。
+    """跨终端宿主彻底清屏（含滚动回溯缓冲）。
 
-    - IDE 运行面板等非终端：跳过（清不掉，且直接写 ANSI 会留转义乱码）。
-    - 老 Windows conhost（无 VT）：用 cls 清整个缓冲。
-    - 现代终端 / Win10+ conhost / Windows Terminal：ANSI 清屏 + 清滚动回溯缓冲，
-      解决 cls 与 rich.clear 都清不掉「向上滚仍可见旧内容」的问题。
+    Windows 两种控制台宿主清 scrollback 的方式互补，故都发一遍：
+    - 传统 conhost（cmd / 多数双击 exe）：cls 清整个屏幕缓冲，但不认 ANSI \\033[3J；
+    - Windows Terminal（Win11 默认宿主）：cls 不清其 scrollback，需 ANSI \\033[3J。
+    老 Windows（无 VT，legacy_windows=True）只发 cls，避免 ANSI 变乱码。
+    IDE 运行面板等非终端直接跳过（清不掉，也不留乱码）。
     """
     if not _console.is_terminal:
         return
-    if _console.legacy_windows:
-        subprocess.run("cls", shell=True)
+    if sys.platform == "win32":
+        subprocess.run("cls", shell=True)          # conhost：清整个缓冲含 scrollback
+        if not _console.legacy_windows:
+            sys.stdout.write("\033[3J\033[2J\033[H")  # Windows Terminal：清 scrollback
+            sys.stdout.flush()
     else:
-        _console.clear()              # 清可见屏 + 光标归位（rich 已确保启用 VT）
-        sys.stdout.write("\033[3J")   # 清滚动回溯缓冲
+        _console.clear()
+        sys.stdout.write("\033[3J")
         sys.stdout.flush()
 
 
