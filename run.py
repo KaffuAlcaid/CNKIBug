@@ -42,22 +42,20 @@ logging.basicConfig(
 def _clear_screen() -> None:
     """跨终端宿主彻底清屏（含滚动回溯缓冲）。
 
-    Windows 两种控制台宿主清 scrollback 的方式互补，故都发一遍：
-    - 传统 conhost（cmd / 多数双击 exe）：cls 清整个屏幕缓冲，但不认 ANSI \\033[3J；
-    - Windows Terminal（Win11 默认宿主）：cls 不清其 scrollback，需 ANSI \\033[3J。
+    现代终端用 ESC c（RIS，终端完全重置）一招清屏 + 清 scrollback，conhost 与
+    Windows Terminal 均认；同时再发一次 cls 给传统 conhost / 不识别 RIS 的环境兜底。
     老 Windows（无 VT，legacy_windows=True）只发 cls，避免 ANSI 变乱码。
     IDE 运行面板等非终端直接跳过（清不掉，也不留乱码）。
     """
     if not _console.is_terminal:
         return
     if sys.platform == "win32":
-        subprocess.run("cls", shell=True)          # conhost：清整个缓冲含 scrollback
+        subprocess.run("cls", shell=True)   # conhost / 老系统兜底：清整个缓冲
         if not _console.legacy_windows:
-            sys.stdout.write("\033[3J\033[2J\033[H")  # Windows Terminal：清 scrollback
+            sys.stdout.write("\033c")        # RIS：终端完全重置（清屏 + 清 scrollback）
             sys.stdout.flush()
     else:
-        _console.clear()
-        sys.stdout.write("\033[3J")
+        sys.stdout.write("\033c")
         sys.stdout.flush()
 
 
