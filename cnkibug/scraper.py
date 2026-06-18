@@ -11,6 +11,7 @@ import sys
 import time
 import random
 import logging
+from datetime import datetime
 
 from playwright.sync_api import (
     sync_playwright,
@@ -29,7 +30,7 @@ from rich.progress import (
 from . import window
 from .ui import _console, print_browser_banner, print_verify_alert
 from .errors import _popup_error
-from .exporter import _save_single, _save_multi_split, _save_multi_merge
+from .exporter import save_all
 
 _stop_requested = False
 
@@ -69,9 +70,29 @@ def _handle_verify(page) -> bool:
     return True
 
 
+def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
+    """等待结果列表首行详情链接变为与 old_href 不同的值，用于确认 AJAX 翻页
+    真正完成。超时（首行未变 / 无首行）返回 False，不抛异常。"""
+    try:
+        page.wait_for_function(
+            "(oldHref) => {"
+            " const a = document.querySelector("
+            "'table.result-table-list tbody tr td.name a');"
+            " return a && a.getAttribute('href')"
+            " && a.getAttribute('href') !== oldHref; }",
+            arg=old_href,
+            timeout=timeout,
+        )
+        return True
+    except PlaywrightTimeoutError:
+        return False
+
+
 def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
     global _stop_requested
     results = []
+    # 本关键词内跨页去重用：记录已收录文献的去重 key（详情 href 优先）。
+    seen: set = set()
     _console.print(f"\n[bold][*][/bold] 目标关键词：[bold cyan]{keyword}[/bold cyan]")
 
     try:
@@ -171,11 +192,43 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
 
                 rows = page.query_selector_all("table.result-table-list tbody tr")
                 for row in rows:
-                    title_el = row.query_selector("td.name a")
-                    if title_el:
+                    try:
+                        title_el = row.query_selector("td.name a")
+                        if not title_el:
+                            continue
                         title = title_el.inner_text().strip()
-                        results.append([title])
+
+                        # 去重 key：优先用详情链接 href（知网每篇文献唯一），
+                        # 取不到再回退 (标题, 来源, 日期) 三元组。
+                        href = title_el.get_attribute("href")
+
+                        author_parts = []
+                        for a in row.query_selector_all("td.author a.KnowledgeNetLink"):
+                            name = a.text_content().strip()
+                            if name:
+                                author_parts.append(name)
+                        authors = "; ".join(author_parts)
+
+                        source_el = row.query_selector("td.source")
+                        source = (
+                            " ".join(source_el.text_content().split())
+                            if source_el else ""
+                        )
+
+                        date_el = row.query_selector("td.date")
+                        date = date_el.text_content().strip() if date_el else ""
+
+                        dedup_key = href if href else (title, source, date)
+                        if dedup_key in seen:
+                            continue
+                        seen.add(dedup_key)
+
+                        results.append([title, authors, source, date])
                         progress.console.print(f"  [green]→[/green] {title}")
+                    except PlaywrightError:
+                        # 单行解析失败（元素 stale / 被回收等）只跳过这一行，
+                        # 不再让整页/整个关键词中断。
+                        continue
 
                 progress.advance(task)
 
@@ -192,11 +245,19 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         break
 
             except PlaywrightError:
+                # 只有浏览器/页面真正关闭才中止整个关键词；其它操作异常
+                # （翻页点击失败、临时 stale 等）只跳过本页继续。
+                if page.is_closed():
+                    progress.console.print(
+                        "\n[yellow][!] 检测到浏览器被手动关闭，"
+                        "正在为您安全中止并保存已抓取的数据...[/yellow]"
+                    )
+                    break
                 progress.console.print(
-                    "\n[yellow][!] 检测到浏览器被手动关闭或强制中断，"
-                    "正在为您安全中止并保存已抓取的数据...[/yellow]"
+                    f"[yellow][!] 第 {current_page} 页处理异常，跳过本页继续。[/yellow]"
                 )
-                break
+                progress.advance(task)
+                continue
 
             except KeyboardInterrupt:
                 _stop_requested = True
@@ -220,6 +281,8 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
         return
 
     all_results: dict[str, list] = {}
+    # 所有增量落盘与最终保存共用同一时间戳，保证写的是同一批文件（覆盖而非堆积）。
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     global _stop_requested
     _stop_requested = False
@@ -340,6 +403,19 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
 
                 all_results[keyword] = results
 
+                # 增量落盘：每抓完一个关键词立即写盘，避免后续关键词出错或
+                # 浏览器被关导致已抓数据丢失。静默写（announce=False），失败
+                # 仅记日志、不打断抓取——最终保存时会再写一次并给出完整反馈。
+                try:
+                    save_all(save_mode, keywords, all_results, ts, announce=False)
+                    if len(keywords) > 1:
+                        _console.print(
+                            f"[dim][*] 已落盘阶段性结果"
+                            f"（已完成 {idx + 1}/{len(keywords)} 个关键词）[/dim]"
+                        )
+                except BaseException: # noqa
+                    logging.exception("增量保存失败")
+
                 if _stop_requested:
                     break
 
@@ -353,12 +429,13 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             if browser:
                 try:
                     browser.close()
-                except BaseException:
+                except BaseException: # noqa
                     pass
 
-    if save_mode == "single":
-        _save_single(keywords[0], all_results.get(keywords[0], []))
-    elif save_mode == "multi_split":
-        _save_multi_split(all_results)
-    elif save_mode == "multi_merge":
-        _save_multi_merge(all_results)
+            # 最终保存 + 打印汇总。放在 finally 内、以 BaseException 兜底，
+            # 确保正常完成、关键词中途出错、以及保存阶段的二次 Ctrl+C 都不丢数据。
+            # 与增量落盘共用同一 ts，写的是同一批文件（幂等覆盖）。
+            try:
+                save_all(save_mode, keywords, all_results, ts, announce=True)
+            except BaseException: # noqa
+                logging.exception("最终保存失败")

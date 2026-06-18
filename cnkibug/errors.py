@@ -9,9 +9,9 @@ def _popup_error(lines: list[str]):
         try:
             import ctypes
             style = 0x10 | 0x10000 | 0x40000
-            ctypes.windll.user32.MessageBoxW(0, message, "CNKIBug - 错误", style)
+            ctypes.windll.user32.MessageBoxW(0, message, "CNKIBug - 错误", style) # noqa
             return
-        except Exception:
+        except Exception: # noqa
             pass
 
     print(message, file=sys.stderr)

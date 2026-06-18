@@ -2,10 +2,10 @@ import sys
 import os
 import logging
 
-from cnkibug.errors import _popup_error
+from cnkibug.errors import _popup_error # noqa
 
 try:
-    from cnkibug.ui import _console
+    from cnkibug.ui import _console # noqa
     from cnkibug.environment import check_env
     from cnkibug.scraper import scrape_cnki
     from cnkibug.estimate import estimate_seconds, format_eta
@@ -47,18 +47,14 @@ def _clear_screen() -> None:
     清 Windows Terminal 的 scrollback。非 Windows：ESC c 终端重置。
     IDE 运行面板 / 输出重定向（非 tty）直接跳过，避免乱码。
 
-    注意：Windows 下必须用 os.system("cls")，不能换成 subprocess.run——
-    PyInstaller 打包后 subprocess 起的子进程拿不到父进程的真实控制台句柄，
-    cls 会作用在错误的缓冲上、对可见窗口无效（实测踩坑）。命令是硬编码常量、
-    无注入风险，故 PyCharm「建议改用 subprocess」的提示在此不适用，可忽略。
     """
     try:
         if not sys.stdout.isatty():
             return
-    except Exception:
+    except Exception: # noqa
         return
     if sys.platform == "win32":
-        os.system("cls") 
+        os.system("cls") # noqa
         sys.stdout.write("\033[3J")
         sys.stdout.flush()
     else:

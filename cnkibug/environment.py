@@ -6,6 +6,7 @@ Linux / macOS 上 `import cnkibug.environment` 直接抛 ModuleNotFoundError，
 get_real_desktop_path 的 Windows 分支内按需导入；非 Windows 平台的桌面路径
 改走 XDG 用户目录解析（见 _xdg_desktop_path）。Windows 行为保持不变。
 """
+# noinspection PyDeprecation
 
 import sys
 import os
@@ -80,12 +81,12 @@ def _xdg_desktop_path() -> str:
     config = os.path.join(home, ".config", "user-dirs.dirs")
     try:
         with open(config, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+            for raw_line in f:
+                line = raw_line.strip()
                 if line.startswith("XDG_DESKTOP_DIR"):
-                    val = line.split("=", 1)[1].strip().strip('"')
+                    val: str = line.split("=", 1)[1].strip().strip('"')
                     val = val.replace("$HOME", home)
-                    return os.path.expandvars(val)
+                    return os.path.expandvars(val) # noqa
     except OSError:
         pass
 

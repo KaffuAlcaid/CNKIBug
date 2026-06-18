@@ -22,6 +22,7 @@ _SWP_SHOWWINDOW = 0x0040
 _SW_RESTORE = 9
 
 
+# noinspection PyUnresolvedReferences,PyBroadException
 def bring_to_front(title_hints=("安全验证", "中国知网", "知网")) -> bool:
     """把标题命中 title_hints 任一子串的顶层窗口置顶并抢焦点。
 

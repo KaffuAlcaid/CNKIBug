@@ -19,10 +19,10 @@ def estimate_seconds(pages: int, keyword_count: int = 1) -> tuple[int, int]:
     per_word_low = pages * _SEC_PER_PAGE_LOW
     per_word_high = pages * _SEC_PER_PAGE_HIGH
     if keyword_count <= 1:
-        return (per_word_low, per_word_high)
+        return per_word_low, per_word_high
     low = keyword_count * (_REDIRECT_OVERHEAD + per_word_low)
     high = keyword_count * (_REDIRECT_OVERHEAD + per_word_high)
-    return (low, high)
+    return low, high
 
 
 def _fmt(seconds: int) -> str:
