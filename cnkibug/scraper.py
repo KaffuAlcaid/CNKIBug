@@ -37,16 +37,43 @@ _stop_requested = False
 
 _VERIFY_WAIT_TIMEOUT = 180
 _VERIFY_NOTICE_INTERVAL = 15
+_VERIFY_NONE = "none"
+_VERIFY_PASSED = "passed"
+_VERIFY_TIMEOUT = "timeout"
+
+CNKI_HOME_URL = "https://www.cnki.net/"
+CNKI_SEARCH_URL = "https://kns.cnki.net/kns8s/"
+WARMUP_KEYWORD = "焊接"
+
+SELECTOR_SEARCH_INPUT = "input.search-input"
+SELECTOR_SEARCH_BUTTON = "input.search-btn"
+SELECTOR_RESULT_ROWS = "table.result-table-list tbody tr"
+SELECTOR_RESULT_TITLE = "td.name a"
+SELECTOR_AUTHOR = "td.author a.KnowledgeNetLink"
+SELECTOR_SOURCE = "td.source"
+SELECTOR_DATE = "td.date"
+SELECTOR_NO_CONTENT = "#briefBox p.no-content"
+SELECTOR_NEXT_PAGE = "a#PageNext"
+
+TIMEOUT_GOTO = 30000
+TIMEOUT_LOAD = 20000
+TIMEOUT_SELECTOR = 15000
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
-def _handle_verify(page) -> bool:
+def _handle_verify(page) -> str:
     """若当前处于知网安全验证页(/verify)，置顶浏览器并等待用户完成。
 
-    返回 True 表示曾检测到验证并已处理（含等待超时）；False 表示无验证。
-    返回值用于循环内 timeout 分支：True 则验证刚过、值得重等结果；False 是真超时。
+    返回值用于区分：无验证、验证通过、验证等待超时。超时需要调用方停止
+    当前抓取并触发保存，避免提示“将保存”后仍继续执行。
     """
     if "/verify" not in page.url:
-        return False
+        return _VERIFY_NONE
 
     window.bring_to_front()
     print_verify_alert()
@@ -57,7 +84,7 @@ def _handle_verify(page) -> bool:
     while "/verify" in page.url:
         if waited >= _VERIFY_WAIT_TIMEOUT:
             _console.print("[yellow][!] 等待安全验证超时，将保存已抓取的数据。[/yellow]")
-            return True
+            return _VERIFY_TIMEOUT
         if waited >= next_notice:
             remaining = int(_VERIFY_WAIT_TIMEOUT - waited)
             _console.print(
@@ -67,7 +94,7 @@ def _handle_verify(page) -> bool:
         time.sleep(interval)
         waited += interval
     _console.print("[green][*] 验证已通过，继续抓取。[/green]")
-    return True
+    return _VERIFY_PASSED
 
 
 def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
@@ -77,7 +104,7 @@ def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
         page.wait_for_function(
             "(oldHref) => {"
             " const a = document.querySelector("
-            "'table.result-table-list tbody tr td.name a');"
+            f"'{SELECTOR_RESULT_ROWS} {SELECTOR_RESULT_TITLE}');"
             " return a && a.getAttribute('href')"
             " && a.getAttribute('href') !== oldHref; }",
             arg=old_href,
@@ -85,6 +112,97 @@ def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
         )
         return True
     except PlaywrightTimeoutError:
+        return False
+
+
+def _launch_browser(p):
+    try:
+        with _console.status(
+            "[bold magenta]少女祈祷中...[/bold magenta]",
+            spinner="bouncingBar",
+        ):
+            browser = p.chromium.launch(
+                channel="msedge",
+                headless=False,
+                args=["--start-maximized"],
+            )
+        _console.print("[dim][*] 已启动 Microsoft Edge[/dim]")
+        return browser
+    except PlaywrightError as edge_err:
+        _console.print(f"[yellow][!] Edge 启动失败 ({edge_err})，尝试备用 Chromium...[/yellow]")
+        try:
+            with _console.status(
+                "[bold magenta]少女祈祷中...[/bold magenta]",
+                spinner="bouncingBar",
+            ):
+                browser = p.chromium.launch(
+                    headless=False,
+                    args=["--start-maximized"],
+                )
+            _console.print("[dim][*] 已启动备用 Chromium 浏览器[/dim]")
+            return browser
+        except PlaywrightError as chromium_err:
+            if sys.platform == "win32":
+                _popup_error([
+                    "==============================================",
+                    " [错误] 浏览器启动失败！",
+                    "----------------------------------------------",
+                    " 程序无法启动 Edge，也无法启动备用 Chromium。",
+                    "",
+                    " 可能原因：",
+                    "   · Edge 未安装或文件损坏",
+                    "   · Playwright Chromium 未安装",
+                    "   · 系统权限不足",
+                    "   · 安全软件阻止了浏览器启动",
+                    "",
+                    " 建议：",
+                    "   1. 安装或重新安装 Microsoft Edge",
+                    "      https://www.microsoft.com/zh-cn/edge/download",
+                    "   2. 源码运行用户可执行 playwright install chromium",
+                    "   3. 以管理员身份运行本程序",
+                    "==============================================",
+                ])
+            else:
+                _console.print(f"[red][FATAL] 浏览器启动失败: {chromium_err}[/red]")
+            raise RuntimeError(f"浏览器启动彻底失败: {chromium_err}")
+        except Exception:
+            logging.exception("备用 Chromium 启动出现非预期异常")
+            raise
+    except Exception:
+        logging.exception("Edge 启动出现非预期异常")
+        raise
+
+
+def _warmup(page) -> bool:
+    global _stop_requested
+    try:
+        with _console.status(
+            "[bold magenta]少女祈祷中...[/bold magenta]",
+            spinner="bouncingBar",
+        ):
+            page.goto(CNKI_HOME_URL, timeout=TIMEOUT_GOTO)
+            page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_LOAD)
+        if _handle_verify(page) == _VERIFY_TIMEOUT:
+            _stop_requested = True
+        if not _stop_requested:
+            with _console.status(
+                "[bold magenta]少女祈祷中...[/bold magenta]",
+                spinner="bouncingBar",
+            ):
+                page.goto(CNKI_SEARCH_URL, timeout=TIMEOUT_GOTO)
+                page.wait_for_load_state("load", timeout=TIMEOUT_LOAD)
+                page.fill(SELECTOR_SEARCH_INPUT, WARMUP_KEYWORD, timeout=TIMEOUT_SELECTOR)
+                time.sleep(random.uniform(0.5, 1.5))
+                page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
+                page.wait_for_selector(SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR)
+            if _handle_verify(page) == _VERIFY_TIMEOUT:
+                _stop_requested = True
+        if _stop_requested:
+            return False
+        _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
+        return True
+    except (PlaywrightTimeoutError, PlaywrightError) as warmup_err:
+        _console.print(f"[yellow][!] 预热搜索未完全成功 ({warmup_err})，继续正式抓取。[/yellow]")
         return False
 
 
@@ -100,49 +218,59 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
             "[bold magenta]少女祈祷中...[/bold magenta]",
             spinner="bouncingBar",
         ):
-            page.goto("https://www.cnki.net/", timeout=30000)
-            page.wait_for_load_state("domcontentloaded", timeout=20000)
+            page.goto(CNKI_HOME_URL, timeout=TIMEOUT_GOTO)
+            page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_LOAD)
     except PlaywrightTimeoutError:
         _console.print("[yellow][!] 预热请求超时，跳过该关键词。[/yellow]")
         return results
     except PlaywrightError as e:
         _console.print(f"[yellow][!] 预热请求失败: {e}，跳过该关键词。[/yellow]")
         return results
-    _handle_verify(page)
+    if _handle_verify(page) == _VERIFY_TIMEOUT:
+        _stop_requested = True
+        return results
 
     try:
         with _console.status(
             "[bold magenta]少女祈祷中...[/bold magenta]",
             spinner="bouncingBar",
         ):
-            page.goto("https://kns.cnki.net/kns8s/", timeout=30000)
-            page.wait_for_load_state("load", timeout=20000)
+            page.goto(CNKI_SEARCH_URL, timeout=TIMEOUT_GOTO)
+            page.wait_for_load_state("load", timeout=TIMEOUT_LOAD)
     except PlaywrightTimeoutError:
         _console.print("[yellow][!] 检索页加载超时，跳过该关键词。[/yellow]")
         return results
     except PlaywrightError as e:
         _console.print(f"[yellow][!] 检索页加载失败: {e}，跳过该关键词。[/yellow]")
         return results
-    _handle_verify(page)
+    if _handle_verify(page) == _VERIFY_TIMEOUT:
+        _stop_requested = True
+        return results
 
     with _console.status(
         "[bold magenta]少女祈祷中...[/bold magenta]",
         spinner="bouncingBar",
     ):
-        page.fill("input.search-input", keyword, timeout=15000)
+        page.fill(SELECTOR_SEARCH_INPUT, keyword, timeout=TIMEOUT_SELECTOR)
         time.sleep(random.uniform(0.5, 1.5))
-        page.click("input.search-btn", timeout=15000)
+        page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
         time.sleep(random.uniform(1, 2))
-    _handle_verify(page)
+    if _handle_verify(page) == _VERIFY_TIMEOUT:
+        _stop_requested = True
+        return results
 
     try:
         outcome = page.wait_for_function(
-            """() => {
-                if (document.querySelector('table.result-table-list tbody tr')) return 'has_results';
-                if (document.querySelector('#briefBox p.no-content')) return 'no_content';
+            """(selectors) => {
+                if (document.querySelector(selectors.resultRows)) return 'has_results';
+                if (document.querySelector(selectors.noContent)) return 'no_content';
                 return false;
             }""",
-            timeout=15000,
+            arg={
+                "resultRows": SELECTOR_RESULT_ROWS,
+                "noContent": SELECTOR_NO_CONTENT,
+            },
+            timeout=TIMEOUT_SELECTOR,
         ).json_value()
     except PlaywrightTimeoutError:
         _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
@@ -172,14 +300,17 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                 progress.update(task, description=f"第 [bold]{current_page}[/bold] / {max_pages} 页")
                 try:
                     page.wait_for_selector(
-                        "table.result-table-list tbody tr", timeout=15000
+                        SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
                     )
                 except PlaywrightTimeoutError:
-                    handled = _handle_verify(page)
-                    if handled:
+                    verify_status = _handle_verify(page)
+                    if verify_status == _VERIFY_PASSED:
                         page.wait_for_selector(
-                            "table.result-table-list tbody tr", timeout=15000
+                            SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
                         )
+                    elif verify_status == _VERIFY_TIMEOUT:
+                        _stop_requested = True
+                        break
                     else:
                         progress.console.print(
                             f"[red][x] 第 {current_page} 页等待超时（非验证），跳过本页。[/red]"
@@ -188,12 +319,14 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         continue
 
                 time.sleep(random.uniform(2, 5))
-                _handle_verify(page)
+                if _handle_verify(page) == _VERIFY_TIMEOUT:
+                    _stop_requested = True
+                    break
 
-                rows = page.query_selector_all("table.result-table-list tbody tr")
+                rows = page.query_selector_all(SELECTOR_RESULT_ROWS)
                 for row in rows:
                     try:
-                        title_el = row.query_selector("td.name a")
+                        title_el = row.query_selector(SELECTOR_RESULT_TITLE)
                         if not title_el:
                             continue
                         title = title_el.inner_text().strip()
@@ -203,19 +336,19 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         href = title_el.get_attribute("href")
 
                         author_parts = []
-                        for a in row.query_selector_all("td.author a.KnowledgeNetLink"):
+                        for a in row.query_selector_all(SELECTOR_AUTHOR):
                             name = a.text_content().strip()
                             if name:
                                 author_parts.append(name)
                         authors = "; ".join(author_parts)
 
-                        source_el = row.query_selector("td.source")
+                        source_el = row.query_selector(SELECTOR_SOURCE)
                         source = (
                             " ".join(source_el.text_content().split())
                             if source_el else ""
                         )
 
-                        date_el = row.query_selector("td.date")
+                        date_el = row.query_selector(SELECTOR_DATE)
                         date = date_el.text_content().strip() if date_el else ""
 
                         dedup_key = href if href else (title, source, date)
@@ -233,11 +366,13 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                 progress.advance(task)
 
                 if current_page < max_pages:
-                    next_btn = page.query_selector("a#PageNext")
+                    next_btn = page.query_selector(SELECTOR_NEXT_PAGE)
                     if next_btn:
-                        next_btn.click(timeout=15000)
+                        next_btn.click(timeout=TIMEOUT_SELECTOR)
                         time.sleep(random.uniform(4, 8))
-                        _handle_verify(page)
+                        if _handle_verify(page) == _VERIFY_TIMEOUT:
+                            _stop_requested = True
+                            break
                     else:
                         progress.console.print(
                             "[yellow][!] 没找到下一页按钮，可能已到最后一页。[/yellow]"
@@ -290,98 +425,23 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
     with sync_playwright() as p:
         browser = None
 
-        try:
-            with _console.status(
-                "[bold magenta]少女祈祷中...[/bold magenta]",
-                spinner="bouncingBar",
-            ):
-                browser = p.chromium.launch(
-                    channel="msedge",
-                    headless=False,
-                    args=["--start-maximized"],
-                )
-            _console.print("[dim][*] 已启动 Microsoft Edge[/dim]")
-        except PlaywrightError as _e1:
-            _console.print(f"[yellow][!] Edge 启动失败 ({_e1})，尝试备用 Chromium...[/yellow]")
-            try:
-                with _console.status(
-                    "[bold magenta]少女祈祷中...[/bold magenta]",
-                    spinner="bouncingBar",
-                ):
-                    browser = p.chromium.launch(
-                        headless=False,
-                        args=["--start-maximized"],
-                    )
-                _console.print("[dim][*] 已启动备用 Chromium 浏览器[/dim]")
-            except PlaywrightError as _e2:
-                if sys.platform == "win32":
-                    _popup_error([
-                        "==============================================",
-                        " [错误] 浏览器启动失败！",
-                        "----------------------------------------------",
-                        " 程序找到了 Edge，但无法正常启动它。",
-                        "",
-                        " 可能原因：",
-                        "   · Edge 浏览器文件损坏",
-                        "   · 系统权限不足",
-                        "   · 安全软件阻止了浏览器启动",
-                        "",
-                        " 建议：",
-                        "   1. 重新安装 Microsoft Edge",
-                        "      https://www.microsoft.com/zh-cn/edge/download",
-                        "   2. 以管理员身份运行本程序",
-                        "   3. 暂时关闭杀毒软件后重试",
-                        "==============================================",
-                    ])
-                else:
-                    _console.print(f"[red][FATAL] 浏览器启动失败: {_e2}[/red]")
-                raise RuntimeError(f"浏览器启动彻底失败: {_e2}")
-            except Exception:
-                logging.exception("备用 Chromium 启动出现非预期异常")
-                raise
-        except Exception:
-            logging.exception("Edge 启动出现非预期异常")
-            raise
+        browser = _launch_browser(p)
 
         try:
             context = browser.new_context(
                 no_viewport=True,
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
+                user_agent=USER_AGENT
             )
             page = context.new_page()
 
             print_browser_banner()
 
-            dummy_keyword = "焊接"
-            try:
-                with _console.status(
-                    "[bold magenta]少女祈祷中...[/bold magenta]",
-                    spinner="bouncingBar",
-                ):
-                    page.goto("https://www.cnki.net/", timeout=30000)
-                    page.wait_for_load_state("domcontentloaded", timeout=20000)
-                _handle_verify(page)
-                with _console.status(
-                    "[bold magenta]少女祈祷中...[/bold magenta]",
-                    spinner="bouncingBar",
-                ):
-                    page.goto("https://kns.cnki.net/kns8s/", timeout=30000)
-                    page.wait_for_load_state("load", timeout=20000)
-                    page.fill("input.search-input", dummy_keyword, timeout=15000)
-                    time.sleep(random.uniform(0.5, 1.5))
-                    page.click("input.search-btn", timeout=15000)
-                    page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
-                _handle_verify(page)
-                _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
-            except (PlaywrightTimeoutError, PlaywrightError) as warmup_err:
-                _console.print(f"[yellow][!] 预热搜索未完全成功 ({warmup_err})，继续正式抓取。[/yellow]")
+            _warmup(page)
             time.sleep(random.uniform(2, 4))
 
             for idx, keyword in enumerate(keywords):
+                if _stop_requested:
+                    break
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
                     with _console.status(
@@ -437,5 +497,8 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             # 与增量落盘共用同一 ts，写的是同一批文件（幂等覆盖）。
             try:
                 save_all(save_mode, keywords, all_results, ts, announce=True)
-            except BaseException: # noqa
+            except BaseException as save_err: # noqa
                 logging.exception("最终保存失败")
+                _console.print("\n[bold red][x] 最终保存失败！[/bold red]")
+                _console.print(f"[red]错误信息：{save_err}[/red]")
+                _console.print("[yellow]请关闭已打开的同名 Excel 文件，并检查桌面或程序目录写入权限。[/yellow]")

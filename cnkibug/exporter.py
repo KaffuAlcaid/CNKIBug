@@ -24,9 +24,29 @@ def _get_output_path(filename: str) -> str:
         return os.path.join(os.getcwd(), filename)
 
 
-def _try_save_workbook(wb, filepath: str, announce: bool = True) -> bool:
-    """写盘。announce=False 时静默（不显示 spinner、不打印失败提示），
-    供每抓完一个关键词的增量落盘使用；失败由调用方记日志、最终保存时再提示。
+def _try_save_fallback(wb, filepath: str, save_err: OSError, announce: bool) -> str | None:
+    fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
+    if announce:
+        _console.print(f"\n[red][x] 文件保存失败：{save_err}[/red]")
+        _console.print(f"    尝试保存到程序目录：{fallback}")
+
+    try:
+        wb.save(fallback)
+        saved_path = os.path.abspath(fallback)
+        if announce:
+            _console.print(f"    已保存至备用路径：{saved_path}")
+        return saved_path
+    except OSError as fb_err:
+        if announce:
+            _console.print(f"[red][x] 备用路径也保存失败：{fb_err}[/red]")
+        return None
+
+
+def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
+    """写盘并返回实际保存路径。
+
+    announce=False 时静默（不显示 spinner、不打印失败提示），供每抓完一个
+    关键词的增量落盘使用；失败由调用方记日志、最终保存时再提示。
     """
     try:
         if announce:
@@ -37,27 +57,11 @@ def _try_save_workbook(wb, filepath: str, announce: bool = True) -> bool:
                 wb.save(filepath)
         else:
             wb.save(filepath)
-        return True
-    except PermissionError:
-        if announce:
-            _console.print(f"\n[red][x] 文件保存失败：没有写入权限！[/red]")
-            _console.print(f"    目标路径：{filepath}")
-            _console.print(f"    请确认桌面文件夹未被锁定，或关闭已打开的同名 Excel 文件。")
-        return False
+        return os.path.abspath(filepath)
+    except PermissionError as save_err:
+        return _try_save_fallback(wb, filepath, save_err, announce)
     except OSError as save_err:
-        fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
-        if announce:
-            _console.print(f"\n[red][x] 文件保存失败：{save_err}[/red]")
-            _console.print(f"    尝试保存到程序目录：{fallback}")
-        try:
-            wb.save(fallback)
-            if announce:
-                _console.print(f"    已保存至备用路径：{fallback}")
-            return True
-        except OSError as fb_err:
-            if announce:
-                _console.print(f"[red][x] 备用路径也保存失败：{fb_err}[/red]")
-            return False
+        return _try_save_fallback(wb, filepath, save_err, announce)
 
 
 def _build_single_sheet_workbook(results: list):
@@ -82,11 +86,12 @@ def _save_single(keyword: str, results: list, ts: str, announce: bool):
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
     wb = _build_single_sheet_workbook(results)
 
-    if _try_save_workbook(wb, filepath, announce) and announce:
+    saved_path = _try_save_workbook(wb, filepath, announce)
+    if saved_path and announce:
         _console.print("\n" + "═" * 50)
         _console.print(f"[bold green][*] 共抓取 {len(results)} 条数据。[/bold green]")
         _console.print(f"[*] 文件已保存至：")
-        _console.print(f"    [bold]>>> {os.path.abspath(filepath)} <<<[/bold]")
+        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
         _console.print("═" * 50 + "\n")
 
 
@@ -102,8 +107,9 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
         clean_keyword = _sanitize_name(keyword)
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
         wb = _build_single_sheet_workbook(results)
-        if _try_save_workbook(wb, filepath, announce):
-            saved_files.append((keyword, len(results), os.path.abspath(filepath)))
+        saved_path = _try_save_workbook(wb, filepath, announce)
+        if saved_path:
+            saved_files.append((keyword, len(results), saved_path))
             total += len(results)
 
     if announce:
@@ -150,11 +156,12 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
             ws.append(row)
         total += len(results)
 
-    if _try_save_workbook(wb, filepath, announce) and announce:
+    saved_path = _try_save_workbook(wb, filepath, announce)
+    if saved_path and announce:
         _console.print("\n" + "═" * 50)
         _console.print(f"[bold green][*] 全部抓取完毕，共 {total} 条数据。[/bold green]")
         _console.print(f"[*] 已合并保存至：")
-        _console.print(f"    [bold]>>> {os.path.abspath(filepath)} <<<[/bold]")
+        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
         for kw, results in all_results.items():
             if not results:
                 continue

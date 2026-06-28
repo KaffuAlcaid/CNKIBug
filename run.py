@@ -68,7 +68,7 @@ def main():
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
-        _console.print("  Version 0.1.7")
+        _console.print("  Version 0.2.1")
         _console.print("=" * 50)
         _console.print("  本软件用于抓取中国知网的论文标题\n")
         _console.print("按 Ctrl+C 可随时中断并保存已抓取数据")
@@ -82,17 +82,19 @@ def main():
                 print("\n请选择抓取模式：")
                 print("  1 -> 单关键词模式")
                 print("  2 -> 多关键词模式")
-                mode_input = input("请输入选项（1 或 2）: ").strip()
-                if mode_input not in ("1", "2"):
-                    print("[!] 无效选项，程序退出。")
-                    sys.exit(0)
+                while True:
+                    mode_input = input("请输入选项（1 或 2）: ").strip()
+                    if mode_input in ("1", "2"):
+                        break
+                    print("[!] 无效选项，请重新输入。")
 
                 keywords = []
                 if mode_input == "1":
-                    word = input("\n请输入你要搜索的关键词: ").strip()
-                    if not word:
-                        print("[!] 关键词不能为空，程序退出。")
-                        sys.exit(0)
+                    while True:
+                        word = input("\n请输入你要搜索的关键词: ").strip()
+                        if word:
+                            break
+                        print("[!] 关键词不能为空，请重新输入。")
                     keywords = [word]
                     save_mode = "single"
                 else:
@@ -109,19 +111,32 @@ def main():
                     if not keywords:
                         print("[!] 未输入任何关键词，程序退出。")
                         sys.exit(0)
+                    seen_keywords = set()
+                    deduped_keywords = []
+                    duplicate_keywords = []
+                    for word in keywords:
+                        if word in seen_keywords:
+                            duplicate_keywords.append(word)
+                            continue
+                        seen_keywords.add(word)
+                        deduped_keywords.append(word)
+                    keywords = deduped_keywords
+                    if duplicate_keywords:
+                        print(f"[!] 已忽略重复关键词：{duplicate_keywords}")
                     print(f"\n[*] 共确认 {len(keywords)} 个关键词：{keywords}")
 
                     print("\n请选择保存方式：")
                     print("  1 -> 分文件保存（每个关键词独立生成一个 Excel）")
                     print("  2 -> 单文件多 Sheet 保存（所有关键词汇总到一个 Excel）")
-                    save_input = input("请输入选项（1 或 2）: ").strip()
-                    if save_input == "1":
-                        save_mode = "multi_split"
-                    elif save_input == "2":
-                        save_mode = "multi_merge"
-                    else:
-                        print("[!] 无效选项，程序退出。")
-                        sys.exit(0)
+                    while True:
+                        save_input = input("请输入选项（1 或 2）: ").strip()
+                        if save_input == "1":
+                            save_mode = "multi_split"
+                            break
+                        if save_input == "2":
+                            save_mode = "multi_merge"
+                            break
+                        print("[!] 无效选项，请重新输入。")
                 target_pages = 0
                 while True:
                     try:

@@ -109,18 +109,11 @@ def check_env():
         return
 
     if not _edge_installed():
-        _popup_error([
-            "==============================================",
-            " [环境缺失] 未检测到 Microsoft Edge 浏览器！",
-            "----------------------------------------------",
-            " 本程序需要使用 Microsoft Edge 来抓取网页数据。",
-            " Windows 10/11 通常已预装，若您已卸载请重新安装。",
-            "",
-            " 请用浏览器打开以下地址，下载并安装 Edge：",
-            "",
-            "   https://www.microsoft.com/zh-cn/edge/download",
-            "",
-            " 安装完成后，关闭此窗口，重新双击程序即可！",
-            "==============================================",
-        ])
-        sys.exit(0)
+        _console.print(
+            "\n[yellow][环境提示] 未检测到 Microsoft Edge，"
+            "将尝试使用 Playwright Chromium。[/yellow]"
+        )
+        _console.print(
+            "[dim]若后续浏览器启动失败，请安装 Edge 或运行："
+            "playwright install chromium[/dim]\n"
+        )

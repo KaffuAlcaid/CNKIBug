@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.1.6-orange)
+![Version](https://img.shields.io/badge/Version-0.2.1-orange)
 
 ---
 
@@ -114,6 +114,8 @@ CNKIBug/
 │   ├── ui.py               # 共享的 rich Console 单例
 │   ├── environment.py      # 平台/环境检测（Edge 检查、桌面路径）
 │   ├── exporter.py         # 结果导出（xlsx、文件名清洗、三种保存模式）
+│   ├── estimate.py         # 抓取耗时估算
+│   ├── window.py           # 浏览器窗口置顶（主要用于验证码提示）
 │   └── scraper.py          # 核心抓取与多关键词编排
 ├── requirements.txt        # 依赖清单（playwright / openpyxl / rich）
 ├── icon.ico                # 打包图标
