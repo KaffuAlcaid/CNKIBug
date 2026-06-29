@@ -97,9 +97,71 @@ def _handle_verify(page) -> str:
     return _VERIFY_PASSED
 
 
+def _print_page_debug(page, context: str) -> None:
+    """打印页面状态，辅助判断 CNKI 页面结构或验证策略是否变化。"""
+    _console.print(f"[yellow][debug] {context}[/yellow]")
+    try:
+        _console.print(f"[dim]当前 URL: {page.url}[/dim]")
+    except PlaywrightError:
+        _console.print("[dim]当前 URL: <无法读取>[/dim]")
+    try:
+        _console.print(f"[dim]页面标题: {page.title()}[/dim]")
+    except PlaywrightError:
+        _console.print("[dim]页面标题: <无法读取>[/dim]")
+
+
+def _get_first_result_href(page) -> str:
+    try:
+        first_title = page.query_selector(f"{SELECTOR_RESULT_ROWS} {SELECTOR_RESULT_TITLE}")
+        if not first_title:
+            return ""
+        return first_title.get_attribute("href") or ""
+    except PlaywrightError:
+        return ""
+
+
+def _get_next_page_marker(page) -> str:
+    try:
+        next_btn = page.query_selector(SELECTOR_NEXT_PAGE)
+        if not next_btn:
+            return ""
+        return next_btn.get_attribute("data-curpage") or ""
+    except PlaywrightError:
+        return ""
+
+
+def _wait_result_page_advanced(
+    page,
+    old_href: str,
+    old_next_page: str,
+    timeout: int = 15000,
+) -> bool:
+    """等待翻页完成。
+
+    CNKI 的“下一页”按钮 data-curpage 表示点击后将前往的页码，例如当前第 2 页时
+    data-curpage="3"。因此点击后不能等待它等于旧值，而应等待它变化；同时用
+    首行详情 href 变化作为另一个信号，避免单一 DOM 标记失效导致误判。
+    """
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() < deadline:
+        new_href = _get_first_result_href(page)
+        if old_href and new_href and new_href != old_href:
+            return True
+
+        new_next_page = _get_next_page_marker(page)
+        if old_next_page and new_next_page and new_next_page != old_next_page:
+            return True
+
+        time.sleep(0.25)
+    return False
+
+
 def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
-    """等待结果列表首行详情链接变为与 old_href 不同的值，用于确认 AJAX 翻页
-    真正完成。超时（首行未变 / 无首行）返回 False，不抛异常。"""
+    """等待结果列表首行详情链接变为与 old_href 不同的值。
+
+    保留为窄用途工具函数；翻页主流程使用 _wait_result_page_advanced 同时参考
+    首行 href 与 PageNext data-curpage。
+    """
     try:
         page.wait_for_function(
             "(oldHref) => {"
@@ -164,6 +226,11 @@ def _launch_browser(p):
                 ])
             else:
                 _console.print(f"[red][FATAL] 浏览器启动失败: {chromium_err}[/red]")
+                _console.print("[yellow]建议执行：playwright install chromium[/yellow]")
+                _console.print(
+                    "[dim]Linux 若提示缺少系统依赖，可再执行："
+                    "playwright install-deps chromium[/dim]"
+                )
             raise RuntimeError(f"浏览器启动彻底失败: {chromium_err}")
         except Exception:
             logging.exception("备用 Chromium 启动出现非预期异常")
@@ -273,6 +340,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
             timeout=TIMEOUT_SELECTOR,
         ).json_value()
     except PlaywrightTimeoutError:
+        _print_page_debug(page, f"关键词「{keyword}」结果加载超时")
         _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
         return results
 
@@ -315,6 +383,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         progress.console.print(
                             f"[red][x] 第 {current_page} 页等待超时（非验证），跳过本页。[/red]"
                         )
+                        _print_page_debug(page, f"第 {current_page} 页结果表格等待超时")
                         progress.advance(task)
                         continue
 
@@ -368,8 +437,21 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                 if current_page < max_pages:
                     next_btn = page.query_selector(SELECTOR_NEXT_PAGE)
                     if next_btn:
+                        old_first_href = _get_first_result_href(page)
+                        old_next_page = next_btn.get_attribute("data-curpage") or ""
                         next_btn.click(timeout=TIMEOUT_SELECTOR)
-                        time.sleep(random.uniform(4, 8))
+                        if not _wait_result_page_advanced(
+                            page,
+                            old_href=old_first_href,
+                            old_next_page=old_next_page,
+                            timeout=TIMEOUT_SELECTOR,
+                        ):
+                            progress.console.print(
+                                "[yellow][!] 翻页后未确认到结果变化，"
+                                "将继续尝试处理下一页。[/yellow]"
+                            )
+                            _print_page_debug(page, f"第 {current_page} 页翻页确认超时")
+                        time.sleep(random.uniform(1, 2))
                         if _handle_verify(page) == _VERIFY_TIMEOUT:
                             _stop_requested = True
                             break

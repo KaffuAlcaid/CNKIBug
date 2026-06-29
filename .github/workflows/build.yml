@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          uv pip install -r requirements.txt pyinstaller --system
+          uv pip install -r requirements.txt -r requirements-dev.txt pyinstaller --system
 
 
       - name: Smoke test (compile + import on Windows)
@@ -38,6 +38,11 @@ jobs:
         run: |
           python -m py_compile run.py cnkibug/*.py
           python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          pytest
 
       - name: Build with PyInstaller
         shell: bash
@@ -62,5 +67,4 @@ jobs:
         with:
           tag_name: ${{ steps.get_tag.outputs.TAG_NAME }}
           files: dist/CNKIBug.exe
-
 
