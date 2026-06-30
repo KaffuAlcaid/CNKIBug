@@ -2,7 +2,7 @@
 
 ==== 不可轻动的部分 ====
 中断处理（KeyboardInterrupt / PlaywrightError / BaseException）经 v0.1.5、
-v0.1.6 多版本迭代调校：_warmup / _scrape_keyword 与 scrape_cnki 通过
+多版本迭代调校：_warmup / _scrape_keyword 与 scrape_cnki 通过
 ScrapeSession.stop_requested 协作（取代旧的模块级全局 _stop_requested，
 避免跨调用状态串扰），finally 用 BaseException 兜底以免 Ctrl+C 逃出导致
 跳过保存。中断信号的读写关系与原版一致，未作任何逻辑修改。
@@ -32,24 +32,49 @@ from . import window
 from .ui import _console, print_browser_banner, print_verify_alert
 from .errors import _popup_error
 from .exporter import save_all
+from .scrape_logging import (
+    count_missing_fields,
+    keyword_log_ref,
+    missing_field_text,
+    new_scrape_stats,
+)
+from .scrape_report import (
+    STATUS_EMPTY,
+    STATUS_FAILED,
+    STATUS_STOPPED,
+    STATUS_SUCCESS,
+    KeywordResult,
+    TaskReport,
+    make_keyword_result,
+    print_task_report,
+)
+from .session_cache import discard_cookie_state, prepare_cookie_state, save_cookie_state
+from .settings import get_scraper_settings
+
+
+_logger = logging.getLogger("cnkibug.scraper")
+
 
 class ScrapeSession:
-    """单次 scrape_cnki 调用的可变状态容器。
-
-    取代旧的模块级全局 _stop_requested：原写法在多次/并发调用 scrape_cnki
-    时会共享同一个模块级变量，存在状态串扰风险。session.page 由调用方在
-    创建 Playwright Page 后绑定；session.stop_requested 是中断/验证超时
-    等场景下跨 _warmup、_scrape_keyword、scrape_cnki 三处共享的停止信号，
-    读写关系与原 _stop_requested 完全一致，只是改为挂在实例上。
-    """
 
     def __init__(self):
         self.page = None
         self.stop_requested = False
+        self.verify_timeout = False
+        self.stop_reason = ""
+
+    def request_stop(self, reason: str = "", verify_timeout: bool = False) -> None:
+        self.stop_requested = True
+        if reason:
+            self.stop_reason = reason
+        if verify_timeout:
+            self.verify_timeout = True
 
 
-_VERIFY_WAIT_TIMEOUT = 180
-_VERIFY_NOTICE_INTERVAL = 15
+_SETTINGS = get_scraper_settings()
+
+_VERIFY_WAIT_TIMEOUT = _SETTINGS.verify_wait_timeout_sec
+_VERIFY_NOTICE_INTERVAL = _SETTINGS.verify_notice_interval_sec
 _VERIFY_NONE = "none"
 _VERIFY_PASSED = "passed"
 _VERIFY_TIMEOUT = "timeout"
@@ -68,19 +93,32 @@ SELECTOR_DATE = "td.date"
 SELECTOR_NO_CONTENT = "#briefBox p.no-content"
 SELECTOR_NEXT_PAGE = "a#PageNext"
 
-TIMEOUT_GOTO = 30000
-TIMEOUT_LOAD = 20000
-TIMEOUT_SELECTOR = 15000
+TIMEOUT_GOTO = _SETTINGS.timeout_goto_ms
+TIMEOUT_LOAD = _SETTINGS.timeout_load_ms
+TIMEOUT_SELECTOR = _SETTINGS.timeout_selector_ms
 
 # 连续翻页未确认到页面变化达到此次数，则判定无法继续翻页，提前结束当前
 # 关键词——避免在「翻页失败但不报错」时空转剩余页数、却让进度条虚报满格。
-_MAX_ADVANCE_FAIL = 2
+_MAX_ADVANCE_FAIL = _SETTINGS.max_advance_fail
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
+
+
+def _keyword_ref(
+    keyword: str,
+    keyword_index: int | None = None,
+    keyword_total: int | None = None,
+) -> str:
+    return keyword_log_ref(
+        keyword,
+        keyword_index,
+        keyword_total,
+        include_keyword=_SETTINGS.log_keywords,
+    )
 
 
 def _handle_verify(page) -> str:
@@ -92,6 +130,7 @@ def _handle_verify(page) -> str:
     if "/verify" not in page.url:
         return _VERIFY_NONE
 
+    _logger.warning("检测到安全验证，等待用户手动完成")
     window.bring_to_front()
     print_verify_alert()
 
@@ -100,10 +139,12 @@ def _handle_verify(page) -> str:
     next_notice = float(_VERIFY_NOTICE_INTERVAL)
     while "/verify" in page.url:
         if waited >= _VERIFY_WAIT_TIMEOUT:
+            _logger.warning("安全验证等待超时: waited_sec=%d", int(waited))
             _console.print("[yellow][!] 等待安全验证超时，将保存已抓取的数据。[/yellow]")
             return _VERIFY_TIMEOUT
         if waited >= next_notice:
             remaining = int(_VERIFY_WAIT_TIMEOUT - waited)
+            _logger.info("仍在等待安全验证: waited_sec=%d remaining_sec=%d", int(waited), remaining)
             _console.print(
                 f"[dim][*] 仍在等待手动完成安全验证…（剩余约 {remaining} 秒，完成后自动继续）[/dim]"
             )
@@ -111,6 +152,7 @@ def _handle_verify(page) -> str:
         time.sleep(interval)
         waited += interval
     _console.print("[green][*] 验证已通过，继续抓取。[/green]")
+    _logger.info("安全验证已通过: waited_sec=%d", int(waited))
     return _VERIFY_PASSED
 
 
@@ -196,6 +238,7 @@ def _wait_first_row_changed(page, old_href: str, timeout: int = 15000) -> bool:
 
 def _launch_browser(p):
     try:
+        _logger.info("浏览器启动开始: channel=msedge")
         with _console.status(
             "[bold magenta]少女祈祷中...[/bold magenta]",
             spinner="bouncingBar",
@@ -206,10 +249,13 @@ def _launch_browser(p):
                 args=["--start-maximized"],
             )
         _console.print("[dim][*] 已启动 Microsoft Edge[/dim]")
+        _logger.info("浏览器启动成功: channel=msedge")
         return browser
     except PlaywrightError as edge_err:
+        _logger.warning("Edge 启动失败，尝试备用 Chromium: %s", edge_err)
         _console.print(f"[yellow][!] Edge 启动失败 ({edge_err})，尝试备用 Chromium...[/yellow]")
         try:
+            _logger.info("浏览器启动开始: channel=chromium")
             with _console.status(
                 "[bold magenta]少女祈祷中...[/bold magenta]",
                 spinner="bouncingBar",
@@ -219,8 +265,10 @@ def _launch_browser(p):
                     args=["--start-maximized"],
                 )
             _console.print("[dim][*] 已启动备用 Chromium 浏览器[/dim]")
+            _logger.info("浏览器启动成功: channel=chromium")
             return browser
         except PlaywrightError as chromium_err:
+            _logger.error("备用 Chromium 启动失败: %s", chromium_err)
             if sys.platform == "win32":
                 _popup_error([
                     "==============================================",
@@ -250,15 +298,16 @@ def _launch_browser(p):
                 )
             raise RuntimeError(f"浏览器启动彻底失败: {chromium_err}")
         except Exception:
-            logging.exception("备用 Chromium 启动出现非预期异常")
+            _logger.exception("备用 Chromium 启动出现非预期异常")
             raise
     except Exception:
-        logging.exception("Edge 启动出现非预期异常")
+        _logger.exception("Edge 启动出现非预期异常")
         raise
 
 
 def _warmup(session: "ScrapeSession") -> bool:
     page = session.page
+    _logger.info("预热开始")
     try:
         with _console.status(
             "[bold magenta]少女祈祷中...[/bold magenta]",
@@ -266,8 +315,10 @@ def _warmup(session: "ScrapeSession") -> bool:
         ):
             page.goto(CNKI_HOME_URL, timeout=TIMEOUT_GOTO)
             page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_LOAD)
+        _logger.info("预热首页加载完成")
         if _handle_verify(page) == _VERIFY_TIMEOUT:
-            session.stop_requested = True
+            session.request_stop("安全验证等待超时", verify_timeout=True)
+            _logger.warning("预热因安全验证超时停止")
         if not session.stop_requested:
             with _console.status(
                 "[bold magenta]少女祈祷中...[/bold magenta]",
@@ -279,23 +330,37 @@ def _warmup(session: "ScrapeSession") -> bool:
                 time.sleep(random.uniform(0.5, 1.5))
                 page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
                 page.wait_for_selector(SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR)
+            _logger.info("预热检索完成")
             if _handle_verify(page) == _VERIFY_TIMEOUT:
-                session.stop_requested = True
+                session.request_stop("安全验证等待超时", verify_timeout=True)
+                _logger.warning("预热检索后因安全验证超时停止")
         if session.stop_requested:
+            _logger.warning("预热停止")
             return False
         _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
+        _logger.info("预热成功")
         return True
     except (PlaywrightTimeoutError, PlaywrightError) as warmup_err:
+        _logger.warning("预热未完全成功，继续正式抓取: %s", warmup_err)
         _console.print(f"[yellow][!] 预热搜索未完全成功 ({warmup_err})，继续正式抓取。[/yellow]")
         return False
 
 
-def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> list:
+def _scrape_keyword(
+    session: "ScrapeSession",
+    keyword: str,
+    max_pages: int,
+    keyword_index: int | None = None,
+    keyword_total: int | None = None,
+) -> KeywordResult:
     page = session.page
     results = []
+    keyword_ref = _keyword_ref(keyword, keyword_index, keyword_total)
+    stats = new_scrape_stats()
     # 本关键词内跨页去重用：记录已收录文献的去重 key（详情 href 优先）。
     seen: set = set()
     _console.print(f"\n[bold][*][/bold] 目标关键词：[bold cyan]{keyword}[/bold cyan]")
+    _logger.info("关键词开始: %s max_pages=%d", keyword_ref, max_pages)
 
     try:
         with _console.status(
@@ -305,14 +370,23 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
             page.goto(CNKI_HOME_URL, timeout=TIMEOUT_GOTO)
             page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_LOAD)
     except PlaywrightTimeoutError:
+        _logger.warning("关键词首页预热超时，跳过: %s", keyword_ref)
         _console.print("[yellow][!] 预热请求超时，跳过该关键词。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "首页预热超时"
+        )
     except PlaywrightError as e:
+        _logger.warning("关键词首页预热失败，跳过: %s error=%s", keyword_ref, e)
         _console.print(f"[yellow][!] 预热请求失败: {e}，跳过该关键词。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "首页预热失败"
+        )
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        session.stop_requested = True
-        return results
+        session.request_stop("安全验证等待超时", verify_timeout=True)
+        _logger.warning("关键词因首页安全验证超时停止: %s", keyword_ref)
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_STOPPED, "安全验证等待超时"
+        )
 
     try:
         with _console.status(
@@ -322,14 +396,23 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
             page.goto(CNKI_SEARCH_URL, timeout=TIMEOUT_GOTO)
             page.wait_for_load_state("load", timeout=TIMEOUT_LOAD)
     except PlaywrightTimeoutError:
+        _logger.warning("检索页加载超时，跳过关键词: %s", keyword_ref)
         _console.print("[yellow][!] 检索页加载超时，跳过该关键词。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "检索页加载超时"
+        )
     except PlaywrightError as e:
+        _logger.warning("检索页加载失败，跳过关键词: %s error=%s", keyword_ref, e)
         _console.print(f"[yellow][!] 检索页加载失败: {e}，跳过该关键词。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "检索页加载失败"
+        )
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        session.stop_requested = True
-        return results
+        session.request_stop("安全验证等待超时", verify_timeout=True)
+        _logger.warning("关键词因检索页安全验证超时停止: %s", keyword_ref)
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_STOPPED, "安全验证等待超时"
+        )
 
     with _console.status(
         "[bold magenta]少女祈祷中...[/bold magenta]",
@@ -339,9 +422,13 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
         time.sleep(random.uniform(0.5, 1.5))
         page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
         time.sleep(random.uniform(1, 2))
+    _logger.info("关键词检索已提交: %s", keyword_ref)
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        session.stop_requested = True
-        return results
+        session.request_stop("安全验证等待超时", verify_timeout=True)
+        _logger.warning("关键词提交后因安全验证超时停止: %s", keyword_ref)
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_STOPPED, "安全验证等待超时"
+        )
 
     try:
         outcome = page.wait_for_function(
@@ -357,13 +444,19 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
             timeout=TIMEOUT_SELECTOR,
         ).json_value()
     except PlaywrightTimeoutError:
+        _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
         _print_page_debug(page, f"关键词「{keyword}」结果加载超时")
         _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "结果加载超时"
+        )
 
     if outcome == "no_content":
+        _logger.info("关键词无结果: %s", keyword_ref)
         _console.print(f"[yellow][!] 知网无「{keyword}」的检索结果，跳过。[/yellow]")
-        return results
+        return make_keyword_result(
+            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_EMPTY, "知网无结果"
+        )
 
     with Progress(
         SpinnerColumn(spinner_name="bouncingBar", style="bold magenta"),
@@ -384,6 +477,11 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
 
         for current_page in range(1, max_pages + 1):
             try:
+                page_records_start = len(results)
+                page_rows_seen = 0
+                page_duplicates = 0
+                page_skipped_no_title = 0
+                page_parse_errors = 0
                 progress.update(task, description=f"第 [bold]{current_page}[/bold] / {max_pages} 页")
                 try:
                     page.wait_for_selector(
@@ -396,9 +494,11 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                             SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
                         )
                     elif verify_status == _VERIFY_TIMEOUT:
-                        session.stop_requested = True
+                        session.request_stop("安全验证等待超时", verify_timeout=True)
+                        _logger.warning("结果页等待时安全验证超时: %s page=%d", keyword_ref, current_page)
                         break
                     else:
+                        _logger.warning("结果页表格等待超时，跳过本页: %s page=%d", keyword_ref, current_page)
                         progress.console.print(
                             f"[red][x] 第 {current_page} 页等待超时（非验证），跳过本页。[/red]"
                         )
@@ -408,14 +508,19 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
 
                 time.sleep(random.uniform(2, 5))
                 if _handle_verify(page) == _VERIFY_TIMEOUT:
-                    session.stop_requested = True
+                    session.request_stop("安全验证等待超时", verify_timeout=True)
+                    _logger.warning("结果页解析前安全验证超时: %s page=%d", keyword_ref, current_page)
                     break
 
                 rows = page.query_selector_all(SELECTOR_RESULT_ROWS)
+                page_rows_seen = len(rows)
+                stats["rows_seen"] += page_rows_seen
                 for row in rows:
                     try:
                         title_el = row.query_selector(SELECTOR_RESULT_TITLE)
                         if not title_el:
+                            page_skipped_no_title += 1
+                            stats["skipped_no_title"] += 1
                             continue
                         title = title_el.inner_text().strip()
 
@@ -441,15 +546,47 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
 
                         dedup_key = href if href else (title, source, date)
                         if dedup_key in seen:
+                            page_duplicates += 1
+                            stats["duplicates"] += 1
                             continue
                         seen.add(dedup_key)
 
-                        results.append([title, authors, source, date])
+                        record = [title, authors, source, date]
+                        count_missing_fields(record, stats)
+                        results.append(record)
+                        stats["records_added"] += 1
                         progress.console.print(f"  [green]→[/green] {title}")
                     except PlaywrightError:
+                        page_parse_errors += 1
+                        stats["row_parse_errors"] += 1
                         # 单行解析失败（元素 stale / 被回收等）只跳过这一行，
                         # 不再让整页/整个关键词中断。
                         continue
+
+                page_records_added = len(results) - page_records_start
+                if _SETTINGS.log_scraped_records:
+                    _logger.info(
+                        "结果页完成: %s page=%d rows=%d added=%d duplicates=%d "
+                        "skipped_no_title=%d parse_errors=%d total_records=%d missing_fields=(%s)",
+                        keyword_ref,
+                        current_page,
+                        page_rows_seen,
+                        page_records_added,
+                        page_duplicates,
+                        page_skipped_no_title,
+                        page_parse_errors,
+                        len(results),
+                        missing_field_text(stats),
+                    )
+                else:
+                    _logger.info(
+                        "结果页完成: %s page=%d rows=%d added=%d total_records=%d",
+                        keyword_ref,
+                        current_page,
+                        page_rows_seen,
+                        page_records_added,
+                        len(results),
+                    )
 
                 progress.advance(task)
 
@@ -468,6 +605,13 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                             consecutive_advance_fail = 0
                         else:
                             consecutive_advance_fail += 1
+                            _logger.warning(
+                                "翻页后未确认到结果变化: %s page=%d consecutive_fail=%d max_fail=%d",
+                                keyword_ref,
+                                current_page,
+                                consecutive_advance_fail,
+                                _MAX_ADVANCE_FAIL,
+                            )
                             progress.console.print(
                                 f"[yellow][!] 翻页后未确认到结果变化"
                                 f"（连续 {consecutive_advance_fail}/{_MAX_ADVANCE_FAIL} 次）。[/yellow]"
@@ -477,6 +621,12 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                             # 重复抓同一页（被 seen 去重）、白白拉满进度条。提前收尾，
                             # 如实告知用户真实有效页数。
                             if consecutive_advance_fail >= _MAX_ADVANCE_FAIL:
+                                _logger.warning(
+                                    "连续翻页失败，提前结束关键词: %s effective_pages=%d requested_pages=%d",
+                                    keyword_ref,
+                                    current_page,
+                                    max_pages,
+                                )
                                 progress.console.print(
                                     f"[red][x] 连续翻页失败，提前结束关键词「{keyword}」："
                                     f"实际有效页数约 {current_page} 页"
@@ -485,9 +635,11 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                                 break
                         time.sleep(random.uniform(1, 2))
                         if _handle_verify(page) == _VERIFY_TIMEOUT:
-                            session.stop_requested = True
+                            session.request_stop("安全验证等待超时", verify_timeout=True)
+                            _logger.warning("翻页后安全验证超时: %s page=%d", keyword_ref, current_page)
                             break
                     else:
+                        _logger.info("未找到下一页按钮，结束关键词: %s page=%d", keyword_ref, current_page)
                         progress.console.print(
                             "[yellow][!] 没找到下一页按钮，可能已到最后一页。[/yellow]"
                         )
@@ -497,11 +649,14 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                 # 只有浏览器/页面真正关闭才中止整个关键词；其它操作异常
                 # （翻页点击失败、临时 stale 等）只跳过本页继续。
                 if page.is_closed():
+                    session.request_stop("浏览器页面已关闭")
+                    _logger.warning("浏览器页面已关闭，结束关键词: %s page=%d", keyword_ref, current_page)
                     progress.console.print(
                         "\n[yellow][!] 检测到浏览器被手动关闭，"
                         "正在为您安全中止并保存已抓取的数据...[/yellow]"
                     )
                     break
+                _logger.warning("结果页处理异常，跳过本页: %s page=%d", keyword_ref, current_page, exc_info=True)
                 progress.console.print(
                     f"[yellow][!] 第 {current_page} 页处理异常，跳过本页继续。[/yellow]"
                 )
@@ -509,13 +664,44 @@ def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> l
                 continue
 
             except KeyboardInterrupt:
-                session.stop_requested = True
+                session.request_stop("用户中断")
+                _logger.warning("关键词抓取被用户中断: %s page=%d", keyword_ref, current_page)
                 break
 
     if session.stop_requested:
+        _logger.warning("关键词停止: %s total_records=%d", keyword_ref, len(results))
         _console.print("[yellow][!] 用户中断，正在保存已抓取的数据...[/yellow]")
+        return make_keyword_result(
+            keyword,
+            keyword_index or 0,
+            keyword_total or 0,
+            results,
+            STATUS_STOPPED,
+            session.stop_reason or "已停止",
+        )
+    else:
+        _logger.info(
+            "关键词完成: %s total_records=%d rows_seen=%d duplicates=%d "
+            "skipped_no_title=%d parse_errors=%d missing_fields=(%s)",
+            keyword_ref,
+            len(results),
+            stats["rows_seen"],
+            stats["duplicates"],
+            stats["skipped_no_title"],
+            stats["row_parse_errors"],
+            missing_field_text(stats),
+        )
 
-    return results
+    status = STATUS_SUCCESS if results else STATUS_FAILED
+    reason = "" if results else "未解析到有效记录"
+    return make_keyword_result(
+        keyword,
+        keyword_index or 0,
+        keyword_total or 0,
+        results,
+        status,
+        reason,
+    )
 
 
 def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
@@ -530,11 +716,18 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
         return
 
     all_results: dict[str, list] = {}
+    report = TaskReport(total_keywords=len(keywords))
     # 所有增量落盘与最终保存共用同一时间戳，保证写的是同一批文件（覆盖而非堆积）。
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 每次调用独立的会话状态，取代旧的模块级全局 _stop_requested。
     session = ScrapeSession()
+    _logger.info(
+        "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s",
+        len(keywords),
+        max_pages,
+        save_mode,
+    )
 
     with sync_playwright() as p:
         browser = None
@@ -543,16 +736,33 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
         browser = _launch_browser(p)
 
         try:
-            context = browser.new_context(
-                no_viewport=True,
-                user_agent=USER_AGENT
+            cookie_state_path = prepare_cookie_state(
+                _SETTINGS.session_cache_enabled,
+                _SETTINGS.session_cache_ttl_hours,
             )
+            context_options = {
+                "no_viewport": True,
+                "user_agent": USER_AGENT,
+            }
+            if cookie_state_path is not None:
+                context_options["storage_state"] = str(cookie_state_path)
+            try:
+                context = browser.new_context(**context_options)
+            except PlaywrightError:
+                if cookie_state_path is None:
+                    raise
+                discard_cookie_state(cookie_state_path, "创建浏览器上下文失败")
+                _logger.warning("cookies 会话缓存加载失败，已改用新会话", exc_info=True)
+                context_options.pop("storage_state", None)
+                context = browser.new_context(**context_options)
+            _logger.info("浏览器上下文已创建: no_viewport=True")
             page = context.new_page()
             session.page = page
 
             print_browser_banner()
 
             warmup_ok = _warmup(session)
+            _logger.info("预热结果: ok=%s stop_requested=%s", warmup_ok, session.stop_requested)
             # _warmup 返回 False 且未触发验证超时（未置 session.stop_requested），意味着
             # 预热阶段网络异常或知网不可达——此时继续抓取大概率只是每个关键词逐个
             # 超时空转。明确告知并让用户决定是否继续，非交互环境下默认中止。
@@ -565,7 +775,10 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 except EOFError:
                     cont = "n"
                 if cont != "y":
-                    session.stop_requested = True
+                    session.request_stop("预热失败后用户选择停止")
+                    _logger.warning("用户选择在预热失败后停止抓取")
+                else:
+                    _logger.info("用户选择在预热失败后继续抓取")
             time.sleep(random.uniform(2, 4))
 
             for idx, keyword in enumerate(keywords):
@@ -573,68 +786,164 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     break
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
+                    _logger.info(
+                        "关键词间隔等待: next_keyword_index=%d/%d wait_sec=%.1f",
+                        idx + 1,
+                        len(keywords),
+                        wait_sec,
+                    )
                     with _console.status(
                         f"[dim]少女祈祷中... 等待 {wait_sec:.1f} 秒[/dim]",
                         spinner="dots",
                     ):
                         time.sleep(wait_sec)
 
-                results = []
+                keyword_result = make_keyword_result(
+                    keyword,
+                    idx + 1,
+                    len(keywords),
+                    [],
+                    STATUS_FAILED,
+                    "未开始抓取",
+                )
                 try:
-                    results = _scrape_keyword(session, keyword, max_pages)
+                    keyword_result = _scrape_keyword(
+                        session,
+                        keyword,
+                        max_pages,
+                        idx + 1,
+                        len(keywords),
+                    )
                 except PlaywrightTimeoutError as e:
+                    _logger.warning(
+                        "关键词页面等待超时，跳过: %s error=%s",
+                        _keyword_ref(keyword, idx + 1, len(keywords)),
+                        e,
+                    )
                     _console.print(f"[red][x] 关键词「{keyword}」页面等待超时，跳过: {e}[/red]")
+                    keyword_result = make_keyword_result(
+                        keyword,
+                        idx + 1,
+                        len(keywords),
+                        [],
+                        STATUS_FAILED,
+                        "关键词页面等待超时",
+                    )
                 except PlaywrightError as e:
+                    _logger.warning(
+                        "浏览器连接异常，停止后续关键词: %s error=%s",
+                        _keyword_ref(keyword, idx + 1, len(keywords)),
+                        e,
+                    )
                     _console.print(f"[yellow][!] 浏览器连接已断开，停止后续关键词抓取: {e}[/yellow]")
-                    session.stop_requested = True
+                    session.request_stop("浏览器连接异常")
+                    keyword_result = make_keyword_result(
+                        keyword,
+                        idx + 1,
+                        len(keywords),
+                        [],
+                        STATUS_STOPPED,
+                        "浏览器连接异常",
+                    )
                 except KeyboardInterrupt:
-                    session.stop_requested = True
+                    session.request_stop("用户中断")
+                    _logger.warning(
+                        "用户中断关键词循环: %s",
+                        _keyword_ref(keyword, idx + 1, len(keywords)),
+                    )
+                    keyword_result = make_keyword_result(
+                        keyword,
+                        idx + 1,
+                        len(keywords),
+                        [],
+                        STATUS_STOPPED,
+                        "用户中断",
+                    )
 
-                all_results[keyword] = results
-
-                # 增量落盘：每抓完一个关键词立即写盘，避免后续关键词出错或
-                # 浏览器被关导致已抓数据丢失。静默写（announce=False），失败
-                # 仅记日志、不打断抓取——最终保存时会再写一次并给出完整反馈。
+                all_results[keyword] = keyword_result.records
+                report.add(keyword_result)
+                _logger.info(
+                    "关键词结果已记录: %s status=%s records=%d stop_requested=%s",
+                    _keyword_ref(keyword, idx + 1, len(keywords)),
+                    keyword_result.status,
+                    len(keyword_result.records),
+                    session.stop_requested,
+                )
                 try:
                     save_all(save_mode, keywords, all_results, ts, announce=False)
+                    _logger.info(
+                        "增量保存完成: completed_keywords=%d/%d total_records=%d",
+                        idx + 1,
+                        len(keywords),
+                        sum(len(items) for items in all_results.values()),
+                    )
                     if len(keywords) > 1:
                         _console.print(
                             f"[dim][*] 已落盘阶段性结果"
                             f"（已完成 {idx + 1}/{len(keywords)} 个关键词）[/dim]"
                         )
                 except BaseException: # noqa
-                    logging.exception("增量保存失败")
+                    _logger.exception("增量保存失败")
 
                 if session.stop_requested:
                     break
 
         except KeyboardInterrupt:
+            session.request_stop("用户中断")
+            _logger.warning("抓取任务被用户中断")
             _console.print(
                 "\n[bold yellow][!] 用户中断，正在保存已抓取的数据...[/bold yellow]"
             )
         except RuntimeError as e:
+            session.request_stop("运行时错误")
+            _logger.error("抓取任务运行时错误: %s", e)
             _console.print(f"[red][x] 运行时错误: {e}[/red]")
         finally:
+            report.stopped = session.stop_requested
+            report.verify_timeout = session.verify_timeout
             # 多轮抓取下每轮新建 context，显式关闭避免句柄/进程残留；再关 browser
             # 兜底（browser.close 会级联关闭其下 context，二者都 try 包裹不互相影响）。
             if context:
                 try:
+                    save_cookie_state(context, _SETTINGS.session_cache_enabled)
                     context.close()
+                    _logger.info("浏览器上下文已关闭")
                 except BaseException: # noqa
+                    _logger.warning("浏览器上下文关闭失败", exc_info=True)
                     pass
             if browser:
                 try:
                     browser.close()
+                    _logger.info("浏览器已关闭")
                 except BaseException: # noqa
+                    _logger.warning("浏览器关闭失败", exc_info=True)
                     pass
 
             # 最终保存 + 打印汇总。放在 finally 内、以 BaseException 兜底，
             # 确保正常完成、关键词中途出错、以及保存阶段的二次 Ctrl+C 都不丢数据。
             # 与增量落盘共用同一 ts，写的是同一批文件（幂等覆盖）。
             try:
+                _logger.info(
+                    "最终保存开始: keyword_count=%d total_records=%d stop_requested=%s",
+                    len(keywords),
+                    sum(len(items) for items in all_results.values()),
+                    session.stop_requested,
+                )
                 save_all(save_mode, keywords, all_results, ts, announce=True)
+                _logger.info(
+                    "抓取任务结束: completed_keywords=%d/%d total_records=%d stop_requested=%s",
+                    len(all_results),
+                    len(keywords),
+                    sum(len(items) for items in all_results.values()),
+                    session.stop_requested,
+                )
             except BaseException as save_err: # noqa
-                logging.exception("最终保存失败")
+                _logger.exception("最终保存失败")
                 _console.print("\n[bold red][x] 最终保存失败！[/bold red]")
                 _console.print(f"[red]错误信息：{save_err}[/red]")
                 _console.print("[yellow]请关闭已打开的同名 Excel 文件，并检查桌面或程序目录写入权限。[/yellow]")
+
+            try:
+                print_task_report(report, all_results)
+            except BaseException: # noqa
+                _logger.exception("任务摘要输出失败")

@@ -4,12 +4,10 @@ import logging
 
 from cnkibug.errors import _popup_error # noqa
 
-try:
-    from cnkibug.ui import _console # noqa
-    from cnkibug.environment import check_env
-    from cnkibug.scraper import scrape_cnki
-    from cnkibug.estimate import estimate_seconds, format_eta
-except ImportError as _err:
+APP_VERSION = "0.2.1"
+
+
+def _handle_import_error(_err: ImportError) -> None:
     if sys.platform == "win32":
         _popup_error([
             "==============================================",
@@ -29,6 +27,15 @@ except ImportError as _err:
         print(f"[FATAL] 缺少依赖: {_err}")
         print("请运行: pip install playwright openpyxl rich && playwright install chromium")
     sys.exit(1)
+
+
+try:
+    from cnkibug.ui import _console # noqa
+    from cnkibug.environment import check_env
+    from cnkibug.estimate import estimate_seconds, format_eta
+    from cnkibug.runtime import init_runtime
+except ImportError as _err:
+    _handle_import_error(_err)
 
 
 
@@ -76,12 +83,20 @@ def safe_input(prompt: str = "") -> str:
 
 
 def main():
+    app_logger = logging.getLogger("cnkibug.app")
+    init_runtime(app_version=APP_VERSION)
+    try:
+        from cnkibug.scraper import scrape_cnki
+    except ImportError as _err:
+        logging.getLogger("cnkibug.app").exception("程序核心组件加载失败")
+        _handle_import_error(_err)
+
     try:
         _clear_screen()
 
         _console.print("=" * 50)
         _console.print("  CNKI_Bug_dev  |  copyright by Kaffu_Alcaid")
-        _console.print("  Version 0.2.1")
+        _console.print(f"  Version {APP_VERSION}")
         _console.print("=" * 50)
         _console.print("  本软件用于抓取中国知网的论文标题\n")
         _console.print("按 Ctrl+C 可随时中断并保存已抓取数据")
@@ -180,11 +195,19 @@ def main():
                     f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
                     f"（实际受网络与知网反爬等待波动，仅供参考）[/dim]"
                 )
+                app_logger.info(
+                    "用户选择: save_mode=%s keyword_count=%d pages=%d",
+                    save_mode,
+                    len(keywords),
+                    target_pages,
+                )
 
                 scrape_cnki(keywords, max_pages=target_pages, save_mode=save_mode)
+                app_logger.info("本轮抓取完成")
 
                 again = safe_input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
+                    app_logger.info("用户选择开始新一轮抓取")
                     _clear_screen()
                     continue
                 else:
@@ -192,25 +215,27 @@ def main():
                     break
 
             except RuntimeError as e:
+                app_logger.warning("运行时错误: %s", e)
                 print(f"\n[!] {e}")
                 retry = safe_input("是否返回主菜单重试？(y/n): ").strip().lower()
                 if retry == "y":
+                    app_logger.info("用户选择返回主菜单重试")
                     continue
                 else:
                     break
 
             except Exception as ex:
-                logging.exception("程序遇到未知错误")
+                app_logger.exception("程序遇到未知错误")
                 print("\n" + "!" * 40)
                 print(f"  程序遇到未知错误: {ex}")
                 print("!" * 40)
                 break
 
     except KeyboardInterrupt:
+        app_logger.warning("用户中断，程序退出")
         print("\n[*] 用户中断，程序退出。")
     finally:
-        # 退出阻塞同样要兜底 EOF：stdin 已关闭时直接跳过，避免二次抛
-        # EOFError 把优雅退出变成崩溃。
+        app_logger.info("程序退出")
         try:
             input("\n按 [回车键 Enter] 退出程序...")
         except (EOFError, KeyboardInterrupt):

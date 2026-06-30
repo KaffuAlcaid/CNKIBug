@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+# CNKIBug runtime data (config/cache/log created next to run.py or exe)
+/CNKIBug/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

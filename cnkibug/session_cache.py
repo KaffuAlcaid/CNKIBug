@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import json
+import logging
+import time
+from pathlib import Path
+from typing import Any
+
+from .runtime import get_paths
+
+
+COOKIE_STATE_FILENAME = "cookies"
+
+_logger = logging.getLogger("cnkibug.session_cache")
+
+
+def get_cookie_state_path() -> Path | None:
+    paths = get_paths()
+    if paths is None:
+        return None
+    return paths.cache_dir / COOKIE_STATE_FILENAME
+
+
+def prepare_cookie_state(
+    enabled: bool,
+    ttl_hours: int,
+    now: float | None = None,
+) -> Path | None:
+    if not enabled:
+        _logger.info("cookies 会话缓存未启用")
+        return None
+
+    path = get_cookie_state_path()
+    if path is None:
+        _logger.warning("运行路径未初始化，跳过 cookies 会话缓存")
+        return None
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        _logger.info("未发现 cookies 会话缓存，将使用新会话: path=%s", path)
+        return None
+
+    current = time.time() if now is None else now
+    age_seconds = current - path.stat().st_mtime
+    ttl_seconds = ttl_hours * 3600
+    if age_seconds > ttl_seconds:
+        _delete_cookie_state(path, "已过期")
+        return None
+
+    if not _looks_like_storage_state(path):
+        _delete_cookie_state(path, "格式无效")
+        return None
+
+    _logger.info(
+        "已加载 cookies 会话缓存: path=%s age_hours=%.2f ttl_hours=%d",
+        path,
+        age_seconds / 3600,
+        ttl_hours,
+    )
+    return path
+
+
+def discard_cookie_state(path: Path, reason: str) -> None:
+    _delete_cookie_state(path, reason)
+
+
+def save_cookie_state(context: Any, enabled: bool) -> Path | None:
+    if not enabled:
+        return None
+
+    path = get_cookie_state_path()
+    if path is None:
+        _logger.warning("运行路径未初始化，跳过 cookies 会话缓存保存")
+        return None
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        context.storage_state(path=str(path))
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("cookies 会话缓存保存失败: path=%s error=%s", path, exc)
+        return None
+
+    _logger.info("cookies 会话缓存已保存: path=%s", path)
+    return path
+
+
+def _looks_like_storage_state(path: Path) -> bool:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("cookies 会话缓存读取失败: path=%s error=%s", path, exc)
+        return False
+    return isinstance(raw, dict) and "cookies" in raw and "origins" in raw
+
+
+def _delete_cookie_state(path: Path, reason: str) -> None:
+    try:
+        path.unlink(missing_ok=True)
+        _logger.info("cookies 会话缓存已删除: path=%s reason=%s", path, reason)
+    except OSError as exc:
+        _logger.warning("cookies 会话缓存删除失败: path=%s reason=%s error=%s", path, reason, exc)

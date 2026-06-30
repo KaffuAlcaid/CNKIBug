@@ -1,14 +1,17 @@
 import os
 import re
+import logging
 
 import openpyxl
 
 from .ui import _console
 from .environment import get_real_desktop_path
+from .runtime import get_config
 
 # 三种保存模式共用的表头，与 scraper 抓取的列顺序一一对应：
 # [论文标题, 作者, 来源, 发表日期]
 _HEADERS = ["论文标题", "作者", "来源", "发表日期"]
+_logger = logging.getLogger("cnkibug.exporter")
 
 
 def _sanitize_name(text: str) -> str:
@@ -33,6 +36,10 @@ def _get_output_path(filename: str) -> str:
 
 def _try_save_fallback(wb, filepath: str, save_err: OSError, announce: bool) -> str | None:
     fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
+    if _log_save_path_enabled():
+        _logger.warning("文件保存失败，尝试备用路径: target=%s fallback=%s error=%s", filepath, fallback, save_err)
+    else:
+        _logger.warning("文件保存失败，尝试备用路径: error=%s", save_err)
     if announce:
         _console.print(f"\n[red][x] 文件保存失败：{save_err}[/red]")
         _console.print(f"    尝试保存到程序目录：{fallback}")
@@ -40,13 +47,27 @@ def _try_save_fallback(wb, filepath: str, save_err: OSError, announce: bool) -> 
     try:
         wb.save(fallback)
         saved_path = os.path.abspath(fallback)
+        _log_save_success(saved_path, announce)
         if announce:
             _console.print(f"    已保存至备用路径：{saved_path}")
         return saved_path
     except OSError as fb_err:
+        _logger.error("备用路径保存失败: %s", fb_err)
         if announce:
             _console.print(f"[red][x] 备用路径也保存失败：{fb_err}[/red]")
         return None
+
+
+def _log_save_path_enabled() -> bool:
+    return bool(get_config().get("log_save_path", True))
+
+
+def _log_save_success(saved_path: str, announce: bool) -> None:
+    save_type = "final" if announce else "incremental"
+    if _log_save_path_enabled():
+        _logger.info("文件保存成功: type=%s path=%s", save_type, saved_path)
+    else:
+        _logger.info("文件保存成功: type=%s", save_type)
 
 
 def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
@@ -64,7 +85,9 @@ def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
                 wb.save(filepath)
         else:
             wb.save(filepath)
-        return os.path.abspath(filepath)
+        saved_path = os.path.abspath(filepath)
+        _log_save_success(saved_path, announce)
+        return saved_path
     except PermissionError as save_err:
         return _try_save_fallback(wb, filepath, save_err, announce)
     except OSError as save_err:
