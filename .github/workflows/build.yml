@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - name: Check-out repository
@@ -42,7 +44,7 @@ jobs:
       - name: Unit tests
         shell: bash
         run: |
-          pytest
+          python -m pytest tests
 
       - name: Build with PyInstaller
         shell: bash
@@ -67,4 +69,3 @@ jobs:
         with:
           tag_name: ${{ steps.get_tag.outputs.TAG_NAME }}
           files: dist/CNKIBug.exe
-
