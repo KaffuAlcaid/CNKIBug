@@ -11,9 +11,12 @@
 
 ##  功能特性
 
--  输入关键词，自动批量抓取知网论文标题，支持多关键词抓取模式
+-  输入关键词，自动批量抓取知网论文标题，支持单关键词和多关键词抓取模式
 -  结果自动导出为 `.xlsx` Excel 文件，保存至桌面，用户可以选择多关键词保存策略
 -  优先调用系统自带的 **Microsoft Edge**（Windows）；找不到时自动回退到 Playwright 的 Chromium，故 Linux / macOS 亦可运行
+-  首次运行会在程序旁创建 `CNKIBug/config.json`、`CNKIBug/cache/`、`CNKIBug/log/`，用于保存配置、会话缓存和日志
+-  支持复用 `CNKIBug/cache/cookies` 中的浏览器会话状态，默认 12 小时有效，可降低重复验证码概率
+-  抓取过程记录关键行为日志，结束时输出任务摘要、失败原因和字段完整性统计
 -  完善的错误提示，缺少环境时弹出友好的引导窗口
 -  抓取中途按 `Ctrl+C` 或关闭浏览器可安全中止，已抓取数据不丢失
 -  可打包为单文件 `.exe`，双击即用，无需 Python 环境
@@ -58,6 +61,8 @@
 2. 确保电脑已安装 **Microsoft Edge**（Win10/11 通常已预装）
 3. 双击 `CNKIBug.exe`，按提示输入关键词和页数即可
 4. 请注意：**一定要手动通过知网的滑块人机验证**
+
+首次运行后，程序会在 `CNKIBug.exe` 同目录创建 `CNKIBug/` 运行数据目录。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志。
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装。
 
@@ -115,6 +120,11 @@ CNKIBug/
 │   ├── environment.py      # 平台/环境检测（Edge 检查、桌面路径）
 │   ├── exporter.py         # 结果导出（xlsx、文件名清洗、三种保存模式）
 │   ├── estimate.py         # 抓取耗时估算
+│   ├── runtime.py          # 运行数据目录、config.json、文件日志初始化
+│   ├── settings.py         # 抓取配置映射
+│   ├── session_cache.py    # 浏览器会话缓存（cache/cookies）
+│   ├── scrape_logging.py   # 抓取日志辅助与字段缺失统计
+│   ├── scrape_report.py    # 任务摘要、失败报告与字段完整性统计
 │   ├── window.py           # 浏览器窗口置顶（主要用于验证码提示）
 │   └── scraper.py          # 核心抓取与多关键词编排
 ├── requirements.txt        # 依赖清单（playwright / openpyxl / rich）
@@ -142,6 +152,7 @@ CNKIBug/
 
 **0.2.x阶段：**
 
+- [x] 5.运行配置、日志与浏览器会话缓存: 程序旁创建 `CNKIBug/` 运行数据目录，支持 `config.json`、`cache/cookies` 和任务摘要日志
 - [ ] 6.复合关键词查询:高级检索页面?解析用户输入的逻辑符（空格、+、AND），自动在知网基础搜索框触发复合检索?(未定)
 
 **0.3.x阶段：**
