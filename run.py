@@ -62,6 +62,19 @@ def _clear_screen() -> None:
         sys.stdout.flush()
 
 
+def safe_input(prompt: str = "") -> str:
+    """统一输入入口：stdin 被关闭/重定向（EOF）时视为用户请求退出。
+
+    避免裸 input() 在管道、重定向、CI 等无交互输入场景下抛出未捕获的
+    EOFError 导致程序以红字堆栈崩溃。
+    """
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\n[*] 检测到输入流结束（EOF），程序退出。")
+        sys.exit(0)
+
+
 def main():
     try:
         _clear_screen()
@@ -83,7 +96,7 @@ def main():
                 print("  1 -> 单关键词模式")
                 print("  2 -> 多关键词模式")
                 while True:
-                    mode_input = input("请输入选项（1 或 2）: ").strip()
+                    mode_input = safe_input("请输入选项（1 或 2）: ").strip()
                     if mode_input in ("1", "2"):
                         break
                     print("[!] 无效选项，请重新输入。")
@@ -91,7 +104,7 @@ def main():
                 keywords = []
                 if mode_input == "1":
                     while True:
-                        word = input("\n请输入你要搜索的关键词: ").strip()
+                        word = safe_input("\n请输入你要搜索的关键词: ").strip()
                         if word:
                             break
                         print("[!] 关键词不能为空，请重新输入。")
@@ -104,7 +117,7 @@ def main():
                     print("在一个关键词框里用空格分隔多个词，例如：增材制造 316L 残余应力")
                     print("\n请依次输入关键词，每输入一个按回车确认；直接按回车结束输入：")
                     while True:
-                        word = input("  关键词: ").strip()
+                        word = safe_input("  关键词: ").strip()
                         if not word:
                             break
                         keywords.append(word)
@@ -129,7 +142,7 @@ def main():
                     print("  1 -> 分文件保存（每个关键词独立生成一个 Excel）")
                     print("  2 -> 单文件多 Sheet 保存（所有关键词汇总到一个 Excel）")
                     while True:
-                        save_input = input("请输入选项（1 或 2）: ").strip()
+                        save_input = safe_input("请输入选项（1 或 2）: ").strip()
                         if save_input == "1":
                             save_mode = "multi_split"
                             break
@@ -140,7 +153,7 @@ def main():
                 target_pages = 0
                 while True:
                     try:
-                        user_input_pages = input("\n请输入想抓取的总页数（纯数字，值不要太大）: ").strip()
+                        user_input_pages = safe_input("\n请输入想抓取的总页数（纯数字，值不要太大）: ").strip()
                         target_pages = int(user_input_pages)
                         if target_pages <= 0:
                             print("  [!] 页数必须大于 0，请重新输入。")
@@ -154,7 +167,7 @@ def main():
                             f"\n[yellow][!] 您输入的页数较大（{target_pages}页），"
                             f"预计将耗时较长，且容易触发知网反爬验证。[/yellow]"
                         )
-                        confirm = input("确定要继续吗？(y/n): ").strip().lower()
+                        confirm = safe_input("确定要继续吗？(y/n): ").strip().lower()
                         if confirm == "y":
                             break
                         else:
@@ -170,7 +183,7 @@ def main():
 
                 scrape_cnki(keywords, max_pages=target_pages, save_mode=save_mode)
 
-                again = input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
+                again = safe_input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
                 if again == "y":
                     _clear_screen()
                     continue
@@ -180,7 +193,7 @@ def main():
 
             except RuntimeError as e:
                 print(f"\n[!] {e}")
-                retry = input("是否返回主菜单重试？(y/n): ").strip().lower()
+                retry = safe_input("是否返回主菜单重试？(y/n): ").strip().lower()
                 if retry == "y":
                     continue
                 else:
@@ -196,7 +209,12 @@ def main():
     except KeyboardInterrupt:
         print("\n[*] 用户中断，程序退出。")
     finally:
-        input("\n按 [回车键 Enter] 退出程序...")
+        # 退出阻塞同样要兜底 EOF：stdin 已关闭时直接跳过，避免二次抛
+        # EOFError 把优雅退出变成崩溃。
+        try:
+            input("\n按 [回车键 Enter] 退出程序...")
+        except (EOFError, KeyboardInterrupt):
+            pass
 
 
 if __name__ == "__main__":

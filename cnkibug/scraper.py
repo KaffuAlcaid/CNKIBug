@@ -2,9 +2,10 @@
 
 ==== 不可轻动的部分 ====
 中断处理（KeyboardInterrupt / PlaywrightError / BaseException）经 v0.1.5、
-v0.1.6 多版本迭代调校：_scrape_keyword 与 scrape_cnki 通过模块级
-_stop_requested 协作，finally 用 BaseException 兜底以免 Ctrl+C 逃出导致
-跳过保存。搬入时保持原相对位置与读写关系，未作任何逻辑修改。
+v0.1.6 多版本迭代调校：_warmup / _scrape_keyword 与 scrape_cnki 通过
+ScrapeSession.stop_requested 协作（取代旧的模块级全局 _stop_requested，
+避免跨调用状态串扰），finally 用 BaseException 兜底以免 Ctrl+C 逃出导致
+跳过保存。中断信号的读写关系与原版一致，未作任何逻辑修改。
 """
 
 import sys
@@ -32,7 +33,19 @@ from .ui import _console, print_browser_banner, print_verify_alert
 from .errors import _popup_error
 from .exporter import save_all
 
-_stop_requested = False
+class ScrapeSession:
+    """单次 scrape_cnki 调用的可变状态容器。
+
+    取代旧的模块级全局 _stop_requested：原写法在多次/并发调用 scrape_cnki
+    时会共享同一个模块级变量，存在状态串扰风险。session.page 由调用方在
+    创建 Playwright Page 后绑定；session.stop_requested 是中断/验证超时
+    等场景下跨 _warmup、_scrape_keyword、scrape_cnki 三处共享的停止信号，
+    读写关系与原 _stop_requested 完全一致，只是改为挂在实例上。
+    """
+
+    def __init__(self):
+        self.page = None
+        self.stop_requested = False
 
 
 _VERIFY_WAIT_TIMEOUT = 180
@@ -58,6 +71,10 @@ SELECTOR_NEXT_PAGE = "a#PageNext"
 TIMEOUT_GOTO = 30000
 TIMEOUT_LOAD = 20000
 TIMEOUT_SELECTOR = 15000
+
+# 连续翻页未确认到页面变化达到此次数，则判定无法继续翻页，提前结束当前
+# 关键词——避免在「翻页失败但不报错」时空转剩余页数、却让进度条虚报满格。
+_MAX_ADVANCE_FAIL = 2
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -240,8 +257,8 @@ def _launch_browser(p):
         raise
 
 
-def _warmup(page) -> bool:
-    global _stop_requested
+def _warmup(session: "ScrapeSession") -> bool:
+    page = session.page
     try:
         with _console.status(
             "[bold magenta]少女祈祷中...[/bold magenta]",
@@ -250,8 +267,8 @@ def _warmup(page) -> bool:
             page.goto(CNKI_HOME_URL, timeout=TIMEOUT_GOTO)
             page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_LOAD)
         if _handle_verify(page) == _VERIFY_TIMEOUT:
-            _stop_requested = True
-        if not _stop_requested:
+            session.stop_requested = True
+        if not session.stop_requested:
             with _console.status(
                 "[bold magenta]少女祈祷中...[/bold magenta]",
                 spinner="bouncingBar",
@@ -263,8 +280,8 @@ def _warmup(page) -> bool:
                 page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
                 page.wait_for_selector(SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR)
             if _handle_verify(page) == _VERIFY_TIMEOUT:
-                _stop_requested = True
-        if _stop_requested:
+                session.stop_requested = True
+        if session.stop_requested:
             return False
         _console.print("[dim][*] 预热完成，开始正式抓取。[/dim]")
         return True
@@ -273,8 +290,8 @@ def _warmup(page) -> bool:
         return False
 
 
-def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
-    global _stop_requested
+def _scrape_keyword(session: "ScrapeSession", keyword: str, max_pages: int) -> list:
+    page = session.page
     results = []
     # 本关键词内跨页去重用：记录已收录文献的去重 key（详情 href 优先）。
     seen: set = set()
@@ -294,7 +311,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         _console.print(f"[yellow][!] 预热请求失败: {e}，跳过该关键词。[/yellow]")
         return results
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        _stop_requested = True
+        session.stop_requested = True
         return results
 
     try:
@@ -311,7 +328,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         _console.print(f"[yellow][!] 检索页加载失败: {e}，跳过该关键词。[/yellow]")
         return results
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        _stop_requested = True
+        session.stop_requested = True
         return results
 
     with _console.status(
@@ -323,7 +340,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
         page.click(SELECTOR_SEARCH_BUTTON, timeout=TIMEOUT_SELECTOR)
         time.sleep(random.uniform(1, 2))
     if _handle_verify(page) == _VERIFY_TIMEOUT:
-        _stop_requested = True
+        session.stop_requested = True
         return results
 
     try:
@@ -363,6 +380,8 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
             total=max_pages,
         )
 
+        consecutive_advance_fail = 0  # 连续翻页未确认次数
+
         for current_page in range(1, max_pages + 1):
             try:
                 progress.update(task, description=f"第 [bold]{current_page}[/bold] / {max_pages} 页")
@@ -377,7 +396,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                             SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
                         )
                     elif verify_status == _VERIFY_TIMEOUT:
-                        _stop_requested = True
+                        session.stop_requested = True
                         break
                     else:
                         progress.console.print(
@@ -389,7 +408,7 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
 
                 time.sleep(random.uniform(2, 5))
                 if _handle_verify(page) == _VERIFY_TIMEOUT:
-                    _stop_requested = True
+                    session.stop_requested = True
                     break
 
                 rows = page.query_selector_all(SELECTOR_RESULT_ROWS)
@@ -440,20 +459,33 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                         old_first_href = _get_first_result_href(page)
                         old_next_page = next_btn.get_attribute("data-curpage") or ""
                         next_btn.click(timeout=TIMEOUT_SELECTOR)
-                        if not _wait_result_page_advanced(
+                        if _wait_result_page_advanced(
                             page,
                             old_href=old_first_href,
                             old_next_page=old_next_page,
                             timeout=TIMEOUT_SELECTOR,
                         ):
+                            consecutive_advance_fail = 0
+                        else:
+                            consecutive_advance_fail += 1
                             progress.console.print(
-                                "[yellow][!] 翻页后未确认到结果变化，"
-                                "将继续尝试处理下一页。[/yellow]"
+                                f"[yellow][!] 翻页后未确认到结果变化"
+                                f"（连续 {consecutive_advance_fail}/{_MAX_ADVANCE_FAIL} 次）。[/yellow]"
                             )
                             _print_page_debug(page, f"第 {current_page} 页翻页确认超时")
+                            # 连续多次翻页都没动静，多半已到尾页或被限流，再翻只会
+                            # 重复抓同一页（被 seen 去重）、白白拉满进度条。提前收尾，
+                            # 如实告知用户真实有效页数。
+                            if consecutive_advance_fail >= _MAX_ADVANCE_FAIL:
+                                progress.console.print(
+                                    f"[red][x] 连续翻页失败，提前结束关键词「{keyword}」："
+                                    f"实际有效页数约 {current_page} 页"
+                                    f"（共请求 {max_pages} 页）。[/red]"
+                                )
+                                break
                         time.sleep(random.uniform(1, 2))
                         if _handle_verify(page) == _VERIFY_TIMEOUT:
-                            _stop_requested = True
+                            session.stop_requested = True
                             break
                     else:
                         progress.console.print(
@@ -477,10 +509,10 @@ def _scrape_keyword(page, keyword: str, max_pages: int) -> list:
                 continue
 
             except KeyboardInterrupt:
-                _stop_requested = True
+                session.stop_requested = True
                 break
 
-    if _stop_requested:
+    if session.stop_requested:
         _console.print("[yellow][!] 用户中断，正在保存已抓取的数据...[/yellow]")
 
     return results
@@ -501,11 +533,12 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
     # 所有增量落盘与最终保存共用同一时间戳，保证写的是同一批文件（覆盖而非堆积）。
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    global _stop_requested
-    _stop_requested = False
+    # 每次调用独立的会话状态，取代旧的模块级全局 _stop_requested。
+    session = ScrapeSession()
 
     with sync_playwright() as p:
         browser = None
+        context = None
 
         browser = _launch_browser(p)
 
@@ -515,14 +548,28 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 user_agent=USER_AGENT
             )
             page = context.new_page()
+            session.page = page
 
             print_browser_banner()
 
-            _warmup(page)
+            warmup_ok = _warmup(session)
+            # _warmup 返回 False 且未触发验证超时（未置 session.stop_requested），意味着
+            # 预热阶段网络异常或知网不可达——此时继续抓取大概率只是每个关键词逐个
+            # 超时空转。明确告知并让用户决定是否继续，非交互环境下默认中止。
+            if not warmup_ok and not session.stop_requested:
+                _console.print(
+                    "[yellow][!] 预热未成功，可能网络异常或知网暂时不可达。[/yellow]"
+                )
+                try:
+                    cont = input("是否仍尝试继续抓取？(y/n): ").strip().lower()
+                except EOFError:
+                    cont = "n"
+                if cont != "y":
+                    session.stop_requested = True
             time.sleep(random.uniform(2, 4))
 
             for idx, keyword in enumerate(keywords):
-                if _stop_requested:
+                if session.stop_requested:
                     break
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
@@ -534,14 +581,14 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
 
                 results = []
                 try:
-                    results = _scrape_keyword(page, keyword, max_pages)
+                    results = _scrape_keyword(session, keyword, max_pages)
                 except PlaywrightTimeoutError as e:
                     _console.print(f"[red][x] 关键词「{keyword}」页面等待超时，跳过: {e}[/red]")
                 except PlaywrightError as e:
                     _console.print(f"[yellow][!] 浏览器连接已断开，停止后续关键词抓取: {e}[/yellow]")
-                    _stop_requested = True
+                    session.stop_requested = True
                 except KeyboardInterrupt:
-                    _stop_requested = True
+                    session.stop_requested = True
 
                 all_results[keyword] = results
 
@@ -558,7 +605,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 except BaseException: # noqa
                     logging.exception("增量保存失败")
 
-                if _stop_requested:
+                if session.stop_requested:
                     break
 
         except KeyboardInterrupt:
@@ -568,6 +615,13 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
         except RuntimeError as e:
             _console.print(f"[red][x] 运行时错误: {e}[/red]")
         finally:
+            # 多轮抓取下每轮新建 context，显式关闭避免句柄/进程残留；再关 browser
+            # 兜底（browser.close 会级联关闭其下 context，二者都 try 包裹不互相影响）。
+            if context:
+                try:
+                    context.close()
+                except BaseException: # noqa
+                    pass
             if browser:
                 try:
                     browser.close()

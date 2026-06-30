@@ -12,7 +12,14 @@ _HEADERS = ["论文标题", "作者", "来源", "发表日期"]
 
 
 def _sanitize_name(text: str) -> str:
-    return re.sub(r'[\\/:*?"<>|\[\]]', '_', text)
+    """清洗为合法文件名/Sheet 名。
+
+    除替换非法字符外，再做：去首尾空白与点（避免纯点名 . / ..）、限长到 50 字
+    （防止文件名突破 Windows 260 路径上限导致写盘失败）、空结果给默认名。
+    """
+    cleaned = re.sub(r'[\\/:*?"<>|\[\]]', '_', text)
+    cleaned = cleaned.strip().strip('.').strip()[:50].rstrip('. ')
+    return cleaned or "untitled"
 
 
 def _get_output_path(filename: str) -> str:

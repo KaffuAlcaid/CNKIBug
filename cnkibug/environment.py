@@ -105,7 +105,8 @@ def check_env():
             playwright_path = _override
         if not os.path.exists(playwright_path):
             _console.print("\n[yellow][环境缺失] 请先在终端运行: playwright install chromium[/yellow]\n")
-            sys.exit(0)
+            # 缺少必需依赖属于失败退出，用非 0 退出码，便于脚本化/CI 正确判断。
+            sys.exit(1)
         return
 
     if not _edge_installed():
