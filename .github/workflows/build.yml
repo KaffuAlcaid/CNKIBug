@@ -39,12 +39,12 @@ jobs:
         shell: bash
         run: |
           python -m py_compile run.py cnkibug/*.py
-          python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+          python -c "import os, sys; sys.path.insert(0, os.getcwd()); import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
 
       - name: Unit tests
         shell: bash
         run: |
-          python -m pytest tests
+          python -c "import os, sys; sys.path.insert(0, os.getcwd()); import cnkibug; print('cnkibug=', cnkibug.__file__); import pytest; raise SystemExit(pytest.main(['tests']))"
 
       - name: Build with PyInstaller
         shell: bash
