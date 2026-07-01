@@ -11,8 +11,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - name: Check-out repository
@@ -32,19 +30,19 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          uv pip install -r requirements.txt -r requirements-dev.txt pyinstaller --system
+          uv pip install --system -e . -r requirements-dev.txt pyinstaller
 
 
       - name: Smoke test (compile + import on Windows)
         shell: bash
         run: |
           python -m py_compile run.py cnkibug/*.py
-          python -c "import os, sys; sys.path.insert(0, os.getcwd()); import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+          python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
 
       - name: Unit tests
         shell: bash
         run: |
-          python -c "import os, sys; sys.path.insert(0, os.getcwd()); import cnkibug; print('cnkibug=', cnkibug.__file__); import pytest; raise SystemExit(pytest.main(['tests']))"
+          python -m pytest tests
 
       - name: Build with PyInstaller
         shell: bash
