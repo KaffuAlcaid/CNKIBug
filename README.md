@@ -97,6 +97,59 @@ pyinstaller --onefile --console --name CNKIBug run.py
 
 ---
 
+## 配置文件说明
+
+首次运行后，程序会在运行目录旁创建：
+
+```text
+CNKIBug/config.json
+```
+
+修改配置后请重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
+
+```json
+{
+  "version": 1,
+  "timeout_goto_ms": 30000,
+  "timeout_load_ms": 20000,
+  "timeout_selector_ms": 15000,
+  "verify_wait_timeout_sec": 180,
+  "verify_notice_interval_sec": 15,
+  "max_advance_fail": 2,
+  "session_cache_enabled": true,
+  "session_cache_ttl_hours": 12,
+  "log_level": "INFO",
+  "log_save_path": true,
+  "log_keywords": false,
+  "log_scraped_records": false
+}
+```
+
+| 参数                           | 默认值      | 可填值                                | 作用                                   | 什么时候改                                     |
+|------------------------------|----------|------------------------------------|--------------------------------------|-------------------------------------------|
+| `version`                    | `1`      | 正整数                                | 配置文件版本号，程序内部用于识别配置结构                 | 不建议手动改                                    |
+| `timeout_goto_ms`            | `30000`  | 正整数，毫秒                             | 打开 CNKI 页面时最多等待多久                    | 网络慢、页面经常打不开时调大，例如 `60000`                 |
+| `timeout_load_ms`            | `20000`  | 正整数，毫秒                             | 等页面加载状态时最多等待多久                       | 页面能打开但加载慢时调大                              |
+| `timeout_selector_ms`        | `15000`  | 正整数，毫秒                             | 等搜索框、结果表格、下一页按钮等页面元素出现的时间            | 经常提示找不到结果或按钮时调大                           |
+| `verify_wait_timeout_sec`    | `180`    | 正整数，秒                              | 出现知网滑块/安全验证后，程序最多等你操作多久              | 来不及处理验证码时调大 例如 `300`                      |                     |
+| `verify_notice_interval_sec` | `15`     | 正整数，秒                              | 等验证码期间，每隔多久提醒一次                      | 想少刷提示就调大                                  |
+| `max_advance_fail`           | `2`      | 正整数                                | 翻页后连续几次没确认页面变化，就提前结束当前关键词            | 网络不稳可调大；不建议太大，避免重复空转                      |
+| `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用 `CNKIBug/cache/cookies` 中的浏览器会话 | 验证码太频繁建议保持开启；会话异常时可改为 `false` 或删除 cookies |
+| `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存多久后过期                     | 想更久复用会话可调大；想更频繁刷新会话可调小                    |
+| `log_level`                  | `"INFO"` | `"INFO"` / `"WARNING"` / `"ERROR"` | 日志详细程度                               | 反馈问题时用 `INFO`；只想少写日志可用 `WARNING`          |
+| `log_save_path`              | `true`   | `true` / `false`                   | 日志里是否记录导出文件路径                        | 不想在日志里暴露用户名或目录结构时改为 `false`               |
+| `log_keywords`               | `false`  | `true` / `false`                   | 日志里是否记录关键词                           | 需要排查具体关键词问题时临时开启                          |
+| `log_scraped_records`        | `false`  | `true` / `false`                   | 日志里是否记录更详细的抓取记录统计                    | 深度排查抓取异常时临时开启，不建议长期打开                     |
+
+### 常见调整
+
+- 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大。
+- 验证码来不及处理：把 `verify_wait_timeout_sec` 调大。
+- 会话状态异常：删除 `CNKIBug/cache/cookies`，或把 `session_cache_enabled` 改为 `false` 后重启。
+- 不想日志记录本机路径：把 `log_save_path` 改为 `false`。
+
+---
+
 ## 系统要求
 
 | 项目 | 要求 |
