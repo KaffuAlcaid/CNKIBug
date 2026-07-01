@@ -108,6 +108,12 @@ pyinstaller --onefile --console --name CNKIBug run.py
 
 ---
 
+## 不支持范围
+
+CNKIBug 仅面向中国知网（CNKI）基础检索结果标题抓取，不支持 Web of Science / SCI 数据库，也不支持通过校园 WebVPN、统一认证网关或代管账号密码的方式抓取机构资源。遇到这类访问环境时，请改用浏览器手动访问对应平台。
+
+---
+
 ##  项目结构
 
 ```
@@ -158,7 +164,7 @@ CNKIBug/
 **0.3.x阶段：**
 
 - [ ] 7.参考文献/引证文献抓取(耗时、技术难度大大增加)（考虑中）
-- [ ] 8.SCI (Web of Science) 与校园 WebVPN 支持(拒绝)
+- [ ] 8.SCI (Web of Science) 与校园 WebVPN 支持（不支持，见“不支持范围”）
 - [ ] 9.Web UI界面
 
 

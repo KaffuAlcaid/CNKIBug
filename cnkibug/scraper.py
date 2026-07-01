@@ -1,12 +1,5 @@
-"""核心抓取逻辑 —— 验证码检测、单关键词抓取、多关键词编排。
+#核心抓取逻辑 —— 验证码检测、单关键词抓取、多关键词编排
 
-==== 不可轻动的部分 ====
-中断处理（KeyboardInterrupt / PlaywrightError / BaseException）经 v0.1.5、
-多版本迭代调校：_warmup / _scrape_keyword 与 scrape_cnki 通过
-ScrapeSession.stop_requested 协作（取代旧的模块级全局 _stop_requested，
-避免跨调用状态串扰），finally 用 BaseException 兜底以免 Ctrl+C 逃出导致
-跳过保存。中断信号的读写关系与原版一致，未作任何逻辑修改。
-"""
 
 import sys
 import time

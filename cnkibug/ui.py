@@ -1,7 +1,5 @@
-"""共享的 rich Console 单例 —— 全程序唯一一个，跨模块统一 import 使用。
+"""共享的 rich Console 全程序唯一，跨模块统一 import 使用。
 
-注意：绝不要在其它模块里各自 new 一个 Console()。rich 的 status / Progress
-等 Live 上下文若分属不同 Console 实例会互相打架，必须共用此处这一个。
 """
 
 from rich.console import Console
@@ -11,11 +9,7 @@ _console = Console(highlight=False)
 
 
 def print_browser_banner():
-    """浏览器弹出时的高亮提醒横幅（置顶第一层 + 建议3 的引导文案合并于此）。
 
-    第一层置顶 = 把窗口最大化 + 在控制台醒目提示用户切过去；真正的 z-order
-    置顶（第二层 ctypes）后续单独在 window.py 实现，此处不涉及。
-    """
     _console.print(
         Panel.fit(
             "[bold yellow]浏览器已在新窗口打开[/bold yellow]\n"
@@ -35,7 +29,7 @@ def print_verify_alert():
             "[bold]检测到知网安全验证（滑块）[/bold]\n"
             "· 浏览器已尝试置顶，请切换过去完成滑块验证\n"
             "· 完成后[bold]无需操作本窗口[/bold]，程序会自动继续抓取",
-            title="[bold red]⚠ 需要手动验证[/bold red]",
+            title="[bold red]需要手动验证[/bold red]",
             border_style="red",
         )
     )

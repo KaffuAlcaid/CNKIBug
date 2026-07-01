@@ -168,7 +168,11 @@ def main():
                 target_pages = 0
                 while True:
                     try:
-                        user_input_pages = safe_input("\n请输入想抓取的总页数（纯数字，值不要太大）: ").strip()
+                        if len(keywords) > 1:
+                            pages_prompt = "\n请输入每个关键词想抓取的页数（纯数字，值不要太大）: "
+                        else:
+                            pages_prompt = "\n请输入想抓取的页数（纯数字，值不要太大）: "
+                        user_input_pages = safe_input(pages_prompt).strip()
                         target_pages = int(user_input_pages)
                         if target_pages <= 0:
                             print("  [!] 页数必须大于 0，请重新输入。")
@@ -177,10 +181,27 @@ def main():
                         print("  [!] 错误：页数请输入【纯数字】，例如 3 或 10，请重新输入。")
                         continue
 
-                    if target_pages > 20:
+                    total_requested_pages = target_pages * len(keywords)
+                    if len(keywords) > 1:
                         _console.print(
-                            f"\n[yellow][!] 您输入的页数较大（{target_pages}页），"
-                            f"预计将耗时较长，且容易触发知网反爬验证。[/yellow]"
+                            f"\n[dim][*] 本次共 {len(keywords)} 个关键词，"
+                            f"每个关键词 {target_pages} 页，"
+                            f"理论最多抓取 {total_requested_pages} 页。[/dim]"
+                        )
+
+                    if target_pages > 20 or total_requested_pages > 100:
+                        if len(keywords) > 1 and total_requested_pages > 100:
+                            warning_text = (
+                                f"本次理论抓取总页数较大（{total_requested_pages}页），"
+                                "预计将耗时较长，且容易触发知网反爬验证。"
+                            )
+                        else:
+                            warning_text = (
+                                f"您输入的页数较大（{target_pages}页），"
+                                "预计将耗时较长，且容易触发知网反爬验证。"
+                            )
+                        _console.print(
+                            f"\n[yellow][!] {warning_text}[/yellow]"
                         )
                         confirm = safe_input("确定要继续吗？(y/n): ").strip().lower()
                         if confirm == "y":

@@ -34,6 +34,7 @@ MANIFEST
 
 # CNKIBug runtime data (config/cache/log created next to run.py or exe)
 /CNKIBug/
+/.grill/
 
 # Installer logs
 pip-log.txt

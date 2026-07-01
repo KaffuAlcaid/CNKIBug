@@ -42,19 +42,21 @@ def _try_save_fallback(wb, filepath: str, save_err: OSError, announce: bool) -> 
         _logger.warning("文件保存失败，尝试备用路径: error=%s", save_err)
     if announce:
         _console.print(f"\n[red][x] 文件保存失败：{save_err}[/red]")
-        _console.print(f"    尝试保存到程序目录：{fallback}")
+        _console.print("    可能原因：桌面不可写、同名 Excel 正在打开，或目录权限不足。")
+        _console.print(f"    正在尝试保存到备用位置：{fallback}")
 
     try:
         wb.save(fallback)
         saved_path = os.path.abspath(fallback)
         _log_save_success(saved_path, announce)
         if announce:
-            _console.print(f"    已保存至备用路径：{saved_path}")
+            _console.print(f"    已保存至备用位置：{saved_path}")
         return saved_path
     except OSError as fb_err:
         _logger.error("备用路径保存失败: %s", fb_err)
         if announce:
             _console.print(f"[red][x] 备用路径也保存失败：{fb_err}[/red]")
+            _console.print("[yellow]请关闭已打开的同名 Excel 文件，并检查桌面或程序目录写入权限。[/yellow]")
         return None
 
 
