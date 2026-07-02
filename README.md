@@ -184,8 +184,16 @@ CNKIBug/
 │   ├── session_cache.py    # 浏览器会话缓存（cache/cookies）
 │   ├── scrape_logging.py   # 抓取日志辅助与字段缺失统计
 │   ├── scrape_report.py    # 任务摘要、失败报告与字段完整性统计
+│   ├── scrape_session.py   # 单轮抓取会话状态（中止、验证码超时、当前页面）
+│   ├── browser_runtime.py  # 浏览器启动、上下文创建与 Cookie 会话接入
+│   ├── cnki_verify.py      # 知网安全验证检测、等待与超时处理
+│   ├── cnki_pagination.py  # 结果页翻页标记、翻页完成确认
+│   ├── cnki_records.py     # 结果表格行解析、去重与字段缺失统计
+│   ├── cnki_debug.py       # 页面调试信息输出
+│   ├── keyword_scraper.py  # 单关键词抓取流程
+│   ├── scrape_workflow.py  # 多关键词任务编排、断点续抓、保存与摘要
 │   ├── window.py           # 浏览器窗口置顶（主要用于验证码提示）
-│   └── scraper.py          # 核心抓取与多关键词编排
+│   └── scraper.py          # 兼容入口（对外保留 scrape_cnki 导入路径）
 ├── requirements.txt        # 依赖清单（playwright / openpyxl / rich）
 ├── icon.ico                # 打包图标
 ├── version.txt             # exe 版本信息
