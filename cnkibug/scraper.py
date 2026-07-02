@@ -1,5 +1,5 @@
 #核心抓取逻辑 —— 验证码检测、单关键词抓取、多关键词编排
-
+#这个文件屎山太多了
 
 import sys
 import time
@@ -22,6 +22,15 @@ from rich.progress import (
 )
 
 from . import window
+from .cnki_page import (
+    SELECTOR_NO_CONTENT,
+    SELECTOR_RESULT_ROWS,
+    SELECTOR_RESULT_TITLE,
+    SELECTOR_SEARCH_BUTTON,
+    SELECTOR_SEARCH_INPUT,
+    query_all,
+    query_first,
+)
 from .ui import _console, print_browser_banner, print_verify_alert
 from .errors import _popup_error
 from .exporter import save_all
@@ -43,6 +52,13 @@ from .scrape_report import (
 )
 from .session_cache import discard_cookie_state, prepare_cookie_state, save_cookie_state
 from .settings import get_scraper_settings
+from .task_state import (
+    completed_results,
+    delete_last_task,
+    make_task_state,
+    mark_keyword_done,
+    save_last_task,
+)
 
 
 _logger = logging.getLogger("cnkibug.scraper")
@@ -75,16 +91,6 @@ _VERIFY_TIMEOUT = "timeout"
 CNKI_HOME_URL = "https://www.cnki.net/"
 CNKI_SEARCH_URL = "https://kns.cnki.net/kns8s/"
 WARMUP_KEYWORD = "焊接"
-
-SELECTOR_SEARCH_INPUT = "input.search-input"
-SELECTOR_SEARCH_BUTTON = "input.search-btn"
-SELECTOR_RESULT_ROWS = "table.result-table-list tbody tr"
-SELECTOR_RESULT_TITLE = "td.name a"
-SELECTOR_AUTHOR = "td.author a.KnowledgeNetLink"
-SELECTOR_SOURCE = "td.source"
-SELECTOR_DATE = "td.date"
-SELECTOR_NO_CONTENT = "#briefBox p.no-content"
-SELECTOR_NEXT_PAGE = "a#PageNext"
 
 TIMEOUT_GOTO = _SETTINGS.timeout_goto_ms
 TIMEOUT_LOAD = _SETTINGS.timeout_load_ms
@@ -164,7 +170,10 @@ def _print_page_debug(page, context: str) -> None:
 
 def _get_first_result_href(page) -> str:
     try:
-        first_title = page.query_selector(f"{SELECTOR_RESULT_ROWS} {SELECTOR_RESULT_TITLE}")
+        rows = query_all(page, "result_rows")
+        if not rows:
+            return ""
+        first_title = query_first(rows[0], "title")
         if not first_title:
             return ""
         return first_title.get_attribute("href") or ""
@@ -174,7 +183,7 @@ def _get_first_result_href(page) -> str:
 
 def _get_next_page_marker(page) -> str:
     try:
-        next_btn = page.query_selector(SELECTOR_NEXT_PAGE)
+        next_btn = query_first(page, "next_page")
         if not next_btn:
             return ""
         return next_btn.get_attribute("data-curpage") or ""
@@ -471,7 +480,7 @@ def _scrape_keyword(
         for current_page in range(1, max_pages + 1):
             try:
                 page_records_start = len(results)
-                page_rows_seen = 0
+                page_rows_seen = 0 # noqa
                 page_duplicates = 0
                 page_skipped_no_title = 0
                 page_parse_errors = 0
@@ -483,21 +492,33 @@ def _scrape_keyword(
                 except PlaywrightTimeoutError:
                     verify_status = _handle_verify(page)
                     if verify_status == _VERIFY_PASSED:
-                        page.wait_for_selector(
-                            SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
-                        )
+                        try:
+                            page.wait_for_selector(
+                                SELECTOR_RESULT_ROWS, timeout=TIMEOUT_SELECTOR
+                            )
+                        except PlaywrightTimeoutError:
+                            _logger.warning(
+                                "验证通过后结果页表格仍等待超时，提前结束关键词: %s page=%d",
+                                keyword_ref,
+                                current_page,
+                            )
+                            progress.console.print(
+                                f"[yellow][!] 第 {current_page} 页验证通过后仍加载超时，"
+                                "已停止当前关键词，避免重复抓取旧页面。[/yellow]"
+                            )
+                            break
                     elif verify_status == _VERIFY_TIMEOUT:
                         session.request_stop("安全验证等待超时", verify_timeout=True)
                         _logger.warning("结果页等待时安全验证超时: %s page=%d", keyword_ref, current_page)
                         break
                     else:
-                        _logger.warning("结果页表格等待超时，跳过本页: %s page=%d", keyword_ref, current_page)
+                        _logger.warning("结果页表格等待超时，提前结束关键词: %s page=%d", keyword_ref, current_page)
                         progress.console.print(
-                            f"[red][x] 第 {current_page} 页等待超时（非验证），跳过本页。[/red]"
+                            f"[yellow][!] 第 {current_page} 页等待超时（非验证），"
+                            "已停止当前关键词，避免重复抓取旧页面。[/yellow]"
                         )
                         _print_page_debug(page, f"第 {current_page} 页结果表格等待超时")
-                        progress.advance(task)
-                        continue
+                        break
 
                 time.sleep(random.uniform(2, 5))
                 if _handle_verify(page) == _VERIFY_TIMEOUT:
@@ -505,12 +526,12 @@ def _scrape_keyword(
                     _logger.warning("结果页解析前安全验证超时: %s page=%d", keyword_ref, current_page)
                     break
 
-                rows = page.query_selector_all(SELECTOR_RESULT_ROWS)
+                rows = query_all(page, "result_rows")
                 page_rows_seen = len(rows)
                 stats["rows_seen"] += page_rows_seen
                 for row in rows:
                     try:
-                        title_el = row.query_selector(SELECTOR_RESULT_TITLE)
+                        title_el = query_first(row, "title")
                         if not title_el:
                             page_skipped_no_title += 1
                             stats["skipped_no_title"] += 1
@@ -522,19 +543,19 @@ def _scrape_keyword(
                         href = title_el.get_attribute("href")
 
                         author_parts = []
-                        for a in row.query_selector_all(SELECTOR_AUTHOR):
+                        for a in query_all(row, "author"):
                             name = a.text_content().strip()
                             if name:
                                 author_parts.append(name)
                         authors = "; ".join(author_parts)
 
-                        source_el = row.query_selector(SELECTOR_SOURCE)
+                        source_el = query_first(row, "source")
                         source = (
                             " ".join(source_el.text_content().split())
                             if source_el else ""
                         )
 
-                        date_el = row.query_selector(SELECTOR_DATE)
+                        date_el = query_first(row, "date")
                         date = date_el.text_content().strip() if date_el else ""
 
                         dedup_key = href if href else (title, source, date)
@@ -584,7 +605,7 @@ def _scrape_keyword(
                 progress.advance(task)
 
                 if current_page < max_pages:
-                    next_btn = page.query_selector(SELECTOR_NEXT_PAGE)
+                    next_btn = query_first(page, "next_page")
                     if next_btn:
                         old_first_href = _get_first_result_href(page)
                         old_next_page = next_btn.get_attribute("data-curpage") or ""
@@ -649,12 +670,11 @@ def _scrape_keyword(
                         "正在为您安全中止并保存已抓取的数据...[/yellow]"
                     )
                     break
-                _logger.warning("结果页处理异常，跳过本页: %s page=%d", keyword_ref, current_page, exc_info=True)
+                _logger.warning("结果页处理异常，提前结束关键词: %s page=%d", keyword_ref, current_page, exc_info=True)
                 progress.console.print(
-                    f"[yellow][!] 第 {current_page} 页处理异常，跳过本页继续。[/yellow]"
+                    f"[yellow][!] 第 {current_page} 页处理异常，已停止当前关键词，避免重复抓取旧页面。[/yellow]"
                 )
-                progress.advance(task)
-                continue
+                break
 
             except KeyboardInterrupt:
                 session.request_stop("用户中断")
@@ -697,7 +717,12 @@ def _scrape_keyword(
     )
 
 
-def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
+def scrape_cnki(
+    keywords: list[str],
+    max_pages: int,
+    save_mode: str,
+    resume_state: dict | None = None,
+):
     """
     save_mode:
       'single'       -> 单关键词，保存为 cnki_titles_关键词.xlsx
@@ -708,10 +733,47 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
         _console.print("[yellow][!] 未提供任何关键词，已跳过抓取。[/yellow]")
         return
 
-    all_results: dict[str, list] = {}
+    if resume_state is not None:
+        keywords = list(resume_state["keywords"])
+        max_pages = int(resume_state["max_pages"])
+        save_mode = str(resume_state["save_mode"])
+        ts = str(resume_state["ts"])
+        task_state = resume_state
+        all_results: dict[str, list] = completed_results(task_state)
+        _console.print(
+            f"[dim][*] 已载入上次未完成任务："
+            f"共 {len(keywords)} 个关键词，已完成 {len(all_results)} 个。[/dim]"
+        )
+        _logger.info(
+            "恢复未完成任务: keyword_count=%d completed=%d max_pages=%d save_mode=%s ts=%s",
+            len(keywords),
+            len(all_results),
+            max_pages,
+            save_mode,
+            ts,
+        )
+    else:
+        all_results = {}
+        # 所有增量落盘与最终保存共用同一时间戳，保证写的是同一批文件（覆盖而非堆积）。
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        task_state = make_task_state(keywords, max_pages, save_mode, ts)
+        save_last_task(task_state)
+
     report = TaskReport(total_keywords=len(keywords))
-    # 所有增量落盘与最终保存共用同一时间戳，保证写的是同一批文件（覆盖而非堆积）。
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    completed_state = task_state.get("completed", {})
+    if isinstance(completed_state, dict):
+        for idx, keyword in enumerate(keywords):
+            item = completed_state.get(keyword)
+            if not isinstance(item, dict):
+                continue
+            report.add(make_keyword_result(
+                keyword,
+                idx + 1,
+                len(keywords),
+                item.get("records", []),
+                str(item.get("status", STATUS_FAILED)),
+                str(item.get("reason", "")),
+            ))
 
     # 每次调用独立的会话状态，取代旧的模块级全局 _stop_requested。
     session = ScrapeSession()
@@ -723,7 +785,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
     )
 
     with sync_playwright() as p:
-        browser = None
+        browser = None # noqa
         context = None
 
         browser = _launch_browser(p)
@@ -777,6 +839,12 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             for idx, keyword in enumerate(keywords):
                 if session.stop_requested:
                     break
+                if keyword in all_results:
+                    _logger.info(
+                        "关键词已在 last_task 中完成，跳过: %s",
+                        _keyword_ref(keyword, idx + 1, len(keywords)),
+                    )
+                    continue
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
                     _logger.info(
@@ -791,7 +859,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     ):
                         time.sleep(wait_sec)
 
-                keyword_result = make_keyword_result(
+                keyword_result = make_keyword_result( # noqa
                     keyword,
                     idx + 1,
                     len(keywords),
@@ -855,6 +923,8 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
 
                 all_results[keyword] = keyword_result.records
                 report.add(keyword_result)
+                mark_keyword_done(task_state, keyword_result)
+                save_last_task(task_state)
                 _logger.info(
                     "关键词结果已记录: %s status=%s records=%d stop_requested=%s",
                     _keyword_ref(keyword, idx + 1, len(keywords)),
@@ -863,14 +933,22 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     session.stop_requested,
                 )
                 try:
-                    save_all(save_mode, keywords, all_results, ts, announce=False)
+                    save_result = save_all(save_mode, keywords, all_results, ts, announce=False)
                     _logger.info(
-                        "增量保存完成: completed_keywords=%d/%d total_records=%d",
+                        "增量保存完成: completed_keywords=%d/%d total_records=%d attempted=%d saved=%d failed=%d",
                         idx + 1,
                         len(keywords),
                         sum(len(items) for items in all_results.values()),
+                        save_result.attempted,
+                        len(save_result.saved_paths),
+                        save_result.failed,
                     )
-                    if len(keywords) > 1:
+                    if save_result.failed:
+                        _console.print(
+                            f"[yellow][!] 阶段性保存有 {save_result.failed} 个文件未成功写入，"
+                            "最终保存时会再次尝试。[/yellow]"
+                        )
+                    elif len(keywords) > 1 and save_result.saved_paths:
                         _console.print(
                             f"[dim][*] 已落盘阶段性结果"
                             f"（已完成 {idx + 1}/{len(keywords)} 个关键词）[/dim]"
@@ -899,7 +977,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             if context:
                 try:
                     save_cookie_state(context, _SETTINGS.session_cache_enabled)
-                    context.close()
+                    context.close() # noqa
                     _logger.info("浏览器上下文已关闭")
                 except BaseException: # noqa
                     _logger.warning("浏览器上下文关闭失败", exc_info=True)
@@ -915,6 +993,7 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
             # 最终保存 + 打印汇总。放在 finally 内、以 BaseException 兜底，
             # 确保正常完成、关键词中途出错、以及保存阶段的二次 Ctrl+C 都不丢数据。
             # 与增量落盘共用同一 ts，写的是同一批文件（幂等覆盖）。
+            final_save_failed = False
             try:
                 _logger.info(
                     "最终保存开始: keyword_count=%d total_records=%d stop_requested=%s",
@@ -922,15 +1001,25 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                     sum(len(items) for items in all_results.values()),
                     session.stop_requested,
                 )
-                save_all(save_mode, keywords, all_results, ts, announce=True)
+                save_result = save_all(save_mode, keywords, all_results, ts, announce=True)
+                if save_result.failed:
+                    final_save_failed = True
+                    _console.print(
+                        f"[bold red][x] 本轮有 {save_result.failed} 个文件未能成功保存。[/bold red]"
+                    )
+                elif save_result.saved_paths:
+                    _logger.info("最终保存成功: saved_files=%d", len(save_result.saved_paths))
                 _logger.info(
-                    "抓取任务结束: completed_keywords=%d/%d total_records=%d stop_requested=%s",
+                    "抓取任务结束: completed_keywords=%d/%d total_records=%d stop_requested=%s save_attempted=%d save_failed=%d",
                     len(all_results),
                     len(keywords),
                     sum(len(items) for items in all_results.values()),
                     session.stop_requested,
+                    save_result.attempted,
+                    save_result.failed,
                 )
             except BaseException as save_err: # noqa
+                final_save_failed = True
                 _logger.exception("最终保存失败")
                 _console.print("\n[bold red][x] 最终保存失败！[/bold red]")
                 _console.print(f"[red]错误信息：{save_err}[/red]")
@@ -940,3 +1029,8 @@ def scrape_cnki(keywords: list[str], max_pages: int, save_mode: str):
                 print_task_report(report, all_results)
             except BaseException: # noqa
                 _logger.exception("任务摘要输出失败")
+
+            if not session.stop_requested and report.completed_keywords >= len(keywords) and not final_save_failed:
+                delete_last_task()
+            else:
+                save_last_task(task_state)

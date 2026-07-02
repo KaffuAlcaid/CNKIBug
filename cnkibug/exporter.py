@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from dataclasses import dataclass, field
 
 import openpyxl
 
@@ -12,6 +13,20 @@ from .runtime import get_config
 # [论文标题, 作者, 来源, 发表日期]
 _HEADERS = ["论文标题", "作者", "来源", "发表日期"]
 _logger = logging.getLogger("cnkibug.exporter")
+
+
+@dataclass
+class SaveResult:
+    attempted: int = 0
+    saved_paths: list[str] = field(default_factory=list)
+    failed: int = 0
+
+    def record(self, saved_path: str | None) -> None:
+        self.attempted += 1
+        if saved_path:
+            self.saved_paths.append(saved_path)
+        else:
+            self.failed += 1
 
 
 def _sanitize_name(text: str) -> str:
@@ -109,25 +124,29 @@ def _build_single_sheet_workbook(results: list):
 
 
 def _save_single(keyword: str, results: list, ts: str, announce: bool):
+    save_result = SaveResult()
     if not results:
         if announce:
             _console.print("[yellow][!] 未抓取到任何数据，不生成文件。[/yellow]")
-        return
+        return save_result
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
     wb = _build_single_sheet_workbook(results)
 
     saved_path = _try_save_workbook(wb, filepath, announce)
+    save_result.record(saved_path)
     if saved_path and announce:
         _console.print("\n" + "═" * 50)
         _console.print(f"[bold green][*] 共抓取 {len(results)} 条数据。[/bold green]")
         _console.print(f"[*] 文件已保存至：")
         _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
         _console.print("═" * 50 + "\n")
+    return save_result
 
 
 def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
+    save_result = SaveResult()
     total = 0
     saved_files = []
     for keyword, results in all_results.items():
@@ -140,6 +159,7 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
         wb = _build_single_sheet_workbook(results)
         saved_path = _try_save_workbook(wb, filepath, announce)
+        save_result.record(saved_path)
         if saved_path:
             saved_files.append((keyword, len(results), saved_path))
             total += len(results)
@@ -152,13 +172,15 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
         for kw, cnt, path in saved_files:
             _console.print(f"  · [cyan][{kw}][/cyan] {cnt} 条  ->  {path}")
         _console.print("═" * 50 + "\n")
+    return save_result
 
 
 def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
+    save_result = SaveResult()
     if not any(len(v) > 0 for v in all_results.values()):
         if announce:
             _console.print("[yellow][!] 所有关键词均未抓取到数据，不生成文件。[/yellow]")
-        return
+        return save_result
 
     filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.xlsx")
     wb = openpyxl.Workbook()
@@ -189,6 +211,7 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
         total += len(results)
 
     saved_path = _try_save_workbook(wb, filepath, announce)
+    save_result.record(saved_path)
     if saved_path and announce:
         _console.print("\n" + "═" * 50)
         _console.print(f"[bold green][*] 全部抓取完毕，共 {total} 条数据。[/bold green]")
@@ -199,6 +222,7 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
                 continue
             _console.print(f"  · Sheet [cyan][{kw}][/cyan]：{len(results)} 条")
         _console.print("═" * 50 + "\n")
+    return save_result
 
 
 def save_all(
@@ -207,7 +231,7 @@ def save_all(
     all_results: dict[str, list],
     ts: str,
     announce: bool,
-):
+) -> SaveResult:
     """统一保存入口（幂等）。
 
     - 增量调用（announce=False）：静默写盘，用于每抓完一个关键词的阶段性落盘。
@@ -215,11 +239,14 @@ def save_all(
 
     文件名以传入的 ts 固定，增量与最终写同一文件、覆盖而非堆积，从而保证
     中途任何异常（含保存阶段的二次 Ctrl+C）都不会丢失已抓取的数据。
+
+    claude opus4.8生成的神秘注释
     """
     if save_mode == "single":
         if keywords:
-            _save_single(keywords[0], all_results.get(keywords[0], []), ts, announce)
+            return _save_single(keywords[0], all_results.get(keywords[0], []), ts, announce)
     elif save_mode == "multi_split":
-        _save_multi_split(all_results, ts, announce)
+        return _save_multi_split(all_results, ts, announce)
     elif save_mode == "multi_merge":
-        _save_multi_merge(all_results, ts, announce)
+        return _save_multi_merge(all_results, ts, announce)
+    return SaveResult()

@@ -84,9 +84,30 @@ def safe_input(prompt: str = "") -> str:
 
 def main():
     app_logger = logging.getLogger("cnkibug.app")
-    init_runtime(app_version=APP_VERSION)
+    try:
+        runtime_state = init_runtime(app_version=APP_VERSION)
+    except OSError as err:
+        if sys.platform == "win32":
+            _popup_error([
+                "==============================================",
+                " [致命错误] 无法创建运行数据目录！",
+                "----------------------------------------------",
+                f" 错误信息: {err}",
+                "",
+                " 请检查程序所在目录或用户数据目录的写入权限。",
+                "==============================================",
+            ])
+        else:
+            print(f"[FATAL] 无法创建运行数据目录: {err}")
+        sys.exit(1)
     try:
         from cnkibug.scraper import scrape_cnki
+        from cnkibug.task_state import (
+            delete_last_task,
+            describe_task,
+            get_last_task_path,
+            load_last_task,
+        )
     except ImportError as _err:
         logging.getLogger("cnkibug.app").exception("程序核心组件加载失败")
         _handle_import_error(_err)
@@ -103,10 +124,51 @@ def main():
         _console.print("それは，幾千の夜を舞う、さくらと少女たちの物語ーーー")
         _console.print("祈祷着今后的你的人生，永远都有幸福的“魔法”相伴")
 
+        if any(level in {"WARNING", "ERROR"} for level, _ in runtime_state.events):
+            _console.print(
+                f"[yellow][配置提示] 配置文件或运行目录已自动调整，详情见日志：{runtime_state.log_path}[/yellow]"
+            )
+
         check_env()
 
         while True:
             try:
+                resume_state = load_last_task()
+                last_task_path = get_last_task_path()
+                if resume_state is None and last_task_path and last_task_path.exists():
+                    _console.print("[yellow][!] 检测到损坏的未完成任务缓存，已删除。[/yellow]")
+                    delete_last_task()
+                elif resume_state is not None:
+                    _console.print("\n[yellow][!] 检测到上次未完成的抓取任务。[/yellow]")
+                    _console.print(f"    {describe_task(resume_state)}")
+                    print("  1 -> 继续上次任务")
+                    print("  0 -> 删除缓存并开始新任务")
+                    while True:
+                        resume_input = safe_input("请输入选项（1 或 0）: ").strip()
+                        if resume_input in ("1", "0"):
+                            break
+                        print("[!] 无效选项，请重新输入。")
+                    if resume_input == "1":
+                        app_logger.info("用户选择继续未完成任务")
+                        scrape_cnki(
+                            list(resume_state["keywords"]),
+                            int(resume_state["max_pages"]),
+                            str(resume_state["save_mode"]),
+                            resume_state=resume_state,
+                        )
+                        app_logger.info("恢复任务结束")
+
+                        again = safe_input("\n[*] 本轮抓取已结束！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()
+                        if again == "y":
+                            app_logger.info("用户选择开始新一轮抓取")
+                            _clear_screen()
+                            continue
+                        _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
+                        break
+
+                    delete_last_task()
+                    app_logger.info("用户选择删除未完成任务缓存")
+
                 print("\n请选择抓取模式：")
                 print("  1 -> 单关键词模式")
                 print("  2 -> 多关键词模式")

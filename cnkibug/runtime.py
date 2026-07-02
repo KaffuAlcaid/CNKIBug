@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ class RuntimeState:
     paths: RuntimePaths
     config: dict[str, Any]
     log_path: Path
+    events: list[tuple[str, str]]
 
 
 _CONFIG: dict[str, Any] = DEFAULT_CONFIG.copy()
@@ -53,6 +55,20 @@ def get_program_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
+
+
+def get_user_data_base_dir() -> Path:
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data)
+        return Path.home() / "AppData" / "Local"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home)
+    return Path.home() / ".local" / "share"
 
 
 def get_runtime_paths(base_dir: str | Path | None = None) -> RuntimePaths:
@@ -86,7 +102,21 @@ def init_runtime(
     configure_logging: bool = True,
 ) -> RuntimeState:
     paths = get_runtime_paths(base_dir)
-    config, events = load_or_create_config(paths)
+    try:
+        config, events = load_or_create_config(paths)
+    except OSError as exc:
+        if base_dir is not None:
+            raise
+        failed_paths = paths
+        paths = get_runtime_paths(get_user_data_base_dir())
+        config, events = load_or_create_config(paths)
+        events.insert(
+            0,
+            (
+                "WARNING",
+                f"程序目录不可写，已改用用户数据目录: {paths.data_dir} (原目录: {failed_paths.data_dir}, 错误: {exc})",
+            ),
+        )
     log_path = build_log_path(paths)
 
     global _CONFIG, _PATHS
@@ -107,7 +137,7 @@ def init_runtime(
         logger.info("程序启动%s", version_part)
         logger.info("运行数据目录: %s", paths.data_dir)
 
-    return RuntimeState(paths=paths, config=config.copy(), log_path=log_path)
+    return RuntimeState(paths=paths, config=config.copy(), log_path=log_path, events=list(events))
 
 
 def load_or_create_config(paths: RuntimePaths) -> tuple[dict[str, Any], list[tuple[str, str]]]:

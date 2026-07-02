@@ -62,10 +62,13 @@ def _load(path):
 def test_save_all_single_writes_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     data = [["t1", "a1", "s1", "2026-01-01"], ["t2", "a2", "s2", "2026-02-02"]]
-    save_all("single", ["焊接"], {"焊接": data}, "TS", announce=False)
+    result = save_all("single", ["焊接"], {"焊接": data}, "TS", announce=False)
 
     files = list(tmp_path.glob("cnki_titles_焊接_TS.xlsx"))
     assert len(files) == 1
+    assert result.attempted == 1
+    assert result.failed == 0
+    assert result.saved_paths == [str(files[0].resolve())]
     ws = _load(files[0]).active
     assert [c.value for c in ws[1]] == ["论文标题", "作者", "来源", "发表日期"]
     assert ws.max_row == 3  # 表头 + 2 行数据
@@ -73,7 +76,10 @@ def test_save_all_single_writes_file(monkeypatch, tmp_path):
 
 def test_save_all_single_no_data_skips_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
-    save_all("single", ["焊接"], {"焊接": []}, "TS", announce=False)
+    result = save_all("single", ["焊接"], {"焊接": []}, "TS", announce=False)
+    assert result.attempted == 0
+    assert result.failed == 0
+    assert result.saved_paths == []
     assert list(tmp_path.glob("*.xlsx")) == []
 
 
@@ -161,3 +167,21 @@ def test_try_save_workbook_falls_back_to_cwd_on_permission_error(monkeypatch, tm
     assert os.path.basename(saved) == "out.xlsx"
     assert os.path.dirname(os.path.abspath(saved)) == str(tmp_path)
     assert os.path.exists(saved)
+
+
+def test_save_all_reports_failed_save(monkeypatch, tmp_path):
+    _patch_desktop(monkeypatch, tmp_path)
+    monkeypatch.setattr(exporter, "_try_save_workbook", lambda wb, filepath, announce: None)
+
+    result = save_all(
+        "single",
+        ["焊接"],
+        {"焊接": [["t", "a", "s", "d"]]},
+        "TS",
+        announce=False,
+    )
+
+    assert result.attempted == 1
+    assert result.failed == 1
+    assert result.saved_paths == []
+    assert list(tmp_path.glob("*.xlsx")) == []
