@@ -17,12 +17,12 @@ VSVersionInfo(
         '080404b0',
         [StringStruct('CompanyName', 'Kaffu_Alcaid'),
         StringStruct('FileDescription', '中国知网论文标题爬虫工具'),
-        StringStruct('FileVersion', '0.2.1'),
+        StringStruct('FileVersion', '0.2.2'),
         StringStruct('InternalName', 'CNKIBug'),
         StringStruct('LegalCopyright', '©2026 Kaffu_Alcaid. All rights reserved.'),
         StringStruct('OriginalFilename', 'CNKIBug.exe'),
         StringStruct('ProductName', 'CNKI_Bug'),
-        StringStruct('ProductVersion', '0.2.1')])
+        StringStruct('ProductVersion', '0.2.2')])
       ]), 
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]

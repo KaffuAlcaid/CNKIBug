@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.2.1-orange)
+![Version](https://img.shields.io/badge/Version-0.2.2-orange)
 
 ---
 
@@ -210,36 +210,9 @@ CNKIBug/
 
 ---
 
-##  版本规划
-**0.1.x阶段：**
-- [x] 1.无限续杯:当前检索并保存完毕后，程序直接结束，需重新双击运行才能进行下一次检索 
-- [x] 2.强退防丢:用户检索中途（如手抖填了200页）想终止，直接点浏览器红叉或按 Ctrl+C 会导致程序崩溃，已抓取数据全部丢失
-- [x] 3.超大页数拦截警告
-- [x] 4.首页重定向修复:首次启动无 Cookie 时，知网大概率会重定向到科普/低质文章推荐页，导致检索目标错误
-
-**0.2.x阶段：**
-
-- [x] 5.运行配置、日志与浏览器会话缓存: 程序旁创建 `CNKIBug/` 运行数据目录，支持 `config.json`、`cache/cookies` 和任务摘要日志
-- [ ] 6.复合关键词查询:高级检索页面?解析用户输入的逻辑符（空格、+、AND），自动在知网基础搜索框触发复合检索?(未定)
-
-**0.3.x阶段：**
-
-- [ ] 7.参考文献/引证文献抓取(耗时、技术难度大大增加)（考虑中）
-- [ ] 8.SCI (Web of Science) 与校园 WebVPN 支持（不支持，见“不支持范围”）
-- [ ] 9.Web UI界面
-
-
----
-
 ##  免责声明
 
 本工具仅供个人学习、代码研究与非商业用途使用。请严格遵守知网（CNKI）的用户协议及相关法律法规。高频爬取极易触发 IP 封禁与验证码，请合理设置抓取页数，切勿滥用。
-
----
-
-##  作者
-
-**Kaffu_Alcaid** — 非科班出身的业余开发者，全凭兴趣写码。欢迎提交Issue探讨或发起PR！
 
 ---
 ## ♥️ 致谢 / Contributors
