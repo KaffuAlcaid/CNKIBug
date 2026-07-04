@@ -19,7 +19,3 @@ def test_query_first_uses_selector_group():
 
 def test_query_all_uses_selector_group():
     assert cnki_page.query_all(FakeParent(), "author") == ["a1", "a2"]
-
-
-def test_selector_returns_primary_selector():
-    assert cnki_page.selector("result_rows") == "table.result-table-list tbody tr"

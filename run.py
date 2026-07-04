@@ -2,7 +2,7 @@ import sys
 import os
 import logging
 
-from cnkibug.errors import _popup_error # noqa
+from cnkibug.errors import _popup_error
 
 APP_VERSION = "0.2.1"
 
@@ -30,7 +30,7 @@ def _handle_import_error(_err: ImportError) -> None:
 
 
 try:
-    from cnkibug.ui import _console # noqa
+    from cnkibug.ui import _console
     from cnkibug.environment import check_env
     from cnkibug.estimate import estimate_seconds, format_eta
     from cnkibug.runtime import init_runtime

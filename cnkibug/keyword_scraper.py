@@ -47,20 +47,6 @@ WARMUP_KEYWORD = "焊接"
 _logger = logging.getLogger("cnkibug.keyword_scraper")
 
 
-def _keyword_ref(
-    keyword: str,
-    settings: ScraperSettings,
-    keyword_index: int | None = None,
-    keyword_total: int | None = None,
-) -> str:
-    return keyword_log_ref(
-        keyword,
-        keyword_index,
-        keyword_total,
-        include_keyword=settings.log_keywords,
-    )
-
-
 def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
     page = _require_page(session)
     _logger.info("预热开始")
@@ -156,7 +142,12 @@ def scrape_keyword(
 ) -> KeywordResult:
     page = _require_page(session)
     results: list[list[str]] = []
-    keyword_ref = _keyword_ref(keyword, settings, keyword_index, keyword_total)
+    keyword_ref = keyword_log_ref(
+        keyword,
+        keyword_index,
+        keyword_total,
+        include_keyword=settings.log_keywords,
+    )
     stats = new_scrape_stats()
     seen: set[Any] = set()
     _console.print(f"\n[bold][*][/bold] 目标关键词：[bold cyan]{keyword}[/bold cyan]")

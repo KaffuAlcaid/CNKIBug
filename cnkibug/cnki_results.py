@@ -5,11 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .cnki_page import (
     SELECTOR_RESULT_ROWS,
-    SELECTOR_RESULT_TITLE,
     query_all,
     query_first,
 )
@@ -73,7 +71,6 @@ def parse_result_rows(
             record = [title, authors, source, date]
             count_missing_fields(record, stats)
             result.records.append(record)
-            stats["records_added"] += 1
         except PlaywrightError:
             result.parse_errors += 1
             stats["row_parse_errors"] += 1
@@ -123,19 +120,3 @@ def wait_result_page_advanced(
 
         time.sleep(0.25)
     return False
-
-
-def wait_first_row_changed(page: Any, old_href: str, timeout: int = 15000) -> bool:
-    try:
-        page.wait_for_function(
-            "(oldHref) => {"
-            " const a = document.querySelector("
-            f"'{SELECTOR_RESULT_ROWS} {SELECTOR_RESULT_TITLE}');"
-            " return a && a.getAttribute('href')"
-            " && a.getAttribute('href') !== oldHref; }",
-            arg=old_href,
-            timeout=timeout,
-        )
-        return True
-    except PlaywrightTimeoutError:
-        return False

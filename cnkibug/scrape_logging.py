@@ -22,7 +22,6 @@ def keyword_log_ref(
 def new_scrape_stats() -> dict[str, int]:
     return {
         "rows_seen": 0,
-        "records_added": 0,
         "duplicates": 0,
         "skipped_no_title": 0,
         "row_parse_errors": 0,

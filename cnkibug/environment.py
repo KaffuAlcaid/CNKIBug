@@ -13,7 +13,6 @@ import os
 import shutil
 import subprocess
 
-from .errors import _popup_error
 from .ui import _console
 
 _EDGE_PATHS = [

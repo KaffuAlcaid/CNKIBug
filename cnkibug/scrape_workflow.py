@@ -24,7 +24,7 @@ from .scrape_report import (
 )
 from .scrape_session import ScrapeSession
 from .session_cache import save_cookie_state
-from .settings import ScraperSettings, get_scraper_settings
+from .settings import get_scraper_settings
 from .task_state import (
     completed_results,
     delete_last_task,
@@ -106,7 +106,6 @@ def scrape_cnki(
     )
 
     with sync_playwright() as p:
-        browser = None
         context = None
 
         browser = launch_browser(p)
@@ -138,10 +137,16 @@ def scrape_cnki(
             for idx, keyword in enumerate(keywords):
                 if session.stop_requested:
                     break
+                keyword_ref = keyword_log_ref(
+                    keyword,
+                    idx + 1,
+                    len(keywords),
+                    include_keyword=settings.log_keywords,
+                )
                 if keyword in all_results:
                     _logger.info(
                         "关键词已在 last_task 中完成，跳过: %s",
-                        _keyword_ref(keyword, settings, idx + 1, len(keywords)),
+                        keyword_ref,
                     )
                     continue
                 if idx > 0:
@@ -158,14 +163,6 @@ def scrape_cnki(
                     ):
                         time.sleep(wait_sec)
 
-                keyword_result = make_keyword_result(
-                    keyword,
-                    idx + 1,
-                    len(keywords),
-                    [],
-                    STATUS_FAILED,
-                    "未开始抓取",
-                )
                 try:
                     keyword_result = scrape_keyword(
                         session,
@@ -178,7 +175,7 @@ def scrape_cnki(
                 except PlaywrightTimeoutError as e:
                     _logger.warning(
                         "关键词页面等待超时，跳过: %s error=%s",
-                        _keyword_ref(keyword, settings, idx + 1, len(keywords)),
+                        keyword_ref,
                         e,
                     )
                     _console.print(f"[red][x] 关键词「{keyword}」页面等待超时，跳过: {e}[/red]")
@@ -193,7 +190,7 @@ def scrape_cnki(
                 except PlaywrightError as e:
                     _logger.warning(
                         "浏览器连接异常，停止后续关键词: %s error=%s",
-                        _keyword_ref(keyword, settings, idx + 1, len(keywords)),
+                        keyword_ref,
                         e,
                     )
                     _console.print(f"[yellow][!] 浏览器连接已断开，停止后续关键词抓取: {e}[/yellow]")
@@ -210,7 +207,7 @@ def scrape_cnki(
                     session.request_stop("用户中断")
                     _logger.warning(
                         "用户中断关键词循环: %s",
-                        _keyword_ref(keyword, settings, idx + 1, len(keywords)),
+                        keyword_ref,
                     )
                     keyword_result = make_keyword_result(
                         keyword,
@@ -227,7 +224,7 @@ def scrape_cnki(
                 save_last_task(task_state)
                 _logger.info(
                     "关键词结果已记录: %s status=%s records=%d stop_requested=%s",
-                    _keyword_ref(keyword, settings, idx + 1, len(keywords)),
+                    keyword_ref,
                     keyword_result.status,
                     len(keyword_result.records),
                     session.stop_requested,
@@ -329,17 +326,3 @@ def scrape_cnki(
                 delete_last_task()
             else:
                 save_last_task(task_state)
-
-
-def _keyword_ref(
-    keyword: str,
-    settings: ScraperSettings,
-    keyword_index: int | None = None,
-    keyword_total: int | None = None,
-) -> str:
-    return keyword_log_ref(
-        keyword,
-        keyword_index,
-        keyword_total,
-        include_keyword=settings.log_keywords,
-    )

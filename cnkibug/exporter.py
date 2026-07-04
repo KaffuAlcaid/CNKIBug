@@ -105,8 +105,6 @@ def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
         saved_path = os.path.abspath(filepath)
         _log_save_success(saved_path, announce)
         return saved_path
-    except PermissionError as save_err:
-        return _try_save_fallback(wb, filepath, save_err, announce)
     except OSError as save_err:
         return _try_save_fallback(wb, filepath, save_err, announce)
 

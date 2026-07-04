@@ -25,11 +25,6 @@ SELECTOR_DATE = SELECTOR_GROUPS["date"][0]
 SELECTOR_NO_CONTENT = SELECTOR_GROUPS["no_content"][0]
 SELECTOR_NEXT_PAGE = SELECTOR_GROUPS["next_page"][0]
 
-
-def selector(group: str) -> str:
-    return SELECTOR_GROUPS[group][0]
-
-
 def query_first(parent: Any, group: str) -> Any | None:
     for candidate in SELECTOR_GROUPS[group]:
         element = parent.query_selector(candidate)

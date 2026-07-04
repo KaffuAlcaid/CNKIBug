@@ -31,7 +31,6 @@ def make_task_state(
 ) -> dict[str, Any]:
     return {
         "version": TASK_STATE_VERSION,
-        "task_id": ts,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "ts": ts,
         "save_mode": save_mode,

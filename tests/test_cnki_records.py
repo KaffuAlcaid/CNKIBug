@@ -67,7 +67,6 @@ def test_parse_result_rows_extracts_records_and_updates_stats():
     assert result.duplicates == 1
     assert result.skipped_no_title == 1
     assert stats["rows_seen"] == 3
-    assert stats["records_added"] == 1
     assert stats["duplicates"] == 1
     assert stats["skipped_no_title"] == 1
 
