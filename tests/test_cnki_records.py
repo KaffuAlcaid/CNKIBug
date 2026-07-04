@@ -5,7 +5,7 @@ from cnkibug.cnki_page import (
     SELECTOR_RESULT_TITLE,
     SELECTOR_SOURCE,
 )
-from cnkibug.cnki_records import parse_result_rows
+from cnkibug.cnki_results import parse_result_rows
 from cnkibug.scrape_logging import new_scrape_stats
 
 

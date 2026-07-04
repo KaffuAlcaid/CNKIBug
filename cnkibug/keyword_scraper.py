@@ -1,5 +1,4 @@
-#新的屎山孩子们
-#单关键词完整抓取逻辑：搜索、翻页、解析
+# 单关键词抓取流程：搜索、翻页、解析。
 from __future__ import annotations
 
 import logging
@@ -18,7 +17,7 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-from .cnki_debug import print_page_debug
+from .cnki_guard import VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify, print_page_debug
 from .cnki_page import (
     SELECTOR_NO_CONTENT,
     SELECTOR_RESULT_ROWS,
@@ -26,9 +25,7 @@ from .cnki_page import (
     SELECTOR_SEARCH_INPUT,
     query_first,
 )
-from .cnki_pagination import get_first_result_href, wait_result_page_advanced
-from .cnki_records import parse_result_rows
-from .cnki_verify import VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify
+from .cnki_results import get_first_result_href, parse_result_rows, wait_result_page_advanced
 from .scrape_logging import keyword_log_ref, missing_field_text, new_scrape_stats
 from .scrape_report import (
     STATUS_EMPTY,
@@ -105,6 +102,50 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
         return False
 
 
+def _open_home_page(page: Any, settings: ScraperSettings) -> None:
+    with _console.status(
+        "[bold magenta]少女祈祷中...[/bold magenta]",
+        spinner="bouncingBar",
+    ):
+        page.goto(CNKI_HOME_URL, timeout=settings.timeout_goto_ms)
+        page.wait_for_load_state("domcontentloaded", timeout=settings.timeout_load_ms)
+
+
+def _open_search_page(page: Any, settings: ScraperSettings) -> None:
+    with _console.status(
+        "[bold magenta]少女祈祷中...[/bold magenta]",
+        spinner="bouncingBar",
+    ):
+        page.goto(CNKI_SEARCH_URL, timeout=settings.timeout_goto_ms)
+        page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+
+
+def _submit_search(page: Any, keyword: str, settings: ScraperSettings) -> None:
+    with _console.status(
+        "[bold magenta]少女祈祷中...[/bold magenta]",
+        spinner="bouncingBar",
+    ):
+        page.fill(SELECTOR_SEARCH_INPUT, keyword, timeout=settings.timeout_selector_ms)
+        time.sleep(random.uniform(0.5, 1.5))
+        page.click(SELECTOR_SEARCH_BUTTON, timeout=settings.timeout_selector_ms)
+        time.sleep(random.uniform(1, 2))
+
+
+def _wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
+    return page.wait_for_function(
+        """(selectors) => {
+            if (document.querySelector(selectors.resultRows)) return 'has_results';
+            if (document.querySelector(selectors.noContent)) return 'no_content';
+            return false;
+        }""",
+        arg={
+            "resultRows": SELECTOR_RESULT_ROWS,
+            "noContent": SELECTOR_NO_CONTENT,
+        },
+        timeout=settings.timeout_selector_ms,
+    ).json_value()
+
+
 def scrape_keyword(
     session: ScrapeSession,
     keyword: str,
@@ -122,12 +163,7 @@ def scrape_keyword(
     _logger.info("关键词开始: %s max_pages=%d", keyword_ref, max_pages)
 
     try:
-        with _console.status(
-            "[bold magenta]少女祈祷中...[/bold magenta]",
-            spinner="bouncingBar",
-        ):
-            page.goto(CNKI_HOME_URL, timeout=settings.timeout_goto_ms)
-            page.wait_for_load_state("domcontentloaded", timeout=settings.timeout_load_ms)
+        _open_home_page(page, settings)
     except PlaywrightTimeoutError:
         _logger.warning("关键词首页预热超时，跳过: %s", keyword_ref)
         _console.print("[yellow][!] 预热请求超时，跳过该关键词。[/yellow]")
@@ -148,12 +184,7 @@ def scrape_keyword(
         )
 
     try:
-        with _console.status(
-            "[bold magenta]少女祈祷中...[/bold magenta]",
-            spinner="bouncingBar",
-        ):
-            page.goto(CNKI_SEARCH_URL, timeout=settings.timeout_goto_ms)
-            page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+        _open_search_page(page, settings)
     except PlaywrightTimeoutError:
         _logger.warning("检索页加载超时，跳过关键词: %s", keyword_ref)
         _console.print("[yellow][!] 检索页加载超时，跳过该关键词。[/yellow]")
@@ -173,14 +204,7 @@ def scrape_keyword(
             keyword, keyword_index or 0, keyword_total or 0, results, STATUS_STOPPED, "安全验证等待超时"
         )
 
-    with _console.status(
-        "[bold magenta]少女祈祷中...[/bold magenta]",
-        spinner="bouncingBar",
-    ):
-        page.fill(SELECTOR_SEARCH_INPUT, keyword, timeout=settings.timeout_selector_ms)
-        time.sleep(random.uniform(0.5, 1.5))
-        page.click(SELECTOR_SEARCH_BUTTON, timeout=settings.timeout_selector_ms)
-        time.sleep(random.uniform(1, 2))
+    _submit_search(page, keyword, settings)
     _logger.info("关键词检索已提交: %s", keyword_ref)
     if handle_verify(page, settings) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
@@ -190,18 +214,7 @@ def scrape_keyword(
         )
 
     try:
-        outcome = page.wait_for_function(
-            """(selectors) => {
-                if (document.querySelector(selectors.resultRows)) return 'has_results';
-                if (document.querySelector(selectors.noContent)) return 'no_content';
-                return false;
-            }""",
-            arg={
-                "resultRows": SELECTOR_RESULT_ROWS,
-                "noContent": SELECTOR_NO_CONTENT,
-            },
-            timeout=settings.timeout_selector_ms,
-        ).json_value()
+        outcome = _wait_search_outcome(page, settings)
     except PlaywrightTimeoutError:
         _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
         print_page_debug(page, f"关键词「{keyword}」结果加载超时")

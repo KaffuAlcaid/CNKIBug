@@ -3,7 +3,7 @@ from cnkibug.cnki_page import (
     SELECTOR_RESULT_ROWS,
     SELECTOR_RESULT_TITLE,
 )
-from cnkibug.cnki_pagination import (
+from cnkibug.cnki_results import (
     get_first_result_href,
     get_next_page_marker,
     wait_result_page_advanced,
