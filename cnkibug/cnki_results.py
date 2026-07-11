@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -12,6 +13,9 @@ from .cnki_page import (
     query_first,
 )
 from .scrape_logging import count_missing_fields
+
+
+_logger = logging.getLogger("cnkibug.cnki_results")
 
 
 @dataclass
@@ -33,6 +37,7 @@ def parse_result_rows(
     stats: dict[str, int],
 ) -> PageParseResult:
     result = PageParseResult()
+    none_text_fields: set[str] = set()
     rows = query_all(page, "result_rows")
     result.rows_seen = len(rows)
     stats["rows_seen"] += result.rows_seen
@@ -50,16 +55,25 @@ def parse_result_rows(
 
             author_parts = []
             for author_el in query_all(row, "author"):
-                name = author_el.text_content().strip()
+                author_text = author_el.text_content()
+                if author_text is None:
+                    none_text_fields.add("author")
+                name = (author_text or "").strip()
                 if name:
                     author_parts.append(name)
             authors = "; ".join(author_parts)
 
             source_el = query_first(row, "source")
-            source = " ".join(source_el.text_content().split()) if source_el else ""
+            source_text = source_el.text_content() if source_el else ""
+            if source_el and source_text is None:
+                none_text_fields.add("source")
+            source = " ".join((source_text or "").split())
 
             date_el = query_first(row, "date")
-            date = date_el.text_content().strip() if date_el else ""
+            date_text = date_el.text_content() if date_el else ""
+            if date_el and date_text is None:
+                none_text_fields.add("date")
+            date = (date_text or "").strip()
 
             dedup_key = href if href else (title, source, date)
             if dedup_key in seen:
@@ -76,6 +90,12 @@ def parse_result_rows(
             stats["row_parse_errors"] += 1
             continue
 
+    if none_text_fields:
+        _logger.warning(
+            "结果字段节点存在但无文本: fields=%s rows=%d",
+            ",".join(sorted(none_text_fields)),
+            result.rows_seen,
+        )
     return result
 
 

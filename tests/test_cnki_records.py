@@ -85,3 +85,18 @@ def test_parse_result_rows_counts_missing_fields():
     assert stats["missing_authors"] == 1
     assert stats["missing_source"] == 1
     assert stats["missing_date"] == 1
+
+
+def test_parse_result_rows_accepts_none_text_content(caplog):
+    stats = new_scrape_stats()
+    page = _page([
+        _row("标题", "/detail/1", [None], None, None),
+    ])
+    row = page._multiple[SELECTOR_RESULT_ROWS][0]
+    row._single[SELECTOR_SOURCE] = FakeElement(None)
+    row._single[SELECTOR_DATE] = FakeElement(None)
+
+    result = parse_result_rows(page, set(), stats)
+
+    assert result.records == [["标题", "", "", ""]]
+    assert "fields=author,date,source" in caplog.text

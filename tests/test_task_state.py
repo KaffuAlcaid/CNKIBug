@@ -1,5 +1,13 @@
+from pathlib import Path
+
 from cnkibug import runtime, task_state
-from cnkibug.scrape_report import STATUS_SUCCESS, make_keyword_result
+from cnkibug.scrape_report import (
+    STATUS_EMPTY,
+    STATUS_FAILED,
+    STATUS_STOPPED,
+    STATUS_SUCCESS,
+    make_keyword_result,
+)
 
 
 def test_last_task_save_load_mark_and_delete(tmp_path):
@@ -52,3 +60,59 @@ def test_load_last_task_returns_none_for_invalid_shape(tmp_path):
     path.write_text('{"version": 1, "keywords": "bad"}', encoding="utf-8")
 
     assert task_state.load_last_task() is None
+
+
+def test_completed_results_only_contains_terminal_statuses(tmp_path):
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    state = task_state.make_task_state(["成功", "空", "失败", "中止"], 3, "multi_merge", "TS")
+    for index, (keyword, status, records) in enumerate((
+        ("成功", STATUS_SUCCESS, [["t1", "", "", ""]]),
+        ("空", STATUS_EMPTY, []),
+        ("失败", STATUS_FAILED, [["partial", "", "", ""]]),
+        ("中止", STATUS_STOPPED, [["stopped", "", "", ""]]),
+    ), start=1):
+        task_state.mark_keyword_done(
+            state,
+            make_keyword_result(keyword, index, 4, records, status),
+        )
+
+    assert task_state.stored_results(state) == {
+        "成功": [["t1", "", "", ""]],
+        "空": [],
+        "失败": [["partial", "", "", ""]],
+        "中止": [["stopped", "", "", ""]],
+    }
+    assert task_state.completed_results(state) == {
+        "成功": [["t1", "", "", ""]],
+        "空": [],
+    }
+    assert task_state.task_is_finished(state) is False
+    assert "待重试 2 个" in task_state.describe_task(state)
+
+
+def test_task_is_finished_accepts_success_and_empty(tmp_path):
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    state = task_state.make_task_state(["成功", "空"], 1, "multi_merge", "TS")
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("成功", 1, 2, [["t", "", "", ""]], STATUS_SUCCESS),
+    )
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("空", 2, 2, [], STATUS_EMPTY),
+    )
+
+    assert task_state.task_is_finished(state) is True
+
+
+def test_save_last_task_logs_and_returns_none_on_write_error(monkeypatch, tmp_path, caplog):
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    state = task_state.make_task_state(["焊接"], 1, "single", "TS")
+
+    def fail_write(self, *args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+
+    assert task_state.save_last_task(state) is None
+    assert "last_task 保存失败" in caplog.text

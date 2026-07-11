@@ -31,11 +31,24 @@ from .task_state import (
     make_task_state,
     mark_keyword_done,
     save_last_task,
+    stored_results,
+    task_is_finished,
 )
 from .ui import _console, print_browser_banner
 
 
 _logger = logging.getLogger("cnkibug.scrape_workflow")
+
+
+def _save_task_state(task_state: dict, context: str) -> bool:
+    if save_last_task(task_state) is not None:
+        return True
+    _logger.error("断点状态未写入，继续尝试保存抓取结果: context=%s", context)
+    _console.print(
+        "[bold yellow][!] 无法更新断点文件；若程序现在退出，本轮进度可能无法恢复。"
+        "程序将继续尝试保存 Excel。[/bold yellow]"
+    )
+    return False
 
 
 def scrape_cnki(
@@ -62,14 +75,17 @@ def scrape_cnki(
         save_mode = str(resume_state["save_mode"])
         ts = str(resume_state["ts"])
         task_state = resume_state
-        all_results: dict[str, list] = completed_results(task_state)
+        all_results: dict[str, list] = stored_results(task_state)
+        terminal_results = completed_results(task_state)
         _console.print(
             f"[dim][*] 已载入上次未完成任务："
-            f"共 {len(keywords)} 个关键词，已完成 {len(all_results)} 个。[/dim]"
+            f"共 {len(keywords)} 个关键词，已完成 {len(terminal_results)} 个。[/dim]"
         )
         _logger.info(
-            "恢复未完成任务: keyword_count=%d completed=%d max_pages=%d save_mode=%s ts=%s",
+            "恢复未完成任务: keyword_count=%d completed=%d stored_results=%d "
+            "max_pages=%d save_mode=%s ts=%s",
             len(keywords),
+            len(terminal_results),
             len(all_results),
             max_pages,
             save_mode,
@@ -77,16 +93,17 @@ def scrape_cnki(
         )
     else:
         all_results = {}
+        terminal_results = {}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         task_state = make_task_state(keywords, max_pages, save_mode, ts)
-        save_last_task(task_state)
+        _save_task_state(task_state, "创建新任务")
 
     report = TaskReport(total_keywords=len(keywords))
     completed_state = task_state.get("completed", {})
     if isinstance(completed_state, dict):
         for idx, keyword in enumerate(keywords):
             item = completed_state.get(keyword)
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or keyword not in terminal_results:
                 continue
             report.add(make_keyword_result(
                 keyword,
@@ -143,12 +160,21 @@ def scrape_cnki(
                     len(keywords),
                     include_keyword=settings.log_keywords,
                 )
-                if keyword in all_results:
+                if keyword in terminal_results:
                     _logger.info(
                         "关键词已在 last_task 中完成，跳过: %s",
                         keyword_ref,
                     )
                     continue
+                if keyword in all_results:
+                    _logger.warning(
+                        "关键词存在失败或中止的历史结果，将从第一页重试: %s records=%d",
+                        keyword_ref,
+                        len(all_results[keyword]),
+                    )
+                    _console.print(
+                        f"[dim][*] 关键词「{keyword}」上次未完整完成，将从第一页重新抓取。[/dim]"
+                    )
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
                     _logger.info(
@@ -218,10 +244,28 @@ def scrape_cnki(
                         "用户中断",
                     )
 
+                previous_records = all_results.get(keyword, [])
+                if keyword_result.status in {STATUS_FAILED, STATUS_STOPPED} and previous_records:
+                    current_count = len(keyword_result.records)
+                    merged_records = list(previous_records)
+                    seen_records = {tuple(record) for record in merged_records}
+                    for record in keyword_result.records:
+                        record_key = tuple(record)
+                        if record_key not in seen_records:
+                            seen_records.add(record_key)
+                            merged_records.append(record)
+                    keyword_result.records = merged_records
+                    _logger.warning(
+                        "关键词重试仍未完整完成，已合并保留部分结果: %s previous=%d current=%d merged=%d",
+                        keyword_ref,
+                        len(previous_records),
+                        current_count,
+                        len(merged_records),
+                    )
                 all_results[keyword] = keyword_result.records
                 report.add(keyword_result)
                 mark_keyword_done(task_state, keyword_result)
-                save_last_task(task_state)
+                _save_task_state(task_state, "关键词结果更新")
                 _logger.info(
                     "关键词结果已记录: %s status=%s records=%d stop_requested=%s",
                     keyword_ref,
@@ -250,7 +294,11 @@ def scrape_cnki(
                             f"[dim][*] 已落盘阶段性结果"
                             f"（已完成 {idx + 1}/{len(keywords)} 个关键词）[/dim]"
                         )
-                except BaseException:
+                except KeyboardInterrupt:
+                    session.request_stop("用户在增量保存期间中断")
+                    _logger.warning("用户在增量保存期间中断")
+                    raise
+                except Exception:
                     _logger.exception("增量保存失败")
 
                 if session.stop_requested:
@@ -274,16 +322,14 @@ def scrape_cnki(
                     save_cookie_state(context, settings.session_cache_enabled)
                     context.close()
                     _logger.info("浏览器上下文已关闭")
-                except BaseException:
+                except Exception:
                     _logger.warning("浏览器上下文关闭失败", exc_info=True)
-                    pass
             if browser:
                 try:
                     browser.close()
                     _logger.info("浏览器已关闭")
-                except BaseException:
+                except Exception:
                     _logger.warning("浏览器关闭失败", exc_info=True)
-                    pass
 
             final_save_failed = False
             try:
@@ -310,7 +356,12 @@ def scrape_cnki(
                     save_result.attempted,
                     save_result.failed,
                 )
-            except BaseException as save_err:
+            except KeyboardInterrupt:
+                final_save_failed = True
+                session.request_stop("用户在最终保存期间中断")
+                _logger.warning("用户在最终保存期间中断，保留断点状态")
+                _console.print("\n[bold yellow][!] 最终保存被中断，已保留断点状态。[/bold yellow]")
+            except Exception as save_err:
                 final_save_failed = True
                 _logger.exception("最终保存失败")
                 _console.print("\n[bold red][x] 最终保存失败！[/bold red]")
@@ -319,10 +370,13 @@ def scrape_cnki(
 
             try:
                 print_task_report(report, all_results)
-            except BaseException:
+            except KeyboardInterrupt:
+                session.request_stop("用户在任务摘要输出期间中断")
+                _logger.warning("用户在任务摘要输出期间中断，继续保存断点状态")
+            except Exception:
                 _logger.exception("任务摘要输出失败")
 
-            if not session.stop_requested and report.completed_keywords >= len(keywords) and not final_save_failed:
+            if task_is_finished(task_state) and not final_save_failed:
                 delete_last_task()
             else:
-                save_last_task(task_state)
+                _save_task_state(task_state, "任务收尾")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,8 @@ def prepare_cookie_state(
         _logger.info("未发现 cookies 会话缓存，将使用新会话: path=%s", path)
         return None
 
+    _secure_cookie_permissions(path)
+
     current = time.time() if now is None else now
     age_seconds = current - path.stat().st_mtime
     ttl_seconds = ttl_hours * 3600
@@ -74,14 +77,35 @@ def save_cookie_state(context: Any, enabled: bool) -> Path | None:
         return None
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _secure_cookie_permissions(path)
     try:
         context.storage_state(path=str(path))
     except Exception as exc:  # noqa: BLE001
         _logger.warning("cookies 会话缓存保存失败: path=%s error=%s", path, exc)
         return None
 
+    _secure_cookie_permissions(path)
     _logger.info("cookies 会话缓存已保存: path=%s", path)
     return path
+
+
+def _secure_cookie_permissions(path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        directory_mode = path.parent.stat().st_mode & 0o777
+        file_mode = path.stat().st_mode & 0o777 if path.exists() else None
+        path.parent.chmod(0o700)
+        if path.exists():
+            path.chmod(0o600)
+        if directory_mode != 0o700 or file_mode not in {None, 0o600}:
+            _logger.warning(
+                "cookies 会话缓存权限已收紧: directory_mode=%03o file_mode=%s",
+                directory_mode,
+                "missing" if file_mode is None else f"{file_mode:03o}",
+            )
+    except OSError as exc:
+        _logger.warning("cookies 会话缓存权限调整失败: path=%s error=%s", path, exc)
 
 
 def _looks_like_storage_state(path: Path) -> bool:

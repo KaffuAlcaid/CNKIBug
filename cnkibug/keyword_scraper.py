@@ -120,6 +120,7 @@ def _submit_search(page: Any, keyword: str, settings: ScraperSettings) -> None:
 def _wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
     return page.wait_for_function(
         """(selectors) => {
+            if (location.pathname.includes('/verify')) return 'verify';
             if (document.querySelector(selectors.resultRows)) return 'has_results';
             if (document.querySelector(selectors.noContent)) return 'no_content';
             return false;
@@ -204,15 +205,31 @@ def scrape_keyword(
             keyword, keyword_index or 0, keyword_total or 0, results, STATUS_STOPPED, "安全验证等待超时"
         )
 
-    try:
-        outcome = _wait_search_outcome(page, settings)
-    except PlaywrightTimeoutError:
-        _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
-        print_page_debug(page, f"关键词「{keyword}」结果加载超时")
-        _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
-        return make_keyword_result(
-            keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "结果加载超时"
-        )
+    while True:
+        try:
+            outcome = _wait_search_outcome(page, settings)
+        except PlaywrightTimeoutError:
+            _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
+            print_page_debug(page, f"关键词「{keyword}」结果加载超时")
+            _console.print(f"[yellow][!] 关键词「{keyword}」结果加载超时，跳过。[/yellow]")
+            return make_keyword_result(
+                keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "结果加载超时"
+            )
+
+        if outcome != "verify":
+            break
+
+        _logger.warning("等待检索结果期间检测到安全验证: %s", keyword_ref)
+        if handle_verify(page, settings) == VERIFY_TIMEOUT:
+            session.request_stop("安全验证等待超时", verify_timeout=True)
+            return make_keyword_result(
+                keyword,
+                keyword_index or 0,
+                keyword_total or 0,
+                results,
+                STATUS_STOPPED,
+                "安全验证等待超时",
+            )
 
     if outcome == "no_content":
         _logger.info("关键词无结果: %s", keyword_ref)
@@ -237,6 +254,7 @@ def scrape_keyword(
         )
 
         consecutive_advance_fail = 0
+        incomplete_reason: str | None = None
 
         for current_page in range(1, max_pages + 1):
             try:
@@ -253,6 +271,7 @@ def scrape_keyword(
                                 SELECTOR_RESULT_ROWS, timeout=settings.timeout_selector_ms
                             )
                         except PlaywrightTimeoutError:
+                            incomplete_reason = f"第 {current_page} 页验证通过后仍加载超时"
                             _logger.warning(
                                 "验证通过后结果页表格仍等待超时，提前结束关键词: %s page=%d",
                                 keyword_ref,
@@ -268,6 +287,7 @@ def scrape_keyword(
                         _logger.warning("结果页等待时安全验证超时: %s page=%d", keyword_ref, current_page)
                         break
                     else:
+                        incomplete_reason = f"第 {current_page} 页结果表格等待超时"
                         _logger.warning("结果页表格等待超时，提前结束关键词: %s page=%d", keyword_ref, current_page)
                         progress.console.print(
                             f"[yellow][!] 第 {current_page} 页等待超时（非验证），"
@@ -341,6 +361,7 @@ def scrape_keyword(
                             )
                             print_page_debug(page, f"第 {current_page} 页翻页确认超时")
                             if consecutive_advance_fail >= settings.max_advance_fail:
+                                incomplete_reason = f"第 {current_page} 页后连续翻页失败"
                                 _logger.warning(
                                     "连续翻页失败，提前结束关键词: %s effective_pages=%d requested_pages=%d",
                                     keyword_ref,
@@ -375,6 +396,7 @@ def scrape_keyword(
                     )
                     break
                 _logger.warning("结果页处理异常，提前结束关键词: %s page=%d", keyword_ref, current_page, exc_info=True)
+                incomplete_reason = f"第 {current_page} 页处理异常"
                 progress.console.print(
                     f"[yellow][!] 第 {current_page} 页处理异常，已停止当前关键词，避免重复抓取旧页面。[/yellow]"
                 )
@@ -395,6 +417,26 @@ def scrape_keyword(
             results,
             STATUS_STOPPED,
             session.stop_reason or "已停止",
+        )
+
+    if incomplete_reason:
+        _logger.warning(
+            "关键词部分完成，将在恢复时重试: %s records=%d reason=%s",
+            keyword_ref,
+            len(results),
+            incomplete_reason,
+        )
+        _console.print(
+            f"[yellow][!] 当前关键词仅完成部分抓取，已保留 {len(results)} 条记录；"
+            "下次恢复时将从第一页重试。[/yellow]"
+        )
+        return make_keyword_result(
+            keyword,
+            keyword_index or 0,
+            keyword_total or 0,
+            results,
+            STATUS_FAILED,
+            incomplete_reason,
         )
 
     _logger.info(

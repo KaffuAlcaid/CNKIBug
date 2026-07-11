@@ -147,13 +147,26 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
     save_result = SaveResult()
     total = 0
     saved_files = []
+    used_names: set[str] = set()
     for keyword, results in all_results.items():
         if not results:
             if announce:
                 _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过生成文件。[/yellow]")
             continue
 
-        clean_keyword = _sanitize_name(keyword)
+        base_keyword = _sanitize_name(keyword)
+        clean_keyword = base_keyword
+        counter = 2
+        while clean_keyword.casefold() in used_names:
+            suffix = f"_{counter}"
+            clean_keyword = f"{base_keyword[:50 - len(suffix)]}{suffix}"
+            counter += 1
+        if clean_keyword != base_keyword:
+            _logger.warning(
+                "分文件保存名冲突，已自动添加后缀: collision_index=%d",
+                counter - 1,
+            )
+        used_names.add(clean_keyword.casefold())
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
         wb = _build_single_sheet_workbook(results)
         saved_path = _try_save_workbook(wb, filepath, announce)

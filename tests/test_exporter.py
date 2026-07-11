@@ -98,6 +98,25 @@ def test_save_all_multi_split_one_file_per_keyword(monkeypatch, tmp_path):
     assert _load(f2).active.max_row == 3
 
 
+def test_save_all_multi_split_avoids_sanitized_name_collision(monkeypatch, tmp_path, caplog):
+    _patch_desktop(monkeypatch, tmp_path)
+    all_results = {
+        "AI/ML": [["first", "a", "s", "d"]],
+        "AI:ML": [["second", "a", "s", "d"]],
+    }
+
+    result = save_all("multi_split", list(all_results), all_results, "TS", announce=False)
+
+    first = tmp_path / "cnki_titles_AI_ML_TS.xlsx"
+    second = tmp_path / "cnki_titles_AI_ML_2_TS.xlsx"
+    assert first.exists()
+    assert second.exists()
+    assert _load(first).active["A2"].value == "first"
+    assert _load(second).active["A2"].value == "second"
+    assert len(result.saved_paths) == 2
+    assert "分文件保存名冲突" in caplog.text
+
+
 def test_save_all_multi_split_skips_empty_keyword(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     all_results = {"有": [["t", "a", "s", "d"]], "无": []}

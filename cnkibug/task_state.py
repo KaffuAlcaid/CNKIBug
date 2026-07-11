@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from .runtime import get_paths
-from .scrape_report import KeywordResult
+from .scrape_report import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
 
 
 LAST_TASK_FILENAME = "last_task.json"
 TASK_STATE_VERSION = 1
 
 _logger = logging.getLogger("cnkibug.task_state")
+_TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
 
 
 def get_last_task_path() -> Path | None:
@@ -60,13 +61,25 @@ def save_last_task(state: dict[str, Any]) -> Path | None:
     if path is None:
         _logger.warning("运行路径未初始化，跳过 last_task 保存")
         return None
-    path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
-    tmp_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    tmp_path.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp_path.replace(path)
+    except OSError as exc:
+        _logger.error("last_task 保存失败: path=%s error=%s", path, exc)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            _logger.warning(
+                "last_task 临时文件清理失败: path=%s error=%s",
+                tmp_path,
+                cleanup_exc,
+            )
+        return None
     _logger.info("last_task 已保存: path=%s", path)
     return path
 
@@ -96,7 +109,7 @@ def mark_keyword_done(state: dict[str, Any], result: KeywordResult) -> dict[str,
     return state
 
 
-def completed_results(state: dict[str, Any]) -> dict[str, list]:
+def stored_results(state: dict[str, Any]) -> dict[str, list]:
     completed = state.get("completed", {})
     if not isinstance(completed, dict):
         return {}
@@ -110,13 +123,57 @@ def completed_results(state: dict[str, Any]) -> dict[str, list]:
     return results
 
 
+def completed_results(state: dict[str, Any]) -> dict[str, list]:
+    completed = state.get("completed", {})
+    if not isinstance(completed, dict):
+        return {}
+
+    results: dict[str, list] = {}
+    retryable_count = 0
+    for keyword, item in completed.items():
+        if not isinstance(keyword, str) or not isinstance(item, dict):
+            continue
+        if item.get("status") not in _TERMINAL_STATUSES:
+            retryable_count += 1
+            continue
+        records = item.get("records", [])
+        if isinstance(records, list):
+            results[keyword] = records
+
+    if retryable_count:
+        _logger.info("恢复任务包含待重试关键词: count=%d", retryable_count)
+    return results
+
+
+def task_is_finished(state: dict[str, Any]) -> bool:
+    keywords = state.get("keywords", [])
+    completed = state.get("completed", {})
+    if not isinstance(keywords, list) or not isinstance(completed, dict):
+        return False
+    return all(
+        isinstance(completed.get(keyword), dict)
+        and completed[keyword].get("status") in _TERMINAL_STATUSES
+        for keyword in keywords
+    )
+
+
 def describe_task(state: dict[str, Any]) -> str:
     keywords = state.get("keywords", [])
     completed = state.get("completed", {})
     keyword_count = len(keywords) if isinstance(keywords, list) else 0
-    completed_count = len(completed) if isinstance(completed, dict) else 0
+    completed_count = 0
+    retryable_count = 0
+    if isinstance(completed, dict):
+        for item in completed.values():
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") in _TERMINAL_STATUSES:
+                completed_count += 1
+            else:
+                retryable_count += 1
+    retry_text = f"，待重试 {retryable_count} 个" if retryable_count else ""
     return (
-        f"关键词 {keyword_count} 个，已完成 {completed_count} 个，"
+        f"关键词 {keyword_count} 个，已完成 {completed_count} 个{retry_text}，"
         f"每词 {state.get('max_pages')} 页，保存方式 {state.get('save_mode')}"
     )
 
