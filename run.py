@@ -3,8 +3,7 @@ import os
 import logging
 
 from cnkibug.errors import _popup_error
-
-APP_VERSION = "0.2.1"
+from cnkibug.version import APP_VERSION
 
 
 def _handle_import_error(_err: ImportError) -> None:

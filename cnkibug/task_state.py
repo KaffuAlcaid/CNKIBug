@@ -11,7 +11,8 @@ from .scrape_report import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 1
+TASK_STATE_VERSION = 2
+_LEGACY_TASK_STATE_VERSION = 1
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -53,6 +54,9 @@ def load_last_task() -> dict[str, Any] | None:
     if not _is_valid_task_state(raw):
         _logger.warning("last_task 格式无效: path=%s", path)
         return None
+    if raw.get("version") == _LEGACY_TASK_STATE_VERSION:
+        raw = _upgrade_legacy_task_state(raw)
+        _logger.info("last_task 已从版本 1 兼容升级到版本 2: path=%s", path)
     return raw
 
 
@@ -101,12 +105,53 @@ def delete_last_task() -> bool:
 
 def mark_keyword_done(state: dict[str, Any], result: KeywordResult) -> dict[str, Any]:
     completed = state.setdefault("completed", {})
+    previous = completed.get(result.keyword, {})
+    completed_page = previous.get("completed_page", 0) if isinstance(previous, dict) else 0
     completed[result.keyword] = {
         "status": result.status,
         "reason": result.reason,
         "records": result.records,
+        "completed_page": completed_page,
     }
     return state
+
+
+def mark_keyword_progress(
+    state: dict[str, Any],
+    keyword: str,
+    completed_page: int,
+    records: list,
+) -> dict[str, Any]:
+    completed = state.setdefault("completed", {})
+    completed[keyword] = {
+        "status": "in_progress",
+        "reason": "",
+        "records": list(records),
+        "completed_page": completed_page,
+    }
+    return state
+
+
+def keyword_checkpoint(state: dict[str, Any], keyword: str) -> tuple[int, list]:
+    completed = state.get("completed", {})
+    if not isinstance(completed, dict):
+        return 0, []
+    item = completed.get(keyword)
+    if not isinstance(item, dict):
+        return 0, []
+    completed_page = item.get("completed_page", 0)
+    records = item.get("records", [])
+    if not isinstance(completed_page, int) or isinstance(completed_page, bool) or completed_page < 0:
+        _logger.warning("关键词断点页码无效，已从第一页恢复: keyword=%r", keyword)
+        completed_page = 0
+    if not isinstance(records, list) or any(not isinstance(record, list) for record in records):
+        _logger.warning("关键词断点记录无效，已忽略历史记录: keyword=%r", keyword)
+        records = []
+        completed_page = 0
+    elif completed_page and not records:
+        _logger.warning("关键词页级断点没有记录，已从第一页恢复: keyword=%r", keyword)
+        completed_page = 0
+    return completed_page, records
 
 
 def stored_results(state: dict[str, Any]) -> dict[str, list]:
@@ -181,7 +226,7 @@ def describe_task(state: dict[str, Any]) -> str:
 def _is_valid_task_state(raw: Any) -> bool:
     if not isinstance(raw, dict):
         return False
-    if raw.get("version") != TASK_STATE_VERSION:
+    if raw.get("version") not in {TASK_STATE_VERSION, _LEGACY_TASK_STATE_VERSION}:
         return False
     if not isinstance(raw.get("ts"), str) or not raw["ts"]:
         return False
@@ -194,3 +239,13 @@ def _is_valid_task_state(raw: Any) -> bool:
         return False
     completed = raw.get("completed")
     return isinstance(completed, dict)
+
+
+def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
+    raw["version"] = TASK_STATE_VERSION
+    completed = raw.get("completed", {})
+    if isinstance(completed, dict):
+        for item in completed.values():
+            if isinstance(item, dict):
+                item.setdefault("completed_page", 0)
+    return raw

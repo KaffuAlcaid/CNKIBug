@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv pip install --system -e . -r requirements-dev.txt
+
+      - name: Install Chromium on Linux
+        if: runner.os == 'Linux'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Install Chromium on Windows
+        if: runner.os == 'Windows'
+        run: python -m playwright install chromium
+
+      - name: Compile
+        run: python -m compileall -q run.py cnkibug tests generate_version_info.py
+
+      - name: Import check
+        run: python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+
+      - name: Unit and DOM contract tests
+        run: python -m pytest -q

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable
 from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -25,7 +26,13 @@ from .cnki_page import (
     SELECTOR_SEARCH_INPUT,
     query_first,
 )
-from .cnki_results import get_first_result_href, parse_result_rows, wait_result_page_advanced
+from .cnki_results import (
+    get_first_result_href,
+    get_first_result_title,
+    parse_result_rows,
+    record_dedup_key,
+    wait_result_page_advanced,
+)
 from .scrape_logging import keyword_log_ref, missing_field_text, new_scrape_stats
 from .scrape_report import (
     STATUS_EMPTY,
@@ -133,6 +140,87 @@ def _wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
     ).json_value()
 
 
+def _position_after_checkpoint(
+    session: ScrapeSession,
+    completed_page: int,
+    settings: ScraperSettings,
+    keyword_ref: str,
+) -> bool:
+    page = _require_page(session)
+    for page_number in range(1, completed_page + 1):
+        try:
+            next_btn = query_first(page, "next_page")
+            if not next_btn:
+                _logger.warning(
+                    "页级恢复定位失败，未找到下一页按钮: %s current_page=%d target_page=%d",
+                    keyword_ref,
+                    page_number,
+                    completed_page + 1,
+                )
+                return False
+            old_first_href = get_first_result_href(page)
+            old_next_page = next_btn.get_attribute("data-curpage") or ""
+            next_btn.click(timeout=settings.timeout_selector_ms)
+            advanced = wait_result_page_advanced(
+                page,
+                old_href=old_first_href,
+                old_next_page=old_next_page,
+                timeout=settings.timeout_selector_ms,
+            )
+            if not advanced:
+                verify_status = handle_verify(page, settings)
+                if verify_status == VERIFY_TIMEOUT:
+                    session.request_stop("安全验证等待超时", verify_timeout=True)
+                    _logger.warning(
+                        "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
+                        keyword_ref,
+                        page_number,
+                        completed_page + 1,
+                    )
+                    return False
+                if verify_status == VERIFY_PASSED:
+                    advanced = wait_result_page_advanced(
+                        page,
+                        old_href=old_first_href,
+                        old_next_page=old_next_page,
+                        timeout=settings.timeout_selector_ms,
+                    )
+            if not advanced:
+                _logger.warning(
+                    "页级恢复定位失败，翻页变化未确认: %s current_page=%d target_page=%d",
+                    keyword_ref,
+                    page_number,
+                    completed_page + 1,
+                )
+                return False
+            if handle_verify(page, settings) == VERIFY_TIMEOUT:
+                session.request_stop("安全验证等待超时", verify_timeout=True)
+                _logger.warning(
+                    "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
+                    keyword_ref,
+                    page_number,
+                    completed_page + 1,
+                )
+                return False
+            time.sleep(random.uniform(1, 2))
+            _logger.info(
+                "页级恢复已跳过完成页: %s page=%d target_page=%d",
+                keyword_ref,
+                page_number,
+                completed_page + 1,
+            )
+        except PlaywrightError:
+            _logger.warning(
+                "页级恢复定位出现页面异常: %s current_page=%d target_page=%d",
+                keyword_ref,
+                page_number,
+                completed_page + 1,
+                exc_info=True,
+            )
+            return False
+    return True
+
+
 def scrape_keyword(
     session: ScrapeSession,
     keyword: str,
@@ -140,9 +228,12 @@ def scrape_keyword(
     settings: ScraperSettings,
     keyword_index: int | None = None,
     keyword_total: int | None = None,
+    start_page: int = 1,
+    initial_records: list[list[str]] | None = None,
+    on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
 ) -> KeywordResult:
     page = _require_page(session)
-    results: list[list[str]] = []
+    results = list(initial_records or [])
     keyword_ref = keyword_log_ref(
         keyword,
         keyword_index,
@@ -150,9 +241,35 @@ def scrape_keyword(
         include_keyword=settings.log_keywords,
     )
     stats = new_scrape_stats()
-    seen: set[Any] = set()
+    seen: set[Any] = {record_dedup_key(record) for record in results}
     _console.print(f"\n[bold][*][/bold] 目标关键词：[bold cyan]{keyword}[/bold cyan]")
-    _logger.info("关键词开始: %s max_pages=%d", keyword_ref, max_pages)
+    _logger.info(
+        "关键词开始: %s max_pages=%d start_page=%d initial_records=%d",
+        keyword_ref,
+        max_pages,
+        start_page,
+        len(results),
+    )
+
+    if start_page > max_pages:
+        status = STATUS_SUCCESS if results else STATUS_FAILED
+        reason = "" if results else "页级断点没有有效记录"
+        _logger.info(
+            "页级断点已覆盖请求页数: %s completed_page=%d max_pages=%d records=%d status=%s",
+            keyword_ref,
+            start_page - 1,
+            max_pages,
+            len(results),
+            status,
+        )
+        return make_keyword_result(
+            keyword,
+            keyword_index or 0,
+            keyword_total or 0,
+            results,
+            status,
+            reason,
+        )
 
     try:
         _open_home_page(page, settings)
@@ -232,11 +349,85 @@ def scrape_keyword(
             )
 
     if outcome == "no_content":
+        if results:
+            _logger.warning(
+                "页级恢复时检索结果变为空，保留断点等待重试: %s records=%d",
+                keyword_ref,
+                len(results),
+            )
+            return make_keyword_result(
+                keyword,
+                keyword_index or 0,
+                keyword_total or 0,
+                results,
+                STATUS_FAILED,
+                "恢复时检索结果变为空",
+            )
         _logger.info("关键词无结果: %s", keyword_ref)
         _console.print(f"[yellow][!] 知网无「{keyword}」的检索结果，跳过。[/yellow]")
         return make_keyword_result(
             keyword, keyword_index or 0, keyword_total or 0, results, STATUS_EMPTY, "知网无结果"
         )
+
+    if start_page > 1:
+        _logger.info(
+            "开始页级恢复定位: %s completed_page=%d resume_page=%d records=%d",
+            keyword_ref,
+            start_page - 1,
+            start_page,
+            len(results),
+        )
+        expected_first_title = str(results[0][0]).strip() if results and results[0] else ""
+        current_first_title = get_first_result_title(page)
+        checkpoint_matches = not (
+            expected_first_title
+            and current_first_title
+            and expected_first_title != current_first_title
+        )
+        if not checkpoint_matches:
+            _logger.warning(
+                "页级恢复首页锚点变化，将从第一页重抓: %s completed_page=%d",
+                keyword_ref,
+                start_page - 1,
+            )
+        if not checkpoint_matches or not _position_after_checkpoint(
+            session,
+            start_page - 1,
+            settings,
+            keyword_ref,
+        ):
+            if session.stop_requested:
+                return make_keyword_result(
+                    keyword,
+                    keyword_index or 0,
+                    keyword_total or 0,
+                    results,
+                    STATUS_STOPPED,
+                    session.stop_reason or "页级恢复停止",
+                )
+            _logger.warning(
+                "页级恢复定位失败，清空页级断点并从第一页重抓: %s completed_page=%d records=%d",
+                keyword_ref,
+                start_page - 1,
+                len(results),
+            )
+            _console.print(
+                f"[yellow][!] 关键词「{keyword}」无法定位到第 {start_page} 页，"
+                "将从第一页重新抓取。[/yellow]"
+            )
+            if on_page_complete is not None:
+                on_page_complete(0, list(results))
+            return scrape_keyword(
+                session,
+                keyword,
+                max_pages,
+                settings,
+                keyword_index,
+                keyword_total,
+                start_page=1,
+                initial_records=[],
+                on_page_complete=on_page_complete,
+            )
 
     with Progress(
         SpinnerColumn(spinner_name="bouncingBar", style="bold magenta"),
@@ -249,14 +440,15 @@ def scrape_keyword(
         transient=False,
     ) as progress:
         task = progress.add_task(
-            description=f"第 1 / {max_pages} 页",
+            description=f"第 {start_page} / {max_pages} 页",
             total=max_pages,
+            completed=start_page - 1,
         )
 
         consecutive_advance_fail = 0
         incomplete_reason: str | None = None
 
-        for current_page in range(1, max_pages + 1):
+        for current_page in range(start_page, max_pages + 1):
             try:
                 progress.update(task, description=f"第 [bold]{current_page}[/bold] / {max_pages} 页")
                 try:
@@ -330,6 +522,9 @@ def scrape_keyword(
                         page_parse.records_added,
                         len(results),
                     )
+
+                if on_page_complete is not None:
+                    on_page_complete(current_page, list(results))
 
                 progress.advance(task)
 

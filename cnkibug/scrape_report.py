@@ -32,6 +32,7 @@ class FieldStats:
     missing_authors: int = 0
     missing_source: int = 0
     missing_date: int = 0
+    missing_detail_url: int = 0
 
 
 @dataclass
@@ -93,6 +94,8 @@ def collect_field_stats(all_results: dict[str, list]) -> FieldStats:
                 stats.missing_source += 1
             if not _field_value(record, 3):
                 stats.missing_date += 1
+            if not _field_value(record, 4):
+                stats.missing_detail_url += 1
     return stats
 
 
@@ -123,7 +126,8 @@ def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
             f"标题 {field_stats.missing_title}，"
             f"作者 {field_stats.missing_authors}，"
             f"来源 {field_stats.missing_source}，"
-            f"日期 {field_stats.missing_date}"
+            f"日期 {field_stats.missing_date}，"
+            f"详情链接 {field_stats.missing_detail_url}"
         )
 
     failed_items = report.failed_items()
@@ -137,7 +141,8 @@ def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
     _logger.info(
         "任务摘要: total_keywords=%d completed_keywords=%d success=%d empty=%d "
         "failed=%d stopped=%d total_records=%d stopped_flag=%s verify_timeout=%s "
-        "missing_title=%d missing_authors=%d missing_source=%d missing_date=%d",
+        "missing_title=%d missing_authors=%d missing_source=%d missing_date=%d "
+        "missing_detail_url=%d",
         report.total_keywords,
         report.completed_keywords,
         success,
@@ -151,6 +156,7 @@ def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
         field_stats.missing_authors,
         field_stats.missing_source,
         field_stats.missing_date,
+        field_stats.missing_detail_url,
     )
     for item in failed_items:
         _logger.warning(
@@ -175,4 +181,5 @@ def _has_missing_fields(stats: FieldStats) -> bool:
         stats.missing_authors,
         stats.missing_source,
         stats.missing_date,
+        stats.missing_detail_url,
     ))

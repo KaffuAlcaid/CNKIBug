@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urljoin
 
 from playwright.sync_api import Error as PlaywrightError
 
@@ -51,7 +52,8 @@ def parse_result_rows(
                 continue
             title = title_el.inner_text().strip()
 
-            href = title_el.get_attribute("href")
+            href = title_el.get_attribute("href") or ""
+            detail_url = urljoin(page.url, href) if href else ""
 
             author_parts = []
             for author_el in query_all(row, "author"):
@@ -75,14 +77,14 @@ def parse_result_rows(
                 none_text_fields.add("date")
             date = (date_text or "").strip()
 
-            dedup_key = href if href else (title, source, date)
+            dedup_key = detail_url if detail_url else (title, source, date)
             if dedup_key in seen:
                 result.duplicates += 1
                 stats["duplicates"] += 1
                 continue
             seen.add(dedup_key)
 
-            record = [title, authors, source, date]
+            record = [title, authors, source, date, detail_url]
             count_missing_fields(record, stats)
             result.records.append(record)
         except PlaywrightError:
@@ -99,6 +101,16 @@ def parse_result_rows(
     return result
 
 
+def record_dedup_key(record: list) -> Any:
+    detail_url = str(record[4]).strip() if len(record) > 4 else ""
+    if detail_url:
+        return detail_url
+    title = str(record[0]).strip() if record else ""
+    source = str(record[2]).strip() if len(record) > 2 else ""
+    date = str(record[3]).strip() if len(record) > 3 else ""
+    return title, source, date
+
+
 def get_first_result_href(page: Any) -> str:
     try:
         rows = query_all(page, "result_rows")
@@ -108,6 +120,19 @@ def get_first_result_href(page: Any) -> str:
         if not first_title:
             return ""
         return first_title.get_attribute("href") or ""
+    except PlaywrightError:
+        return ""
+
+
+def get_first_result_title(page: Any) -> str:
+    try:
+        rows = query_all(page, "result_rows")
+        if not rows:
+            return ""
+        first_title = query_first(rows[0], "title")
+        if not first_title:
+            return ""
+        return first_title.inner_text().strip()
     except PlaywrightError:
         return ""
 

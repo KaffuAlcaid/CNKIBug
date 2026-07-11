@@ -29,15 +29,17 @@ def new_scrape_stats() -> dict[str, int]:
         "missing_authors": 0,
         "missing_source": 0,
         "missing_date": 0,
+        "missing_detail_url": 0,
     }
 
 
 def count_missing_fields(record: Sequence[Any], stats: dict[str, int]) -> None:
     fields = (
-        ("missing_title", record[0]),
-        ("missing_authors", record[1]),
-        ("missing_source", record[2]),
-        ("missing_date", record[3]),
+        ("missing_title", record[0] if len(record) > 0 else ""),
+        ("missing_authors", record[1] if len(record) > 1 else ""),
+        ("missing_source", record[2] if len(record) > 2 else ""),
+        ("missing_date", record[3] if len(record) > 3 else ""),
+        ("missing_detail_url", record[4] if len(record) > 4 else ""),
     )
     for key, value in fields:
         if not str(value).strip():
@@ -47,5 +49,6 @@ def count_missing_fields(record: Sequence[Any], stats: dict[str, int]) -> None:
 def missing_field_text(stats: dict[str, int]) -> str:
     return (
         f"title={stats['missing_title']} authors={stats['missing_authors']} "
-        f"source={stats['missing_source']} date={stats['missing_date']}"
+        f"source={stats['missing_source']} date={stats['missing_date']} "
+        f"detail_url={stats['missing_detail_url']}"
     )

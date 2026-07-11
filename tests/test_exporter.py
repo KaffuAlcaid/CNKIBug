@@ -17,13 +17,15 @@ def test_sanitize_name_replaces_filename_and_sheet_illegal_chars():
 
 
 def test_build_single_sheet_workbook_headers_and_rows():
-    wb = _build_single_sheet_workbook([["标题", "作者", "来源", "2026-01-01"]])
+    detail_url = "https://kns.cnki.net/detail/1"
+    wb = _build_single_sheet_workbook([["标题", "作者", "来源", "2026-01-01", detail_url]])
     ws = wb.active
 
     assert ws is not None
     assert ws.title == "论文标题"
-    assert [cell.value for cell in ws[1]] == ["论文标题", "作者", "来源", "发表日期"]
-    assert [cell.value for cell in ws[2]] == ["标题", "作者", "来源", "2026-01-01"]
+    assert [cell.value for cell in ws[1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
+    assert [cell.value for cell in ws[2]] == ["标题", "作者", "来源", "2026-01-01", detail_url]
+    assert ws["E2"].hyperlink.target == detail_url
 
 
 # ============ _sanitize_name 新边界（A11） ============
@@ -70,7 +72,7 @@ def test_save_all_single_writes_file(monkeypatch, tmp_path):
     assert result.failed == 0
     assert result.saved_paths == [str(files[0].resolve())]
     ws = _load(files[0]).active
-    assert [c.value for c in ws[1]] == ["论文标题", "作者", "来源", "发表日期"]
+    assert [c.value for c in ws[1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
     assert ws.max_row == 3  # 表头 + 2 行数据
 
 
@@ -139,7 +141,7 @@ def test_save_all_multi_merge_one_file_multi_sheet(monkeypatch, tmp_path):
     assert len(files) == 1
     wb = _load(files[0])
     assert wb.sheetnames == ["焊接", "增材"]
-    assert [c.value for c in wb["焊接"][1]] == ["论文标题", "作者", "来源", "发表日期"]
+    assert [c.value for c in wb["焊接"][1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
 
 
 def test_multi_merge_sheet_name_truncated_and_deduped(monkeypatch, tmp_path):

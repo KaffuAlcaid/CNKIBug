@@ -1,3 +1,5 @@
+import json
+import logging
 from pathlib import Path
 
 from cnkibug import runtime, task_state
@@ -60,6 +62,53 @@ def test_load_last_task_returns_none_for_invalid_shape(tmp_path):
     path.write_text('{"version": 1, "keywords": "bad"}', encoding="utf-8")
 
     assert task_state.load_last_task() is None
+
+
+def test_load_last_task_upgrades_version_one_checkpoint(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="cnkibug.task_state")
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    path = task_state.get_last_task_path()
+    assert path is not None
+    legacy = task_state.make_task_state(["焊接"], 3, "single", "TS")
+    legacy["version"] = 1
+    legacy["completed"]["焊接"] = {
+        "status": STATUS_FAILED,
+        "reason": "旧任务",
+        "records": [["标题", "", "", ""]],
+    }
+    path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+    loaded = task_state.load_last_task()
+
+    assert loaded is not None
+    assert loaded["version"] == task_state.TASK_STATE_VERSION
+    assert task_state.keyword_checkpoint(loaded, "焊接") == (
+        0,
+        [["标题", "", "", ""]],
+    )
+    assert "兼容升级" in caplog.text
+
+
+def test_keyword_checkpoint_tracks_page_and_survives_failed_status():
+    state = task_state.make_task_state(["焊接"], 3, "single", "TS")
+    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
+
+    task_state.mark_keyword_progress(state, "焊接", 2, records)
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("焊接", 1, 1, records, STATUS_FAILED, "第 3 页失败"),
+    )
+
+    assert task_state.keyword_checkpoint(state, "焊接") == (2, records)
+    assert state["completed"]["焊接"]["status"] == STATUS_FAILED
+
+
+def test_keyword_checkpoint_restarts_when_page_has_no_records(caplog):
+    state = task_state.make_task_state(["焊接"], 3, "single", "TS")
+    task_state.mark_keyword_progress(state, "焊接", 2, [])
+
+    assert task_state.keyword_checkpoint(state, "焊接") == (0, [])
+    assert "页级断点没有记录" in caplog.text
 
 
 def test_completed_results_only_contains_terminal_statuses(tmp_path):

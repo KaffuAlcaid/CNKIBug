@@ -36,3 +36,4 @@ def test_collect_field_stats_counts_missing_fields():
     assert stats.missing_authors == 1
     assert stats.missing_source == 1
     assert stats.missing_date == 2
+    assert stats.missing_detail_url == 3

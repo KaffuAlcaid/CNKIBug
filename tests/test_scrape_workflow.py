@@ -79,10 +79,23 @@ def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch):
             "第 1 页后翻页失败",
         ),
     )
+    task_state.mark_keyword_progress(state, "焊接", 1, [["old", "", "", ""]])
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result(
+            "焊接",
+            1,
+            1,
+            [["old", "", "", ""]],
+            STATUS_FAILED,
+            "第 2 页失败",
+        ),
+    )
     calls = []
 
     def scrape_keyword(*args, **kwargs):
-        calls.append(True)
+        calls.append((kwargs["start_page"], kwargs["initial_records"]))
+        kwargs["on_page_complete"](2, [["complete", "", "", ""]])
         return make_keyword_result(
             "焊接",
             1,
@@ -95,9 +108,10 @@ def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch):
 
     scrape_workflow.scrape_cnki(["ignored"], 1, "single", resume_state=state)
 
-    assert calls == [True]
+    assert calls == [(2, [["old", "", "", ""]])]
     assert saved_results[-1] == {"焊接": [["complete", "", "", ""]]}
     assert state["completed"]["焊接"]["status"] == STATUS_SUCCESS
+    assert state["completed"]["焊接"]["completed_page"] == 2
     assert deleted == [True]
 
 

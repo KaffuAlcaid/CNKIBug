@@ -47,7 +47,8 @@ jobs:
       - name: Build with PyInstaller
         shell: bash
         run: |
-          pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --name CNKIBug run.py
+          python generate_version_info.py version.txt
+          pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --copy-metadata cnkibug --name CNKIBug run.py
 
       - name: Determine target release tag
         id: get_tag

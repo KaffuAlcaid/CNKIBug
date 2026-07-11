@@ -28,8 +28,10 @@ from .settings import get_scraper_settings
 from .task_state import (
     completed_results,
     delete_last_task,
+    keyword_checkpoint,
     make_task_state,
     mark_keyword_done,
+    mark_keyword_progress,
     save_last_task,
     stored_results,
     task_is_finished,
@@ -166,15 +168,38 @@ def scrape_cnki(
                         keyword_ref,
                     )
                     continue
-                if keyword in all_results:
+                completed_page, checkpoint_records = keyword_checkpoint(task_state, keyword)
+                if completed_page > max_pages:
                     _logger.warning(
-                        "关键词存在失败或中止的历史结果，将从第一页重试: %s records=%d",
+                        "关键词页级断点超过请求页数，已从第一页重抓: %s completed_page=%d max_pages=%d",
                         keyword_ref,
-                        len(all_results[keyword]),
+                        completed_page,
+                        max_pages,
                     )
-                    _console.print(
-                        f"[dim][*] 关键词「{keyword}」上次未完整完成，将从第一页重新抓取。[/dim]"
-                    )
+                    completed_page = 0
+                    checkpoint_records = []
+                if keyword in all_results:
+                    if completed_page:
+                        _logger.info(
+                            "关键词从页级断点恢复: %s completed_page=%d resume_page=%d records=%d",
+                            keyword_ref,
+                            completed_page,
+                            completed_page + 1,
+                            len(checkpoint_records),
+                        )
+                        _console.print(
+                            f"[dim][*] 关键词「{keyword}」将从第 {completed_page + 1} 页继续，"
+                            f"已保留 {len(checkpoint_records)} 条记录。[/dim]"
+                        )
+                    else:
+                        _logger.warning(
+                            "关键词存在无页码的失败或中止结果，将从第一页重试: %s records=%d",
+                            keyword_ref,
+                            len(all_results[keyword]),
+                        )
+                        _console.print(
+                            f"[dim][*] 关键词「{keyword}」上次未完整完成，将从第一页重新抓取。[/dim]"
+                        )
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
                     _logger.info(
@@ -189,6 +214,26 @@ def scrape_cnki(
                     ):
                         time.sleep(wait_sec)
 
+                historical_records = list(all_results.get(keyword, []))
+
+                def save_page_checkpoint(completed: int, records: list[list[str]]) -> None:
+                    all_results[keyword] = list(records)
+                    mark_keyword_progress(task_state, keyword, completed, records)
+                    _save_task_state(task_state, f"关键词第 {completed} 页检查点")
+                    if completed:
+                        _logger.info(
+                            "页级断点已保存: %s completed_page=%d records=%d",
+                            keyword_ref,
+                            completed,
+                            len(records),
+                        )
+                    else:
+                        _logger.warning(
+                            "页级恢复已回退到第一页: %s preserved_records=%d",
+                            keyword_ref,
+                            len(records),
+                        )
+
                 try:
                     keyword_result = scrape_keyword(
                         session,
@@ -197,6 +242,9 @@ def scrape_cnki(
                         settings,
                         idx + 1,
                         len(keywords),
+                        start_page=completed_page + 1,
+                        initial_records=checkpoint_records if completed_page else [],
+                        on_page_complete=save_page_checkpoint,
                     )
                 except PlaywrightTimeoutError as e:
                     _logger.warning(
@@ -244,7 +292,7 @@ def scrape_cnki(
                         "用户中断",
                     )
 
-                previous_records = all_results.get(keyword, [])
+                previous_records = historical_records
                 if keyword_result.status in {STATUS_FAILED, STATUS_STOPPED} and previous_records:
                     current_count = len(keyword_result.records)
                     merged_records = list(previous_records)

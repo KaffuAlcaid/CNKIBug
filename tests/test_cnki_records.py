@@ -33,7 +33,9 @@ class FakeElement:
 
 
 def _page(rows):
-    return FakeElement(multiple={SELECTOR_RESULT_ROWS: rows})
+    page = FakeElement(multiple={SELECTOR_RESULT_ROWS: rows})
+    page.url = "https://kns.cnki.net/kns8s/defaultresult/index"
+    return page
 
 
 def _row(title=None, href=None, authors=None, source="来源", date="2026-01-01"):
@@ -61,7 +63,13 @@ def test_parse_result_rows_extracts_records_and_updates_stats():
 
     result = parse_result_rows(page, seen, stats)
 
-    assert result.records == [["标题1", "作者1; 作者2", "期刊 A", "2026-01-01"]]
+    assert result.records == [[
+        "标题1",
+        "作者1; 作者2",
+        "期刊 A",
+        "2026-01-01",
+        "https://kns.cnki.net/detail/1",
+    ]]
     assert result.rows_seen == 3
     assert result.records_added == 1
     assert result.duplicates == 1
@@ -80,11 +88,12 @@ def test_parse_result_rows_counts_missing_fields():
 
     result = parse_result_rows(page, seen, stats)
 
-    assert result.records == [["标题", "", "", ""]]
+    assert result.records == [["标题", "", "", "", ""]]
     assert stats["missing_title"] == 0
     assert stats["missing_authors"] == 1
     assert stats["missing_source"] == 1
     assert stats["missing_date"] == 1
+    assert stats["missing_detail_url"] == 1
 
 
 def test_parse_result_rows_accepts_none_text_content(caplog):
@@ -98,5 +107,5 @@ def test_parse_result_rows_accepts_none_text_content(caplog):
 
     result = parse_result_rows(page, set(), stats)
 
-    assert result.records == [["标题", "", "", ""]]
+    assert result.records == [["标题", "", "", "", "https://kns.cnki.net/detail/1"]]
     assert "fields=author,date,source" in caplog.text

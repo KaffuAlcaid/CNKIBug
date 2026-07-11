@@ -10,8 +10,8 @@ from .environment import get_real_desktop_path
 from .runtime import get_config
 
 # 三种保存模式共用的表头，与 scraper 抓取的列顺序一一对应：
-# [论文标题, 作者, 来源, 发表日期]
-_HEADERS = ["论文标题", "作者", "来源", "发表日期"]
+# [论文标题, 作者, 来源, 发表日期, 详情链接]
+_HEADERS = ["论文标题", "作者", "来源", "发表日期", "详情链接"]
 _logger = logging.getLogger("cnkibug.exporter")
 
 
@@ -116,9 +116,17 @@ def _build_single_sheet_workbook(results: list):
     assert ws is not None
     ws.title = "论文标题"
     ws.append(_HEADERS)
+    _append_records(ws, results)
+    return wb
+
+
+def _append_records(ws, results: list) -> None:
     for row in results:
         ws.append(row)
-    return wb
+        if len(row) > 4 and str(row[4]).strip():
+            link_cell = ws.cell(row=ws.max_row, column=5)
+            link_cell.hyperlink = str(row[4]).strip()
+            link_cell.style = "Hyperlink"
 
 
 def _save_single(keyword: str, results: list, ts: str, announce: bool):
@@ -217,8 +225,7 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
 
         ws = wb.create_sheet(title=sheet_name)
         ws.append(_HEADERS)
-        for row in results:
-            ws.append(row)
+        _append_records(ws, results)
         total += len(results)
 
     saved_path = _try_save_workbook(wb, filepath, announce)

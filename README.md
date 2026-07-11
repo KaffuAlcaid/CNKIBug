@@ -2,23 +2,23 @@
 
 > 中国知网（CNKI）论文标题批量爬取工具。Windows 下可打包为独立 `.exe` 开箱即用，无需安装任何环境；Linux / macOS 可通过源码运行。
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
+![Python](https://img.shields.io/badge/Python-3.10--3.13-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Version](https://img.shields.io/badge/Version-0.2.2-orange)
+![Version](https://img.shields.io/github/v/release/KaffuAlcaid/CNKIBug?color=orange&label=Version)
 
 ---
 
 ##  功能特性
 
 -  输入关键词，自动批量抓取知网论文标题，支持单关键词和多关键词抓取模式
--  结果自动导出为 `.xlsx` Excel 文件，保存至桌面，用户可以选择多关键词保存策略
+-  结果自动导出为 `.xlsx` Excel 文件，包含可点击的 CNKI 详情链接，用户可以选择多关键词保存策略
 -  优先调用系统自带的 **Microsoft Edge**（Windows）；找不到时自动回退到 Playwright 的 Chromium，故 Linux / macOS 亦可运行
 -  首次运行会在程序旁创建 `CNKIBug/config.json`、`CNKIBug/cache/`、`CNKIBug/log/`，用于保存配置、会话缓存和日志
 -  支持复用 `CNKIBug/cache/cookies` 中的浏览器会话状态，默认 12 小时有效，可降低重复验证码概率
 -  抓取过程记录关键行为日志，结束时输出任务摘要、失败原因和字段完整性统计
 -  完善的错误提示，缺少环境时弹出友好的引导窗口
--  抓取中途按 `Ctrl+C` 或关闭浏览器可安全中止，已抓取数据不丢失
+-  抓取中途按 `Ctrl+C` 或关闭浏览器可安全中止，并从最近完成页继续
 -  可打包为单文件 `.exe`，双击即用，无需 Python 环境
 
 ---
@@ -91,7 +91,8 @@ python run.py
 ```bash
 pip install pyinstaller
 # 入口为 run.py，PyInstaller 会自动跟随 import 把整个 cnkibug/ 包收进单 exe
-pyinstaller --onefile --console --name CNKIBug run.py
+python generate_version_info.py version.txt
+pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkibug --name CNKIBug run.py
 # 生成文件在 dist/CNKIBug.exe
 ```
 
@@ -156,7 +157,7 @@ CNKIBug/config.json
 |------|------|
 | 操作系统 | Windows 10 / 11；或带图形桌面的 Linux / macOS（源码运行） |
 | 浏览器 | Windows：Microsoft Edge（预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
-| Python | 3.10+（源码运行需要） |
+| Python | 3.10–3.13（源码运行需要） |
 | 图形界面 | 必需 —— 需人工通过知网滑块验证，无法在纯无头服务器运行 |
 
 ---
@@ -180,6 +181,7 @@ CNKIBug/
 │   ├── exporter.py         # 结果导出（xlsx、文件名清洗、三种保存模式）
 │   ├── estimate.py         # 抓取耗时估算
 │   ├── runtime.py          # 运行数据目录、config.json、文件日志初始化
+│   ├── version.py          # 从包元数据或 pyproject.toml 读取程序版本
 │   ├── settings.py         # 抓取配置映射
 │   ├── session_cache.py    # 浏览器会话缓存（cache/cookies）
 │   ├── scrape_logging.py   # 抓取日志辅助与字段缺失统计
@@ -196,10 +198,12 @@ CNKIBug/
 ├── requirements.txt        # 依赖清单（playwright / openpyxl / rich）
 ├── icon.ico                # 打包图标
 ├── version.txt             # exe 版本信息
+├── generate_version_info.py # 根据 pyproject.toml 生成 exe 版本信息
 ├── README.md
 ├── .github/
 │   └── workflows/
-│       └── build.yml       # CI：在 Windows 上构建并发布 exe
+│       ├── build.yml       # CI：在 Windows 上构建并发布 exe
+│       └── test.yml        # PR/主分支跨平台测试矩阵
 └── dist/
     └── CNKIBug.exe         # 打包产物（不纳入版本管理）
 ```
