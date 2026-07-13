@@ -32,6 +32,10 @@ jobs:
         run: |
           uv pip install --system -e . -r requirements-dev.txt pyinstaller
 
+      - name: Install Playwright browsers
+        shell: bash
+        run: |
+          python -m playwright install --with-deps chromium
 
       - name: Smoke test (compile + import on Windows)
         shell: bash
@@ -48,7 +52,11 @@ jobs:
         shell: bash
         run: |
           python generate_version_info.py version.txt
-          pyinstaller --onefile --console --icon="icon.ico" --version-file="version.txt" --copy-metadata cnkibug --name CNKIBug run.py
+          pyinstaller --onefile --console --icon="icon.ico" \
+            --version-file="version.txt" \
+            --copy-metadata cnkibug \
+            --name CNKIBug \
+            run.py
 
       - name: Determine target release tag
         id: get_tag
