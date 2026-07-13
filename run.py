@@ -81,6 +81,18 @@ def safe_input(prompt: str = "") -> str:
         sys.exit(0)
 
 
+def _run_self_check() -> int:
+    try:
+        import cnkibug.exporter
+        import cnkibug.scraper
+        import cnkibug.task_state
+    except ImportError as err:
+        print(f"CNKIBug self-check failed: {err}")
+        return 1
+    print(f"CNKIBug self-check OK: {APP_VERSION}")
+    return 0
+
+
 def main():
     app_logger = logging.getLogger("cnkibug.app")
     try:
@@ -325,4 +337,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-check"]:
+        sys.exit(_run_self_check())
     main()

@@ -89,7 +89,7 @@ python run.py
 ### 方式三：自行打包为 exe
 
 ```bash
-pip install pyinstaller
+pip install -e . -r requirements-build.txt
 # 入口为 run.py，PyInstaller 会自动跟随 import 把整个 cnkibug/ 包收进单 exe
 python generate_version_info.py version.txt
 pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkibug --name CNKIBug run.py
@@ -196,6 +196,7 @@ CNKIBug/
 │   ├── window.py           # 浏览器窗口置顶（主要用于验证码提示）
 │   └── scraper.py          # 兼容入口（对外保留 scrape_cnki 导入路径）
 ├── requirements.txt        # 依赖清单（playwright / openpyxl / rich）
+├── requirements-build.txt  # 构建依赖（固定 PyInstaller 版本）
 ├── icon.ico                # 打包图标
 ├── version.txt             # exe 版本信息
 ├── generate_version_info.py # 根据 pyproject.toml 生成 exe 版本信息
