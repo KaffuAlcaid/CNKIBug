@@ -305,9 +305,10 @@ tests/
   </tr>
   <tr>
     <td style="text-align: center; vertical-align: top; width: 200px;">
-      <img src="./logo.png" width="80px" alt="Placeholder"/>
-      <br /><sub><b>虚位以待</b></sub>
-      <br />欢迎提交 PR
+      <a href="https://openai.com/codex/">
+        <img src="https://github.com/openai.png" width="80px" alt="ChatGPT / Codex"/>
+        <br /><sub><b>ChatGPT / Codex</b></sub>
+      </a><br />代码改进
     </td>
       <td style="text-align: center; vertical-align: top; width: 200px;">
       <a href="https://claude.ai">
