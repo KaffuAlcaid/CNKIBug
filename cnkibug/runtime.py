@@ -37,6 +37,7 @@ class RuntimePaths:
     config_path: Path
     cache_dir: Path
     log_dir: Path
+    status_dir: Path
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ def get_runtime_paths(base_dir: str | Path | None = None) -> RuntimePaths:
         config_path=data_dir / "config.json",
         cache_dir=data_dir / "cache",
         log_dir=data_dir / "log",
+        status_dir=data_dir / "status",
     )
 
 
@@ -144,6 +146,7 @@ def load_or_create_config(paths: RuntimePaths) -> tuple[dict[str, Any], list[tup
     paths.data_dir.mkdir(parents=True, exist_ok=True)
     paths.cache_dir.mkdir(parents=True, exist_ok=True)
     paths.log_dir.mkdir(parents=True, exist_ok=True)
+    paths.status_dir.mkdir(parents=True, exist_ok=True)
 
     events: list[tuple[str, str]] = []
     if not paths.config_path.exists():

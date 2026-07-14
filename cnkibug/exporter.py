@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 import logging
@@ -12,6 +13,7 @@ from .runtime import get_config
 # 三种保存模式共用的表头，与 scraper 抓取的列顺序一一对应：
 # [论文标题, 作者, 来源, 发表日期, 详情链接]
 _HEADERS = ["论文标题", "作者", "来源", "发表日期", "详情链接"]
+_CSV_HEADERS = ["keyword", "title", "authors", "source", "publication_date", "detail_url"]
 _logger = logging.getLogger("cnkibug.exporter")
 
 
@@ -243,6 +245,93 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
     return save_result
 
 
+def _write_multi_csv(filepath: str, all_results: dict[str, list]) -> None:
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(_CSV_HEADERS)
+        for keyword, records in all_results.items():
+            for record in records:
+                values = list(record[:5])
+                values.extend([""] * (5 - len(values)))
+                writer.writerow([keyword, *values])
+
+
+def _try_save_csv(
+    filepath: str,
+    all_results: dict[str, list],
+    announce: bool,
+) -> str | None:
+    try:
+        _write_multi_csv(filepath, all_results)
+        saved_path = os.path.abspath(filepath)
+        _log_save_success(saved_path, announce)
+        return saved_path
+    except OSError as save_err:
+        fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
+        if _log_save_path_enabled():
+            _logger.warning(
+                "CSV 保存失败，尝试备用路径: target=%s fallback=%s error=%s",
+                filepath,
+                fallback,
+                save_err,
+            )
+        else:
+            _logger.warning("CSV 保存失败，尝试备用路径: error=%s", save_err)
+        if announce:
+            _console.print(f"\n[red][x] CSV 文件保存失败：{save_err}[/red]")
+            _console.print(f"    正在尝试保存到备用位置：{fallback}")
+        try:
+            _write_multi_csv(fallback, all_results)
+            saved_path = os.path.abspath(fallback)
+            _log_save_success(saved_path, announce)
+            return saved_path
+        except OSError as fallback_err:
+            _logger.error("CSV 备用路径保存失败: %s", fallback_err)
+            if announce:
+                _console.print(f"[red][x] CSV 备用路径也保存失败：{fallback_err}[/red]")
+            return None
+
+
+def _save_multi_csv(all_results: dict[str, list], ts: str, announce: bool) -> SaveResult:
+    save_result = SaveResult()
+    total = sum(len(records) for records in all_results.values())
+    if total == 0:
+        if announce:
+            _console.print("[yellow][!] 所有关键词均未抓取到数据，不生成 CSV 文件。[/yellow]")
+        return save_result
+
+    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.csv")
+    saved_path = _try_save_csv(filepath, all_results, announce)
+    save_result.record(saved_path)
+    if saved_path and announce:
+        _console.print("\n" + "═" * 50)
+        _console.print(f"[bold green][*] 全部抓取完毕，共 {total} 条数据。[/bold green]")
+        _console.print("[*] CSV 文件已保存至：")
+        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
+        _console.print("═" * 50 + "\n")
+    return save_result
+
+
+def _save_single_csv(keyword: str, results: list, ts: str, announce: bool) -> SaveResult:
+    save_result = SaveResult()
+    if not results:
+        if announce:
+            _console.print("[yellow][!] 未抓取到任何数据，不生成 CSV 文件。[/yellow]")
+        return save_result
+
+    clean_keyword = _sanitize_name(keyword)
+    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.csv")
+    saved_path = _try_save_csv(filepath, {keyword: results}, announce)
+    save_result.record(saved_path)
+    if saved_path and announce:
+        _console.print("\n" + "═" * 50)
+        _console.print(f"[bold green][*] 共抓取 {len(results)} 条数据。[/bold green]")
+        _console.print("[*] CSV 文件已保存至：")
+        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
+        _console.print("═" * 50 + "\n")
+    return save_result
+
+
 def save_all(
     save_mode: str,
     keywords: list[str],
@@ -263,8 +352,13 @@ def save_all(
     if save_mode == "single":
         if keywords:
             return _save_single(keywords[0], all_results.get(keywords[0], []), ts, announce)
+    elif save_mode == "single_csv":
+        if keywords:
+            return _save_single_csv(keywords[0], all_results.get(keywords[0], []), ts, announce)
     elif save_mode == "multi_split":
         return _save_multi_split(all_results, ts, announce)
     elif save_mode == "multi_merge":
         return _save_multi_merge(all_results, ts, announce)
+    elif save_mode == "multi_csv":
+        return _save_multi_csv(all_results, ts, announce)
     return SaveResult()

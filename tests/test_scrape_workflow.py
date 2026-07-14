@@ -39,6 +39,11 @@ def _patch_workflow(monkeypatch, saved_results, deleted):
     monkeypatch.setattr(scrape_workflow, "save_cookie_state", lambda context, enabled: None)
     monkeypatch.setattr(scrape_workflow, "print_browser_banner", lambda: None)
     monkeypatch.setattr(scrape_workflow, "print_task_report", lambda report, results: None)
+    monkeypatch.setattr(
+        scrape_workflow,
+        "save_task_report",
+        lambda payload, ts: "/tmp/task_report.json",
+    )
     monkeypatch.setattr(scrape_workflow.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(
         scrape_workflow,
@@ -151,3 +156,30 @@ def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, caplog):
     assert state["completed"]["焊接"]["records"] == expected["焊接"]
     assert deleted == []
     assert "已合并保留部分结果" in caplog.text
+
+
+def test_browser_launch_failure_still_writes_not_started_report(monkeypatch):
+    saved_results = []
+    deleted = []
+    captured_reports = []
+    _patch_workflow(monkeypatch, saved_results, deleted)
+
+    def fail_launch(playwright):
+        raise RuntimeError("browser unavailable")
+
+    monkeypatch.setattr(scrape_workflow, "launch_browser", fail_launch)
+    monkeypatch.setattr(
+        scrape_workflow,
+        "save_task_report",
+        lambda payload, ts: captured_reports.append(payload) or "/tmp/report.json",
+    )
+
+    scrape_workflow.scrape_cnki(["焊接", "增材"], 2, "multi_csv")
+
+    assert saved_results[-1] == {}
+    assert captured_reports[0]["execution"]["stopped"] is True
+    assert [item["status"] for item in captured_reports[0]["keywords"]] == [
+        "not_started",
+        "not_started",
+    ]
+    assert deleted == []

@@ -154,6 +154,15 @@ def test_task_is_finished_accepts_success_and_empty(tmp_path):
     assert task_state.task_is_finished(state) is True
 
 
+def test_csv_save_modes_round_trip(tmp_path):
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+
+    for save_mode in ("single_csv", "multi_csv"):
+        state = task_state.make_task_state(["焊接"], 2, save_mode, "TS")
+        assert task_state.save_last_task(state) is not None
+        assert task_state.load_last_task()["save_mode"] == save_mode
+
+
 def test_save_last_task_logs_and_returns_none_on_write_error(monkeypatch, tmp_path, caplog):
     runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
     state = task_state.make_task_state(["焊接"], 1, "single", "TS")

@@ -1,3 +1,4 @@
+import csv
 import os
 
 import openpyxl
@@ -85,6 +86,22 @@ def test_save_all_single_no_data_skips_file(monkeypatch, tmp_path):
     assert list(tmp_path.glob("*.xlsx")) == []
 
 
+def test_save_all_single_csv_writes_keyword_column(monkeypatch, tmp_path):
+    _patch_desktop(monkeypatch, tmp_path)
+    data = [["标题", "作者", "来源", "2026-01-01", "https://example.test/1"]]
+
+    result = save_all("single_csv", ["焊接"], {"焊接": data}, "TS", announce=False)
+
+    path = tmp_path / "cnki_titles_焊接_TS.csv"
+    assert result.saved_paths == [str(path.resolve())]
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.reader(file))
+    assert rows == [
+        ["keyword", "title", "authors", "source", "publication_date", "detail_url"],
+        ["焊接", "标题", "作者", "来源", "2026-01-01", "https://example.test/1"],
+    ]
+
+
 # ============ multi_split：每词一文件 ============
 def test_save_all_multi_split_one_file_per_keyword(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
@@ -164,6 +181,35 @@ def test_save_all_multi_merge_all_empty_no_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     save_all("multi_merge", ["a", "b"], {"a": [], "b": []}, "TS", announce=False)
     assert list(tmp_path.glob("*.xlsx")) == []
+
+
+def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
+    _patch_desktop(monkeypatch, tmp_path)
+    all_results = {
+        "焊接": [["标题一", "作者甲", "来源甲", "2026-01-01", "https://example.test/1"]],
+        "增材": [["标题,二", "作者乙", "来源乙", "", ""]],
+    }
+
+    result = save_all("multi_csv", list(all_results), all_results, "TS", announce=False)
+
+    path = tmp_path / "cnki_titles_多词汇总_TS.csv"
+    assert result.saved_paths == [str(path.resolve())]
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.reader(file))
+    assert rows == [
+        ["keyword", "title", "authors", "source", "publication_date", "detail_url"],
+        ["焊接", "标题一", "作者甲", "来源甲", "2026-01-01", "https://example.test/1"],
+        ["增材", "标题,二", "作者乙", "来源乙", "", ""],
+    ]
+
+
+def test_save_all_multi_csv_skips_empty_results(monkeypatch, tmp_path):
+    _patch_desktop(monkeypatch, tmp_path)
+
+    result = save_all("multi_csv", ["空"], {"空": []}, "TS", announce=False)
+
+    assert result.attempted == 0
+    assert list(tmp_path.glob("*.csv")) == []
 
 
 # ============ PermissionError 回退到程序目录（核心防丢逻辑） ============

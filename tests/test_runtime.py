@@ -10,6 +10,7 @@ def test_init_runtime_creates_dirs_and_default_config(tmp_path):
     assert state.paths.data_dir == tmp_path / "CNKIBug"
     assert state.paths.cache_dir.is_dir()
     assert state.paths.log_dir.is_dir()
+    assert state.paths.status_dir.is_dir()
     assert state.paths.config_path.is_file()
     assert json.loads(state.paths.config_path.read_text(encoding="utf-8")) == runtime.DEFAULT_CONFIG
 

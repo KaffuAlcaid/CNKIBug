@@ -230,7 +230,7 @@ def _is_valid_task_state(raw: Any) -> bool:
         return False
     if not isinstance(raw.get("ts"), str) or not raw["ts"]:
         return False
-    if raw.get("save_mode") not in {"single", "multi_split", "multi_merge"}:
+    if raw.get("save_mode") not in {"single", "single_csv", "multi_split", "multi_merge", "multi_csv"}:
         return False
     if not isinstance(raw.get("max_pages"), int) or raw["max_pages"] <= 0:
         return False

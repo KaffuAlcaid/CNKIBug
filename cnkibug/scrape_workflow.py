@@ -12,15 +12,17 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import Error as PlaywrightError
 
 from .browser_runtime import create_browser_context, launch_browser
-from .exporter import save_all
+from .exporter import SaveResult, save_all
 from .keyword_scraper import scrape_keyword, warmup
 from .scrape_logging import keyword_log_ref
 from .scrape_report import (
     STATUS_FAILED,
     STATUS_STOPPED,
     TaskReport,
+    build_task_report,
     make_keyword_result,
     print_task_report,
+    save_task_report,
 )
 from .scrape_session import ScrapeSession
 from .session_cache import save_cookie_state
@@ -48,7 +50,7 @@ def _save_task_state(task_state: dict, context: str) -> bool:
     _logger.error("断点状态未写入，继续尝试保存抓取结果: context=%s", context)
     _console.print(
         "[bold yellow][!] 无法更新断点文件；若程序现在退出，本轮进度可能无法恢复。"
-        "程序将继续尝试保存 Excel。[/bold yellow]"
+        "程序将继续尝试保存结果文件。[/bold yellow]"
     )
     return False
 
@@ -62,8 +64,10 @@ def scrape_cnki(
     """
     save_mode:
       'single'       -> 单关键词，保存为 cnki_titles_关键词.xlsx
+      'single_csv'   -> 单关键词，保存为 cnki_titles_关键词.csv
       'multi_split'  -> 多关键词分文件保存
       'multi_merge'  -> 多关键词单文件多 Sheet 保存
+      'multi_csv'    -> 多关键词单文件 CSV 保存
     """
     settings = get_scraper_settings()
 
@@ -126,10 +130,10 @@ def scrape_cnki(
 
     with sync_playwright() as p:
         context = None
-
-        browser = launch_browser(p)
+        browser = None
 
         try:
+            browser = launch_browser(p)
             context = create_browser_context(browser, settings)
             page = context.new_page()
             session.page = page
@@ -362,6 +366,10 @@ def scrape_cnki(
             session.request_stop("运行时错误")
             _logger.error("抓取任务运行时错误: %s", e)
             _console.print(f"[red][x] 运行时错误: {e}[/red]")
+        except PlaywrightError as e:
+            session.request_stop("浏览器运行错误")
+            _logger.error("浏览器运行错误: %s", e)
+            _console.print(f"[red][x] 浏览器运行错误: {e}[/red]")
         finally:
             report.stopped = session.stop_requested
             report.verify_timeout = session.verify_timeout
@@ -380,6 +388,7 @@ def scrape_cnki(
                     _logger.warning("浏览器关闭失败", exc_info=True)
 
             final_save_failed = False
+            save_result = SaveResult()
             try:
                 _logger.info(
                     "最终保存开始: keyword_count=%d total_records=%d stop_requested=%s",
@@ -414,7 +423,35 @@ def scrape_cnki(
                 _logger.exception("最终保存失败")
                 _console.print("\n[bold red][x] 最终保存失败！[/bold red]")
                 _console.print(f"[red]错误信息：{save_err}[/red]")
-                _console.print("[yellow]请关闭已打开的同名 Excel 文件，并检查桌面或程序目录写入权限。[/yellow]")
+                _console.print("[yellow]请关闭已打开的同名结果文件，并检查桌面或程序目录写入权限。[/yellow]")
+
+            result_export_failed = final_save_failed
+            try:
+                report_payload = build_task_report(
+                    report,
+                    all_results,
+                    task_state,
+                    keywords,
+                    max_pages,
+                    save_mode,
+                    ts,
+                    save_result.saved_paths,
+                    result_export_failed,
+                )
+                report_path = save_task_report(report_payload, ts)
+                if report_path:
+                    _console.print(f"[dim][*] JSON 任务报告已保存至：{report_path}[/dim]")
+                else:
+                    final_save_failed = True
+                    _console.print("[red][x] JSON 任务报告保存失败。[/red]")
+            except KeyboardInterrupt:
+                final_save_failed = True
+                session.request_stop("用户在 JSON 任务报告保存期间中断")
+                _logger.warning("JSON 任务报告保存被用户中断")
+            except Exception:
+                final_save_failed = True
+                _logger.exception("JSON 任务报告生成失败")
+                _console.print("[red][x] JSON 任务报告生成失败，详情见日志。[/red]")
 
             try:
                 print_task_report(report, all_results)

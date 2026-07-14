@@ -32,6 +32,11 @@ try:
     from cnkibug.ui import _console
     from cnkibug.environment import check_env
     from cnkibug.estimate import estimate_seconds, format_eta
+    from cnkibug.keyword_import import (
+        KeywordImportError,
+        dedupe_keywords,
+        load_keywords_txt,
+    )
     from cnkibug.runtime import init_runtime
 except ImportError as _err:
     _handle_import_error(_err)
@@ -190,6 +195,8 @@ def main():
                     print("[!] 无效选项，请重新输入。")
 
                 keywords = []
+                keyword_input_result = None
+                keyword_source = "手动输入"
                 if mode_input == "1":
                     while True:
                         word = safe_input("\n请输入你要搜索的关键词: ").strip()
@@ -197,45 +204,79 @@ def main():
                             break
                         print("[!] 关键词不能为空，请重新输入。")
                     keywords = [word]
-                    save_mode = "single"
+                    print("\n请选择保存格式：")
+                    print("  1 -> Excel")
+                    print("  2 -> CSV（包含 keyword 列）")
+                    while True:
+                        save_input = safe_input("请输入选项（1 或 2）: ").strip()
+                        if save_input == "1":
+                            save_mode = "single"
+                            break
+                        if save_input == "2":
+                            save_mode = "single_csv"
+                            break
+                        print("[!] 无效选项，请重新输入。")
                 else:
-
                     print("\n[多关键词模式] 每个关键词将【独立检索、分别出结果】。")
                     print("若想【交叉检索】（多个词作为一个整体一起搜），请改用单关键词模式，")
                     print("在一个关键词框里用空格分隔多个词，例如：增材制造 316L 残余应力")
-                    print("\n请依次输入关键词，每输入一个按回车确认；直接按回车结束输入：")
+
+                    print("\n请选择关键词输入方式：")
+                    print("  1 -> 逐个手动输入")
+                    print("  2 -> 从 TXT 文件导入（一行一个关键词）")
                     while True:
-                        word = safe_input("  关键词: ").strip()
-                        if not word:
+                        source_input = safe_input("请输入选项（1 或 2）: ").strip()
+                        if source_input in ("1", "2"):
                             break
-                        keywords.append(word)
+                        print("[!] 无效选项，请重新输入。")
+
+                    if source_input == "1":
+                        raw_keywords = []
+                        print("\n请依次输入关键词，每输入一个按回车确认；直接按回车结束输入：")
+                        while True:
+                            word = safe_input("  关键词: ").strip()
+                            if not word:
+                                break
+                            raw_keywords.append(word)
+                        try:
+                            keyword_input_result = dedupe_keywords(raw_keywords)
+                        except KeywordImportError as exc:
+                            _console.print(f"[red][x] 输入失败：{exc}[/red]")
+                            continue
+                    else:
+                        while True:
+                            import_path = safe_input("\n请输入或拖入 TXT 文件路径: ")
+                            try:
+                                keyword_input_result = load_keywords_txt(import_path)
+                                keyword_source = f"TXT 文件（{import_path.strip()}）"
+                                break
+                            except KeywordImportError as exc:
+                                _console.print(f"[red][x] 导入失败：{exc}[/red]")
+
+                    keywords = keyword_input_result.keywords
                     if not keywords:
                         print("[!] 未输入任何关键词，程序退出。")
                         sys.exit(0)
-                    seen_keywords = set()
-                    deduped_keywords = []
-                    duplicate_keywords = []
-                    for word in keywords:
-                        if word in seen_keywords:
-                            duplicate_keywords.append(word)
-                            continue
-                        seen_keywords.add(word)
-                        deduped_keywords.append(word)
-                    keywords = deduped_keywords
-                    if duplicate_keywords:
-                        print(f"[!] 已忽略重复关键词：{duplicate_keywords}")
-                    print(f"\n[*] 共确认 {len(keywords)} 个关键词：{keywords}")
+                    if keyword_input_result.duplicates:
+                        duplicate_sample = keyword_input_result.duplicates[:10]
+                        suffix = "……" if keyword_input_result.duplicate_count > 10 else ""
+                        print(f"[!] 已忽略重复关键词：{duplicate_sample}{suffix}")
+                    print(f"\n[*] 去重后共 {len(keywords)} 个关键词。")
 
                     print("\n请选择保存方式：")
                     print("  1 -> 分文件保存（每个关键词独立生成一个 Excel）")
                     print("  2 -> 单文件多 Sheet 保存（所有关键词汇总到一个 Excel）")
+                    print("  3 -> 单文件 CSV 保存（包含 keyword 列）")
                     while True:
-                        save_input = safe_input("请输入选项（1 或 2）: ").strip()
+                        save_input = safe_input("请输入选项（1、2 或 3）: ").strip()
                         if save_input == "1":
                             save_mode = "multi_split"
                             break
                         if save_input == "2":
                             save_mode = "multi_merge"
+                            break
+                        if save_input == "3":
+                            save_mode = "multi_csv"
                             break
                         print("[!] 无效选项，请重新输入。")
                 target_pages = 0
@@ -255,24 +296,11 @@ def main():
                         continue
 
                     total_requested_pages = target_pages * len(keywords)
-                    if len(keywords) > 1:
-                        _console.print(
-                            f"\n[dim][*] 本次共 {len(keywords)} 个关键词，"
-                            f"每个关键词 {target_pages} 页，"
-                            f"理论最多抓取 {total_requested_pages} 页。[/dim]"
+                    if mode_input == "1" and target_pages > 20:
+                        warning_text = (
+                            f"您输入的页数较大（{target_pages}页），"
+                            "预计将耗时较长，且容易触发知网反爬验证。"
                         )
-
-                    if target_pages > 20 or total_requested_pages > 100:
-                        if len(keywords) > 1 and total_requested_pages > 100:
-                            warning_text = (
-                                f"本次理论抓取总页数较大（{total_requested_pages}页），"
-                                "预计将耗时较长，且容易触发知网反爬验证。"
-                            )
-                        else:
-                            warning_text = (
-                                f"您输入的页数较大（{target_pages}页），"
-                                "预计将耗时较长，且容易触发知网反爬验证。"
-                            )
                         _console.print(
                             f"\n[yellow][!] {warning_text}[/yellow]"
                         )
@@ -285,10 +313,53 @@ def main():
                         break
 
                 eta_low, eta_high = estimate_seconds(target_pages, len(keywords))
-                _console.print(
-                    f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
-                    f"（实际受网络与知网反爬等待波动，仅供参考）[/dim]"
-                )
+                if mode_input == "1":
+                    _console.print(
+                        f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
+                        f"（实际受网络与知网反爬等待波动，仅供参考）[/dim]"
+                    )
+                else:
+                    save_mode_text = {
+                        "multi_split": "分文件 Excel",
+                        "multi_merge": "单文件多 Sheet Excel",
+                        "multi_csv": "单文件 CSV",
+                    }[save_mode]
+                    _console.print("\n" + "=" * 50)
+                    _console.print("[bold cyan]批量任务预览[/bold cyan]")
+                    _console.print(f"  输入来源：{keyword_source}")
+                    _console.print(f"  读取行数：{keyword_input_result.total_lines}")
+                    _console.print(f"  空行：{keyword_input_result.blank_lines}")
+                    _console.print(f"  重复：{keyword_input_result.duplicate_count}")
+                    _console.print(f"  最终关键词：{len(keywords)}")
+                    _console.print(f"  每词抓取：{target_pages} 页")
+                    _console.print(f"  理论最多：{total_requested_pages} 页")
+                    _console.print(f"  预计耗时：{format_eta(eta_low, eta_high)}")
+                    _console.print(f"  保存方式：{save_mode_text}")
+                    preview_keywords = keywords[:20]
+                    _console.print(f"  关键词预览：{preview_keywords}")
+                    if len(keywords) > len(preview_keywords):
+                        _console.print(f"  [dim]另有 {len(keywords) - len(preview_keywords)} 个关键词未展开显示[/dim]")
+                    if target_pages > 20 or total_requested_pages > 100:
+                        _console.print(
+                            "  [yellow]风险提示：任务较大，预计耗时较长，"
+                            "且容易触发知网反爬验证。[/yellow]"
+                        )
+                    _console.print("=" * 50)
+                    print("  1 -> 开始执行")
+                    print("  2 -> 返回重新设置")
+                    print("  0 -> 取消并退出程序")
+                    while True:
+                        preview_input = safe_input("请输入选项（1、2 或 0）: ").strip()
+                        if preview_input in ("1", "2", "0"):
+                            break
+                        print("[!] 无效选项，请重新输入。")
+                    if preview_input == "2":
+                        app_logger.info("用户从批量任务预览返回重新设置")
+                        continue
+                    if preview_input == "0":
+                        app_logger.info("用户从批量任务预览取消任务")
+                        _console.print("\n[bold green]任务已取消，程序退出。[/bold green]")
+                        break
                 app_logger.info(
                     "用户选择: save_mode=%s keyword_count=%d pages=%d",
                     save_mode,
