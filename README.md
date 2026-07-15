@@ -28,21 +28,21 @@
   <tr>
     <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>启动演示1</b></sub>
+      <br /><sub><b>输入关键词与设置</b></sub>
     </td>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>2.输入关键词与设置</b></sub>
+      <img src="docs/3.gif" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>抓取过程</b></sub>
     </td>
   </tr>
   <tr>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/3.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>3. 抓取完成</b></sub>
+      <img src="docs/2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>抓取完成</b></sub>
     </td>
     <td style="text-align: center; vertical-align: top; width: 50%;">
       <img src="docs/4.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>4. 抓取完成，结果保存至桌面</b></sub>
+      <br /><sub><b>结果展示</b></sub>
     </td>
   </tr>
 </table>
