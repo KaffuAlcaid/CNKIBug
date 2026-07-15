@@ -9,6 +9,11 @@ def test_estimate_multi_keyword():
     assert estimate_seconds(3, 2) == (84, 132)
 
 
+def test_estimate_with_citations_uses_conservative_per_record_range():
+    assert estimate_seconds(1, 1, include_citation=True) == (50, 118)
+    assert estimate_seconds(1, 2, include_citation=True) == (124, 260)
+
+
 def test_format_eta_seconds_only():
     assert format_eta(10, 18) == "约 10 秒 ~ 18 秒"
 

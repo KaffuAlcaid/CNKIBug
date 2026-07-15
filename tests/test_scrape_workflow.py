@@ -61,7 +61,14 @@ def _patch_workflow(monkeypatch, saved_results, deleted):
         lambda: deleted.append(True),
     )
 
-    def save_all(save_mode, keywords, all_results, ts, announce):
+    def save_all(
+        save_mode,
+        keywords,
+        all_results,
+        ts,
+        announce,
+        include_citation=False,
+    ):
         saved_results.append({key: list(value) for key, value in all_results.items()})
         return SaveResult()
 
@@ -183,3 +190,53 @@ def test_browser_launch_failure_still_writes_not_started_report(monkeypatch):
         "not_started",
     ]
     assert deleted == []
+
+
+def test_new_task_propagates_citation_setting(monkeypatch):
+    saved_results = []
+    deleted = []
+    captured_reports = []
+    citation_flags = []
+    _patch_workflow(monkeypatch, saved_results, deleted)
+
+    def scrape_keyword(*args, **kwargs):
+        assert kwargs["include_citation"] is True
+        kwargs["on_page_complete"](
+            1,
+            [["标题", "作者", "来源", "日期", "https://example.test/1", "[1] 引文"]],
+        )
+        return make_keyword_result(
+            "焊接",
+            1,
+            1,
+            [["标题", "作者", "来源", "日期", "https://example.test/1", "[1] 引文"]],
+            STATUS_SUCCESS,
+        )
+
+    def save_all(*args, include_citation=False, **kwargs):
+        citation_flags.append(include_citation)
+        return SaveResult()
+
+    monkeypatch.setattr(scrape_workflow, "scrape_keyword", scrape_keyword)
+    monkeypatch.setattr(scrape_workflow, "save_all", save_all)
+    monkeypatch.setattr(
+        scrape_workflow,
+        "save_task_report",
+        lambda payload, ts: captured_reports.append(payload) or "/tmp/report.json",
+    )
+
+    scrape_workflow.scrape_cnki(
+        ["焊接"],
+        1,
+        "single",
+        include_citation=True,
+    )
+
+    assert citation_flags == [True, True]
+    assert captured_reports[0]["request"]["include_citation"] is True
+    assert captured_reports[0]["execution"]["citation"] == {
+        "success": 1,
+        "failed": 0,
+        "empty": 0,
+    }
+    assert deleted == [True]

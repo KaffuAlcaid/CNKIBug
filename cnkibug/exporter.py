@@ -10,8 +10,6 @@ from .ui import _console
 from .environment import get_real_desktop_path
 from .runtime import get_config
 
-# 三种保存模式共用的表头，与 scraper 抓取的列顺序一一对应：
-# [论文标题, 作者, 来源, 发表日期, 详情链接]
 _HEADERS = ["论文标题", "作者", "来源", "发表日期", "详情链接"]
 _CSV_HEADERS = ["keyword", "title", "authors", "source", "publication_date", "detail_url"]
 _logger = logging.getLogger("cnkibug.exporter")
@@ -111,27 +109,49 @@ def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
         return _try_save_fallback(wb, filepath, save_err, announce)
 
 
-def _build_single_sheet_workbook(results: list):
+def _export_headers(include_citation: bool) -> list[str]:
+    if include_citation:
+        return ["论文标题", "作者", "来源", "发表日期", "引用格式", "详情链接"]
+    return list(_HEADERS)
+
+
+def _export_record(record: list, include_citation: bool) -> list:
+    values = list(record[:5])
+    values.extend([""] * (5 - len(values)))
+    if include_citation:
+        citation = record[5] if len(record) > 5 else ""
+        return [*values[:4], citation, values[4]]
+    return values
+
+
+def _build_single_sheet_workbook(results: list, include_citation: bool = False):
     """构建单 Sheet 工作簿（single / multi_split 共用）。"""
     wb = openpyxl.Workbook()
     ws = wb.active
     assert ws is not None
     ws.title = "论文标题"
-    ws.append(_HEADERS)
-    _append_records(ws, results)
+    ws.append(_export_headers(include_citation))
+    _append_records(ws, results, include_citation)
     return wb
 
 
-def _append_records(ws, results: list) -> None:
+def _append_records(ws, results: list, include_citation: bool = False) -> None:
     for row in results:
-        ws.append(row)
+        ws.append(_export_record(row, include_citation))
         if len(row) > 4 and str(row[4]).strip():
-            link_cell = ws.cell(row=ws.max_row, column=5)
+            link_column = 6 if include_citation else 5
+            link_cell = ws.cell(row=ws.max_row, column=link_column)
             link_cell.hyperlink = str(row[4]).strip()
             link_cell.style = "Hyperlink"
 
 
-def _save_single(keyword: str, results: list, ts: str, announce: bool):
+def _save_single(
+    keyword: str,
+    results: list,
+    ts: str,
+    announce: bool,
+    include_citation: bool = False,
+):
     save_result = SaveResult()
     if not results:
         if announce:
@@ -140,7 +160,7 @@ def _save_single(keyword: str, results: list, ts: str, announce: bool):
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
-    wb = _build_single_sheet_workbook(results)
+    wb = _build_single_sheet_workbook(results, include_citation)
 
     saved_path = _try_save_workbook(wb, filepath, announce)
     save_result.record(saved_path)
@@ -153,7 +173,12 @@ def _save_single(keyword: str, results: list, ts: str, announce: bool):
     return save_result
 
 
-def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
+def _save_multi_split(
+    all_results: dict[str, list],
+    ts: str,
+    announce: bool,
+    include_citation: bool = False,
+):
     save_result = SaveResult()
     total = 0
     saved_files = []
@@ -178,7 +203,7 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
             )
         used_names.add(clean_keyword.casefold())
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
-        wb = _build_single_sheet_workbook(results)
+        wb = _build_single_sheet_workbook(results, include_citation)
         saved_path = _try_save_workbook(wb, filepath, announce)
         save_result.record(saved_path)
         if saved_path:
@@ -196,7 +221,12 @@ def _save_multi_split(all_results: dict[str, list], ts: str, announce: bool):
     return save_result
 
 
-def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
+def _save_multi_merge(
+    all_results: dict[str, list],
+    ts: str,
+    announce: bool,
+    include_citation: bool = False,
+):
     save_result = SaveResult()
     if not any(len(v) > 0 for v in all_results.values()):
         if announce:
@@ -226,8 +256,8 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
         used_sheet_names.add(sheet_name)
 
         ws = wb.create_sheet(title=sheet_name)
-        ws.append(_HEADERS)
-        _append_records(ws, results)
+        ws.append(_export_headers(include_citation))
+        _append_records(ws, results, include_citation)
         total += len(results)
 
     saved_path = _try_save_workbook(wb, filepath, announce)
@@ -245,14 +275,20 @@ def _save_multi_merge(all_results: dict[str, list], ts: str, announce: bool):
     return save_result
 
 
-def _write_multi_csv(filepath: str, all_results: dict[str, list]) -> None:
+def _write_multi_csv(
+    filepath: str,
+    all_results: dict[str, list],
+    include_citation: bool = False,
+) -> None:
     with open(filepath, "w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(_CSV_HEADERS)
+        headers = list(_CSV_HEADERS)
+        if include_citation:
+            headers.insert(5, "citation")
+        writer.writerow(headers)
         for keyword, records in all_results.items():
             for record in records:
-                values = list(record[:5])
-                values.extend([""] * (5 - len(values)))
+                values = _export_record(record, include_citation)
                 writer.writerow([keyword, *values])
 
 
@@ -260,9 +296,10 @@ def _try_save_csv(
     filepath: str,
     all_results: dict[str, list],
     announce: bool,
+    include_citation: bool = False,
 ) -> str | None:
     try:
-        _write_multi_csv(filepath, all_results)
+        _write_multi_csv(filepath, all_results, include_citation)
         saved_path = os.path.abspath(filepath)
         _log_save_success(saved_path, announce)
         return saved_path
@@ -281,7 +318,7 @@ def _try_save_csv(
             _console.print(f"\n[red][x] CSV 文件保存失败：{save_err}[/red]")
             _console.print(f"    正在尝试保存到备用位置：{fallback}")
         try:
-            _write_multi_csv(fallback, all_results)
+            _write_multi_csv(fallback, all_results, include_citation)
             saved_path = os.path.abspath(fallback)
             _log_save_success(saved_path, announce)
             return saved_path
@@ -292,7 +329,12 @@ def _try_save_csv(
             return None
 
 
-def _save_multi_csv(all_results: dict[str, list], ts: str, announce: bool) -> SaveResult:
+def _save_multi_csv(
+    all_results: dict[str, list],
+    ts: str,
+    announce: bool,
+    include_citation: bool = False,
+) -> SaveResult:
     save_result = SaveResult()
     total = sum(len(records) for records in all_results.values())
     if total == 0:
@@ -301,7 +343,7 @@ def _save_multi_csv(all_results: dict[str, list], ts: str, announce: bool) -> Sa
         return save_result
 
     filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.csv")
-    saved_path = _try_save_csv(filepath, all_results, announce)
+    saved_path = _try_save_csv(filepath, all_results, announce, include_citation)
     save_result.record(saved_path)
     if saved_path and announce:
         _console.print("\n" + "═" * 50)
@@ -312,7 +354,13 @@ def _save_multi_csv(all_results: dict[str, list], ts: str, announce: bool) -> Sa
     return save_result
 
 
-def _save_single_csv(keyword: str, results: list, ts: str, announce: bool) -> SaveResult:
+def _save_single_csv(
+    keyword: str,
+    results: list,
+    ts: str,
+    announce: bool,
+    include_citation: bool = False,
+) -> SaveResult:
     save_result = SaveResult()
     if not results:
         if announce:
@@ -321,7 +369,12 @@ def _save_single_csv(keyword: str, results: list, ts: str, announce: bool) -> Sa
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.csv")
-    saved_path = _try_save_csv(filepath, {keyword: results}, announce)
+    saved_path = _try_save_csv(
+        filepath,
+        {keyword: results},
+        announce,
+        include_citation,
+    )
     save_result.record(saved_path)
     if saved_path and announce:
         _console.print("\n" + "═" * 50)
@@ -338,6 +391,7 @@ def save_all(
     all_results: dict[str, list],
     ts: str,
     announce: bool,
+    include_citation: bool = False,
 ) -> SaveResult:
     """统一保存入口（幂等）。
 
@@ -351,14 +405,26 @@ def save_all(
     """
     if save_mode == "single":
         if keywords:
-            return _save_single(keywords[0], all_results.get(keywords[0], []), ts, announce)
+            return _save_single(
+                keywords[0],
+                all_results.get(keywords[0], []),
+                ts,
+                announce,
+                include_citation,
+            )
     elif save_mode == "single_csv":
         if keywords:
-            return _save_single_csv(keywords[0], all_results.get(keywords[0], []), ts, announce)
+            return _save_single_csv(
+                keywords[0],
+                all_results.get(keywords[0], []),
+                ts,
+                announce,
+                include_citation,
+            )
     elif save_mode == "multi_split":
-        return _save_multi_split(all_results, ts, announce)
+        return _save_multi_split(all_results, ts, announce, include_citation)
     elif save_mode == "multi_merge":
-        return _save_multi_merge(all_results, ts, announce)
+        return _save_multi_merge(all_results, ts, announce, include_citation)
     elif save_mode == "multi_csv":
-        return _save_multi_csv(all_results, ts, announce)
+        return _save_multi_csv(all_results, ts, announce, include_citation)
     return SaveResult()

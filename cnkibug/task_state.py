@@ -11,8 +11,8 @@ from .scrape_report import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 2
-_LEGACY_TASK_STATE_VERSION = 1
+TASK_STATE_VERSION = 3
+_LEGACY_TASK_STATE_VERSIONS = {1, 2}
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -30,6 +30,7 @@ def make_task_state(
     max_pages: int,
     save_mode: str,
     ts: str,
+    include_citation: bool = False,
 ) -> dict[str, Any]:
     return {
         "version": TASK_STATE_VERSION,
@@ -37,6 +38,7 @@ def make_task_state(
         "ts": ts,
         "save_mode": save_mode,
         "max_pages": max_pages,
+        "include_citation": include_citation,
         "keywords": list(keywords),
         "completed": {},
     }
@@ -54,9 +56,15 @@ def load_last_task() -> dict[str, Any] | None:
     if not _is_valid_task_state(raw):
         _logger.warning("last_task 格式无效: path=%s", path)
         return None
-    if raw.get("version") == _LEGACY_TASK_STATE_VERSION:
+    old_version = raw.get("version")
+    if old_version in _LEGACY_TASK_STATE_VERSIONS:
         raw = _upgrade_legacy_task_state(raw)
-        _logger.info("last_task 已从版本 1 兼容升级到版本 2: path=%s", path)
+        _logger.info(
+            "last_task 已从版本 %s 兼容升级到版本 %s: path=%s",
+            old_version,
+            TASK_STATE_VERSION,
+            path,
+        )
     return raw
 
 
@@ -219,14 +227,16 @@ def describe_task(state: dict[str, Any]) -> str:
     retry_text = f"，待重试 {retryable_count} 个" if retryable_count else ""
     return (
         f"关键词 {keyword_count} 个，已完成 {completed_count} 个{retry_text}，"
-        f"每词 {state.get('max_pages')} 页，保存方式 {state.get('save_mode')}"
+        f"每词 {state.get('max_pages')} 页，保存方式 {state.get('save_mode')}，"
+        f"引用格式 {'开启' if state.get('include_citation', False) else '关闭'}"
     )
 
 
 def _is_valid_task_state(raw: Any) -> bool:
     if not isinstance(raw, dict):
         return False
-    if raw.get("version") not in {TASK_STATE_VERSION, _LEGACY_TASK_STATE_VERSION}:
+    version = raw.get("version")
+    if version not in {TASK_STATE_VERSION, *_LEGACY_TASK_STATE_VERSIONS}:
         return False
     if not isinstance(raw.get("ts"), str) or not raw["ts"]:
         return False
@@ -238,11 +248,16 @@ def _is_valid_task_state(raw: Any) -> bool:
     if not isinstance(keywords, list) or not all(isinstance(item, str) for item in keywords):
         return False
     completed = raw.get("completed")
-    return isinstance(completed, dict)
+    if not isinstance(completed, dict):
+        return False
+    return version in _LEGACY_TASK_STATE_VERSIONS or isinstance(
+        raw.get("include_citation"), bool
+    )
 
 
 def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
     raw["version"] = TASK_STATE_VERSION
+    raw["include_citation"] = False
     completed = raw.get("completed", {})
     if isinstance(completed, dict):
         for item in completed.values():

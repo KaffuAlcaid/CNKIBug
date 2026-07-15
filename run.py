@@ -312,7 +312,23 @@ def main():
                     else:
                         break
 
-                eta_low, eta_high = estimate_seconds(target_pages, len(keywords))
+                while True:
+                    citation_input = safe_input(
+                        "\n是否抓取 GB/T 引用格式？这会显著增加耗时 [y/N]: "
+                    ).strip().lower()
+                    if citation_input in ("", "n"):
+                        include_citation = False
+                        break
+                    if citation_input == "y":
+                        include_citation = True
+                        break
+                    print("[!] 无效选项，请输入 y 或 n。")
+
+                eta_low, eta_high = estimate_seconds(
+                    target_pages,
+                    len(keywords),
+                    include_citation=include_citation,
+                )
                 if mode_input == "1":
                     _console.print(
                         f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
@@ -334,6 +350,9 @@ def main():
                     _console.print(f"  每词抓取：{target_pages} 页")
                     _console.print(f"  理论最多：{total_requested_pages} 页")
                     _console.print(f"  预计耗时：{format_eta(eta_low, eta_high)}")
+                    _console.print(
+                        f"  GB/T 引用格式：{'开启' if include_citation else '关闭'}"
+                    )
                     _console.print(f"  保存方式：{save_mode_text}")
                     preview_keywords = keywords[:20]
                     _console.print(f"  关键词预览：{preview_keywords}")
@@ -361,13 +380,19 @@ def main():
                         _console.print("\n[bold green]任务已取消，程序退出。[/bold green]")
                         break
                 app_logger.info(
-                    "用户选择: save_mode=%s keyword_count=%d pages=%d",
+                    "用户选择: save_mode=%s keyword_count=%d pages=%d include_citation=%s",
                     save_mode,
                     len(keywords),
                     target_pages,
+                    include_citation,
                 )
 
-                scrape_cnki(keywords, max_pages=target_pages, save_mode=save_mode)
+                scrape_cnki(
+                    keywords,
+                    max_pages=target_pages,
+                    save_mode=save_mode,
+                    include_citation=include_citation,
+                )
                 app_logger.info("本轮抓取完成")
 
                 again = safe_input("\n[*] 本轮抓取已完成！是否清屏并开始新一轮抓取？(y/n): ").strip().lower()

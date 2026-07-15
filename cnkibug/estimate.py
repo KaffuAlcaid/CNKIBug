@@ -5,6 +5,9 @@
 让显示时间只会比实际久、不会让用户空等到惊慌。实测三点仍落在新区间内并贴近下界。
 多关键词每个词另有一次重导航固定开销（约 12s）。
 
+开启引文时按每页最多 20 条、每条 2~5 秒额外估算。该区间有意偏保守，
+后续可根据真实页面的一页实测结果重新标定。
+
 0.1.8 计划：抓到知网“共找到 N 条”后，用真实结果页数替代用户填写页数，
 届时只需改本文件，不影响调用方。
 """
@@ -12,16 +15,29 @@
 _SEC_PER_PAGE_LOW = 10
 _SEC_PER_PAGE_HIGH = 18
 _REDIRECT_OVERHEAD = 12
+_RESULTS_PER_PAGE = 20
+_SEC_PER_CITATION_LOW = 2
+_SEC_PER_CITATION_HIGH = 5
 
 
-def estimate_seconds(pages: int, keyword_count: int = 1) -> tuple[int, int]:
+def estimate_seconds(
+    pages: int,
+    keyword_count: int = 1,
+    include_citation: bool = False,
+) -> tuple[int, int]:
     """返回 (低, 高) 秒数区间。"""
     per_word_low = pages * _SEC_PER_PAGE_LOW
     per_word_high = pages * _SEC_PER_PAGE_HIGH
     if keyword_count <= 1:
-        return per_word_low, per_word_high
-    low = keyword_count * (_REDIRECT_OVERHEAD + per_word_low)
-    high = keyword_count * (_REDIRECT_OVERHEAD + per_word_high)
+        low, high = per_word_low, per_word_high
+    else:
+        low = keyword_count * (_REDIRECT_OVERHEAD + per_word_low)
+        high = keyword_count * (_REDIRECT_OVERHEAD + per_word_high)
+
+    if include_citation:
+        expected_records = max(keyword_count, 1) * pages * _RESULTS_PER_PAGE
+        low += expected_records * _SEC_PER_CITATION_LOW
+        high += expected_records * _SEC_PER_CITATION_HIGH
     return low, high
 
 

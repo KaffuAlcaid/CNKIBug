@@ -231,6 +231,7 @@ def scrape_keyword(
     start_page: int = 1,
     initial_records: list[list[str]] | None = None,
     on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
+    include_citation: bool = False,
 ) -> KeywordResult:
     page = _require_page(session)
     results = list(initial_records or [])
@@ -241,6 +242,8 @@ def scrape_keyword(
         include_keyword=settings.log_keywords,
     )
     stats = new_scrape_stats()
+    citation_success = 0
+    citation_failed = 0
     seen: set[Any] = {record_dedup_key(record) for record in results}
     _console.print(f"\n[bold][*][/bold] 目标关键词：[bold cyan]{keyword}[/bold cyan]")
     _logger.info(
@@ -494,7 +497,21 @@ def scrape_keyword(
                     _logger.warning("结果页解析前安全验证超时: %s page=%d", keyword_ref, current_page)
                     break
 
-                page_parse = parse_result_rows(page, seen, stats)
+                citation_options = {}
+                if include_citation:
+                    citation_options = {
+                        "include_citation": True,
+                        "citation_log_ref": f"{keyword_ref} page={current_page}",
+                        "log_titles": settings.log_scraped_records,
+                    }
+                page_parse = parse_result_rows(
+                    page,
+                    seen,
+                    stats,
+                    **citation_options,
+                )
+                citation_success += page_parse.citation_success
+                citation_failed += page_parse.citation_failed
                 results.extend(page_parse.records)
                 for record in page_parse.records:
                     progress.console.print(f"  [green]→[/green] {record[0]}")
@@ -502,7 +519,8 @@ def scrape_keyword(
                 if settings.log_scraped_records:
                     _logger.info(
                         "结果页完成: %s page=%d rows=%d added=%d duplicates=%d "
-                        "skipped_no_title=%d parse_errors=%d total_records=%d missing_fields=(%s)",
+                        "skipped_no_title=%d parse_errors=%d total_records=%d "
+                        "citation_success=%d citation_failed=%d missing_fields=(%s)",
                         keyword_ref,
                         current_page,
                         page_parse.rows_seen,
@@ -511,6 +529,8 @@ def scrape_keyword(
                         page_parse.skipped_no_title,
                         page_parse.parse_errors,
                         len(results),
+                        page_parse.citation_success,
+                        page_parse.citation_failed,
                         missing_field_text(stats),
                     )
                 else:
@@ -636,13 +656,16 @@ def scrape_keyword(
 
     _logger.info(
         "关键词完成: %s total_records=%d rows_seen=%d duplicates=%d "
-        "skipped_no_title=%d parse_errors=%d missing_fields=(%s)",
+        "skipped_no_title=%d parse_errors=%d citation_success=%d "
+        "citation_failed=%d missing_fields=(%s)",
         keyword_ref,
         len(results),
         stats["rows_seen"],
         stats["duplicates"],
         stats["skipped_no_title"],
         stats["row_parse_errors"],
+        citation_success,
+        citation_failed,
         missing_field_text(stats),
     )
 

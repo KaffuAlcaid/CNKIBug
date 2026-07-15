@@ -13,6 +13,7 @@
 
 -  输入关键词或从 UTF-8 TXT 文件批量导入，自动去重并在执行前预览任务规模和预计耗时
 -  结果可导出为 `.xlsx` Excel 文件或带 `keyword` 列的单文件 `.csv`，Excel 中包含可点击的 CNKI 详情链接
+-  可选抓取 GB/T 7714 引文；逐篇获取会明显增加耗时，默认关闭
 -  优先调用系统自带的 **Microsoft Edge**（Windows）；找不到时自动回退到 Playwright 的 Chromium，故 Linux / macOS 亦可运行
 -  自动保存配置、会话缓存、日志和任务报告
 -  支持复用 `CNKIBug/cache/cookies` 中的浏览器会话状态，默认 12 小时有效，可降低重复验证码概率
@@ -60,23 +61,23 @@
 3. 双击 `CNKIBug.exe`，按提示手动输入关键词，或在多关键词模式中导入 TXT 文件
 4. 请注意：**一定要手动通过知网的滑块人机验证**
 
-首次运行后，程序会在 `CNKIBug.exe` 同目录创建 `CNKIBug/` 运行数据目录。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志；`status/` 保存 JSON 任务报告。
+首次运行后，程序会在 `CNKIBug.exe` 同目录创建 `CNKIBug/` 运行数据目录。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志；`status/` 保存 JSON 任务报告
 
-> 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装。
+> 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装
 
 ### 批量导入与输出
 
-TXT 导入仅用于多关键词模式，文件必须使用 UTF-8 编码，每个非空行表示一个独立关键词。程序会去除行首、行尾空白，忽略空行，并按首次出现顺序精确去重；关键词内部空格会保留。单个文件不能超过 1 MiB，去重后最多 1000 个关键词。
+TXT 导入仅用于多关键词模式，文件必须使用 UTF-8 编码，每个非空行表示一个独立关键词。程序会去除行首、行尾空白，忽略空行，并按首次出现顺序精确去重；关键词内部空格会保留。单个文件不能超过 1 MiB，去重后最多 1000 个关键词
 
-导入后会显示读取行数、空行数、重复数、最终关键词数、理论最多页数和预计耗时。确认任务预览后才会启动浏览器。所有关键词共用同一个抓取页数和保存方式。
+导入后会显示读取行数、空行数、重复数、最终关键词数、理论最多页数和预计耗时。确认任务预览后才会启动浏览器。所有关键词共用同一个抓取页数、保存方式和引文设置
 
-单关键词任务可以选择 Excel 或 CSV；多关键词任务支持每个关键词一个 Excel、单个 Excel 多 Sheet 或单个 CSV。CSV 使用 UTF-8 BOM 编码，表头为 `keyword,title,authors,source,publication_date,detail_url`。
+单关键词任务可以选择 Excel 或 CSV；多关键词任务支持每个关键词一个 Excel、单个 Excel 多 Sheet 或单个 CSV。开启引文后，结果列为“论文标题、作者、来源、发表日期、引用格式、详情链接”；单条引文获取失败时留空并继续。CSV 使用 UTF-8 BOM 编码，并在开启引文时于 `publication_date` 和 `detail_url` 之间增加 `citation` 列
 
-每轮任务还会在 `CNKIBug/status/` 中生成 `cnki_task_report_时间戳.json`，记录所有关键词的执行状态、失败原因、记录数和字段缺失统计。报告不包含完整论文记录；中止时尚未执行的关键词标记为 `not_started`。
+每轮任务还会在 `CNKIBug/status/` 中生成 `cnki_task_report_时间戳.json`，记录所有关键词的执行状态、失败原因、记录数、字段缺失和引文获取统计。报告不包含完整论文记录；中止时尚未执行的关键词标记为 `not_started`
 
 ### 方式二：源码运行（Linux / macOS 用户，或开发者）
 
-> Windows 用户建议直接用方式一的 `.exe`；**Linux / macOS 用户请使用本方式**。
+> Windows 用户建议直接用方式一的 `.exe`；**Linux / macOS 用户请使用本方式**
 
 ```bash
 pip install -r requirements.txt
@@ -84,9 +85,9 @@ playwright install chromium
 python run.py
 ```
 
-> **必须有图形桌面**（X11 / Wayland）：知网会弹出滑块验证，需要人工手动通过，
-> 因此**无法在纯无头（headless）服务器上运行**。
-> 结果文件保存到当前用户桌面目录（中文桌面会正确识别为 `~/桌面`）。
+> **必须有图形桌面**（X11 / Wayland）：知网会弹出滑块验证，需要人工手动通过
+> 因此**无法在纯无头（headless）服务器上运行**
+> 结果文件保存到当前用户桌面目录（中文桌面会正确识别为 `~/桌面`）
 
 ### 方式三：自行打包为 exe
 
@@ -96,7 +97,7 @@ python generate_version_info.py version.txt
 pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkibug --name CNKIBug run.py
 ```
 
-生成文件位于 `dist/CNKIBug.exe`。
+生成文件位于 `dist/CNKIBug.exe`
 
 ---
 
@@ -108,7 +109,7 @@ pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkib
 CNKIBug/config.json
 ```
 
-修改配置后请重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
+修改配置后请重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释
 
 ```json
 {
@@ -130,43 +131,45 @@ CNKIBug/config.json
 
 | 参数                           | 默认值      | 可填值                                | 作用                                   |
 |------------------------------|----------|------------------------------------|--------------------------------------|
-| `version`                    | `1`      | 正整数                                | 配置文件版本号，不建议手动修改                     |
+| `version`                    | `1`      | 正整数                                | 配置文件版本号，不建议手动修改                      |
 | `timeout_goto_ms`            | `30000`  | 正整数，毫秒                             | 打开 CNKI 页面时的最长等待时间                   |
 | `timeout_load_ms`            | `20000`  | 正整数，毫秒                             | 等待页面加载的最长时间                          |
-| `timeout_selector_ms`        | `15000`  | 正整数，毫秒                             | 等待搜索框、结果表格、翻页按钮等元素的最长时间             |
-| `verify_wait_timeout_sec`    | `180`    | 正整数，秒                              | 等待用户完成滑块或安全验证的最长时间                  |
+| `timeout_selector_ms`        | `15000`  | 正整数，毫秒                             | 等待搜索框、结果表格、翻页按钮等元素的最长时间              |
+| `verify_wait_timeout_sec`    | `180`    | 正整数，秒                              | 等待用户完成滑块或安全验证的最长时间                   |
 | `verify_notice_interval_sec` | `15`     | 正整数，秒                              | 验证等待期间的提醒间隔                          |
-| `max_advance_fail`           | `2`      | 正整数                                | 连续翻页失败多少次后结束当前关键词                   |
+| `max_advance_fail`           | `2`      | 正整数                                | 连续翻页失败多少次后结束当前关键词                    |
 | `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用 `CNKIBug/cache/cookies` 中的浏览器会话 |
-| `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存的有效期                       |
+| `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存的有效期                      |
 | `log_level`                  | `"INFO"` | `"INFO"` / `"WARNING"` / `"ERROR"` | 日志级别                                 |
-| `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                      |
-| `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                         |
-| `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                         |
+| `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                       |
+| `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |
+| `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
 
 ### 常见调整
 
-- 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大。
-- 验证码来不及处理：把 `verify_wait_timeout_sec` 调大。
-- 会话状态异常：删除 `CNKIBug/cache/cookies`，或把 `session_cache_enabled` 改为 `false` 后重启。
-- 不想日志记录本机路径：把 `log_save_path` 改为 `false`。
+- 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大
+- 验证码来不及处理：把 `verify_wait_timeout_sec` 调大
+- 会话状态异常：删除 `CNKIBug/cache/cookies`，或把 `session_cache_enabled` 改为 `false` 后重启
+- 不想日志记录本机路径：把 `log_save_path` 改为 `false`
 
 ---
 
 ## 系统要求
 
-| 项目 | 要求 |
-|------|------|
-| 操作系统 | Windows 10 / 11；或带图形桌面的 Linux / macOS（源码运行） |
-| 浏览器 | Windows：Microsoft Edge（预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
-| Python | 3.10–3.13（源码运行需要） |
-| 图形界面 | 必需 —— 需人工通过知网滑块验证，无法在纯无头服务器运行 |
+| 项目     | 要求                                                                                      |
+|--------|-----------------------------------------------------------------------------------------|
+| 操作系统   | Windows 10 / 11；或带图形桌面的 Linux / macOS（源码运行）                                             |
+| 浏览器    | Windows：Microsoft Edge（已预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
+| Python | 3.10–3.13（源码运行需要）                                                                       |
+| 图形界面   | 必需 —— 需人工通过知网滑块验证，无法在纯无头服务器运行                                                           |
 
 ---
 
 ## 不支持范围
 
-CNKIBug 仅面向中国知网（CNKI）基础检索结果标题抓取，不支持 Web of Science / SCI 数据库，也不支持通过校园 WebVPN、统一认证网关或代管账号密码的方式抓取机构资源。遇到这类访问环境时，请改用浏览器手动访问对应平台。
+CNKIBug 仅面向中国知网（CNKI）基础检索结果标题抓取，不支持 Web of Science / SCI 数据库，也不支持通过校园 WebVPN、统一认证网关或代管账号密码的方式抓取机构资源。
+
+遇到这类访问环境时，请改用浏览器手动访问对应平台。
 
 ---
 
@@ -180,6 +183,7 @@ CNKIBug/
 │   ├── browser_runtime.py  # 浏览器启动与上下文
 │   ├── cnki_guard.py       # 安全验证检测
 │   ├── cnki_page.py        # CNKI 页面选择器
+│   ├── citation_fetcher.py # GB/T 引文获取
 │   ├── keyword_import.py   # TXT 关键词导入
 │   ├── scrape_workflow.py  # 抓取任务编排
 │   ├── keyword_scraper.py  # 单关键词抓取
@@ -221,6 +225,7 @@ tests/
 ├── test_cnki_page.py          # 页面选择器测试
 ├── test_cnki_pagination.py    # 结果翻页测试
 ├── test_cnki_records.py       # 结果解析测试
+├── test_citation_fetcher.py   # GB/T 引文获取测试
 ├── test_dom_contract.py       # CNKI DOM 结构契约测试
 ├── test_estimate.py           # 耗时估算测试
 ├── test_exporter.py           # 结果导出测试
@@ -238,16 +243,24 @@ tests/
 
 ---
 
-##  免责声明
+## 免责声明
 
-本工具仅供个人学习、代码研究与非商业用途使用。请严格遵守知网（CNKI）的用户协议及相关法律法规。
+CNKIBug 是独立开发的开源工具，与中国知网（CNKI）及其关联方不存在隶属、授权、合作或背书关系。
 
-高频爬取极易触发 IP 封禁与验证码，请合理设置抓取页数，切勿滥用。
+本软件仅提供自动化操作能力。使用者应确保其访问和使用行为符合所在国家和地区合法的适用的法律法规、CNKI 用户协议及所在机构的相关规定，并自行确认对相关内容访问和处理权限。
 
-一切因使用本软件产生的封号等后果，皆由用户承担。作者本人概不负责。
+请合理控制任务规模和访问频率，不得将本软件用于绕过访问控制、破坏服务或其他违法违规活动。
+
+本软件按“现状”提供，不保证 CNKI 页面长期兼容，也不保证结果完整、准确或持续可用。
+
+因网络异常、网站变更、验证码、账号或 IP 限制、数据处理及使用本软件产生的风险，由使用者依法承担；作者在所在国家和地区合法的适用法律允许的范围内不承担相关责任。
+
+完整授权与免责条款以仓库中的 MIT License 为准。
+
+软件会在本地保存配置、日志、任务状态和浏览器会话信息。请妥善保管运行数据目录，并在分享日志或任务报告前检查其中是否包含敏感信息。
 
 ---
-## ♥️ 致谢 / Contributors
+## 致谢 / Contributors
 
 <table style="border: none;">
   <tr>

@@ -7,6 +7,7 @@ from cnkibug.scrape_report import (
     STATUS_SUCCESS,
     TaskReport,
     build_task_report,
+    collect_citation_stats,
     collect_field_stats,
     make_keyword_result,
     save_task_report,
@@ -42,6 +43,16 @@ def test_collect_field_stats_counts_missing_fields():
     assert stats.missing_source == 1
     assert stats.missing_date == 2
     assert stats.missing_detail_url == 3
+
+
+def test_collect_citation_stats_counts_empty_values_as_failures():
+    stats = collect_citation_stats([
+        ["标题", "", "", "", "url", "[1] 引文"],
+        ["标题2", "", "", "", "url2", ""],
+        ["旧记录", "", "", "", "url3"],
+    ])
+
+    assert stats == {"success": 1, "failed": 2, "empty": 2}
 
 
 def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
@@ -102,5 +113,5 @@ def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
     report_path = tmp_path / "CNKIBug" / "status" / "cnki_task_report_TS.json"
     assert saved_path == str(report_path.resolve())
     written = json.loads(report_path.read_text(encoding="utf-8"))
-    assert written["schema_version"] == 1
+    assert written["schema_version"] == 2
     assert written["keywords"][2]["keyword"] == "未开始"

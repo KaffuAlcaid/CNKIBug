@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 from playwright.sync_api import Error as PlaywrightError
 
+from .citation_fetcher import fetch_gbt_citation
 from .cnki_page import (
     SELECTOR_RESULT_ROWS,
     query_all,
@@ -26,6 +27,8 @@ class PageParseResult:
     duplicates: int = 0
     skipped_no_title: int = 0
     parse_errors: int = 0
+    citation_success: int = 0
+    citation_failed: int = 0
 
     @property
     def records_added(self) -> int:
@@ -36,6 +39,10 @@ def parse_result_rows(
     page: Any,
     seen: set[Any],
     stats: dict[str, int],
+    *,
+    include_citation: bool = False,
+    citation_log_ref: str = "",
+    log_titles: bool = False,
 ) -> PageParseResult:
     result = PageParseResult()
     none_text_fields: set[str] = set()
@@ -43,7 +50,7 @@ def parse_result_rows(
     result.rows_seen = len(rows)
     stats["rows_seen"] += result.rows_seen
 
-    for row in rows:
+    for row_index, row in enumerate(rows, start=1):
         try:
             title_el = query_first(row, "title")
             if not title_el:
@@ -86,6 +93,16 @@ def parse_result_rows(
 
             record = [title, authors, source, date, detail_url]
             count_missing_fields(record, stats)
+            if include_citation:
+                log_ref = f"{citation_log_ref} row={row_index}".strip()
+                if log_titles:
+                    log_ref = f"{log_ref} title={title!r}"
+                citation = fetch_gbt_citation(page, row, log_ref=log_ref)
+                record.append(citation)
+                if citation:
+                    result.citation_success += 1
+                else:
+                    result.citation_failed += 1
             result.records.append(record)
         except PlaywrightError:
             result.parse_errors += 1

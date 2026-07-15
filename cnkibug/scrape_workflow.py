@@ -60,6 +60,7 @@ def scrape_cnki(
     max_pages: int,
     save_mode: str,
     resume_state: dict | None = None,
+    include_citation: bool = False,
 ) -> None:
     """
     save_mode:
@@ -79,6 +80,7 @@ def scrape_cnki(
         keywords = list(resume_state["keywords"])
         max_pages = int(resume_state["max_pages"])
         save_mode = str(resume_state["save_mode"])
+        include_citation = bool(resume_state.get("include_citation", False))
         ts = str(resume_state["ts"])
         task_state = resume_state
         all_results: dict[str, list] = stored_results(task_state)
@@ -89,22 +91,32 @@ def scrape_cnki(
         )
         _logger.info(
             "恢复未完成任务: keyword_count=%d completed=%d stored_results=%d "
-            "max_pages=%d save_mode=%s ts=%s",
+            "max_pages=%d save_mode=%s include_citation=%s ts=%s",
             len(keywords),
             len(terminal_results),
             len(all_results),
             max_pages,
             save_mode,
+            include_citation,
             ts,
         )
     else:
         all_results = {}
         terminal_results = {}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        task_state = make_task_state(keywords, max_pages, save_mode, ts)
+        task_state = make_task_state(
+            keywords,
+            max_pages,
+            save_mode,
+            ts,
+            include_citation=include_citation,
+        )
         _save_task_state(task_state, "创建新任务")
 
-    report = TaskReport(total_keywords=len(keywords))
+    report = TaskReport(
+        total_keywords=len(keywords),
+        include_citation=include_citation,
+    )
     completed_state = task_state.get("completed", {})
     if isinstance(completed_state, dict):
         for idx, keyword in enumerate(keywords):
@@ -122,10 +134,11 @@ def scrape_cnki(
 
     session = ScrapeSession()
     _logger.info(
-        "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s",
+        "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s include_citation=%s",
         len(keywords),
         max_pages,
         save_mode,
+        include_citation,
     )
 
     with sync_playwright() as p:
@@ -249,6 +262,7 @@ def scrape_cnki(
                         start_page=completed_page + 1,
                         initial_records=checkpoint_records if completed_page else [],
                         on_page_complete=save_page_checkpoint,
+                        include_citation=include_citation,
                     )
                 except PlaywrightTimeoutError as e:
                     _logger.warning(
@@ -326,7 +340,14 @@ def scrape_cnki(
                     session.stop_requested,
                 )
                 try:
-                    save_result = save_all(save_mode, keywords, all_results, ts, announce=False)
+                    save_result = save_all(
+                        save_mode,
+                        keywords,
+                        all_results,
+                        ts,
+                        announce=False,
+                        include_citation=include_citation,
+                    )
                     _logger.info(
                         "增量保存完成: completed_keywords=%d/%d total_records=%d attempted=%d saved=%d failed=%d",
                         idx + 1,
@@ -396,7 +417,14 @@ def scrape_cnki(
                     sum(len(items) for items in all_results.values()),
                     session.stop_requested,
                 )
-                save_result = save_all(save_mode, keywords, all_results, ts, announce=True)
+                save_result = save_all(
+                    save_mode,
+                    keywords,
+                    all_results,
+                    ts,
+                    announce=True,
+                    include_citation=include_citation,
+                )
                 if save_result.failed:
                     final_save_failed = True
                     _console.print(
@@ -437,6 +465,7 @@ def scrape_cnki(
                     ts,
                     save_result.saved_paths,
                     result_export_failed,
+                    include_citation=include_citation,
                 )
                 report_path = save_task_report(report_payload, ts)
                 if report_path:

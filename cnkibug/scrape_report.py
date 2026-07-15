@@ -17,7 +17,7 @@ STATUS_EMPTY = "empty"
 STATUS_FAILED = "failed"
 STATUS_STOPPED = "stopped"
 STATUS_NOT_STARTED = "not_started"
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 _logger = logging.getLogger("cnkibug.report")
 
@@ -48,6 +48,7 @@ class TaskReport:
     keyword_results: list[KeywordResult] = field(default_factory=list)
     stopped: bool = False
     verify_timeout: bool = False
+    include_citation: bool = False
 
     def add(self, result: KeywordResult) -> None:
         self.keyword_results.append(result)
@@ -106,6 +107,20 @@ def collect_field_stats(all_results: dict[str, list]) -> FieldStats:
     return stats
 
 
+def collect_citation_stats(records: list) -> dict[str, int]:
+    success = sum(
+        1
+        for record in records
+        if len(record) > 5 and str(record[5]).strip()
+    )
+    failed = len(records) - success
+    return {
+        "success": success,
+        "failed": failed,
+        "empty": failed,
+    }
+
+
 def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
     field_stats = collect_field_stats(all_results)
     success = report.count_status(STATUS_SUCCESS)
@@ -122,6 +137,15 @@ def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
     _console.print(f"  失败：{failed}")
     _console.print(f"  中止：{stopped}")
     _console.print(f"  总记录：{field_stats.total_records}")
+    if report.include_citation:
+        citation_stats = collect_citation_stats(
+            [record for records in all_results.values() for record in records]
+        )
+        _console.print(
+            "  引用格式："
+            f"成功 {citation_stats['success']}，"
+            f"失败/留空 {citation_stats['failed']}"
+        )
     if report.verify_timeout:
         _console.print("  [yellow]安全验证等待超时：是[/yellow]")
     if report.stopped:
@@ -186,6 +210,7 @@ def build_task_report(
     ts: str,
     output_paths: list[str],
     export_failed: bool,
+    include_citation: bool = False,
 ) -> dict:
     results_by_keyword = {item.keyword: item for item in report.keyword_results}
     completed_state = task_state.get("completed", {})
@@ -227,16 +252,20 @@ def build_task_report(
 
         status_counts[status] = status_counts.get(status, 0) + 1
         field_stats = collect_field_stats({keyword: records})
-        keyword_reports.append({
+        keyword_report = {
             "keyword": keyword,
             "index": index,
             "status": status,
             "reason": reason,
             "record_count": len(records),
             "missing_fields": _field_stats_dict(field_stats),
-        })
+        }
+        if include_citation:
+            keyword_report["citation"] = collect_citation_stats(records)
+        keyword_reports.append(keyword_report)
 
     total_stats = collect_field_stats(all_results)
+    all_records = [record for records in all_results.values() for record in records]
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "app_version": APP_VERSION,
@@ -248,6 +277,7 @@ def build_task_report(
             "max_pages_per_keyword": max_pages,
             "theoretical_max_pages": len(keywords) * max_pages,
             "save_mode": save_mode,
+            "include_citation": include_citation,
         },
         "execution": {
             "stopped": report.stopped,
@@ -255,6 +285,11 @@ def build_task_report(
             "status_counts": status_counts,
             "total_records": total_stats.total_records,
             "missing_fields": _field_stats_dict(total_stats),
+            "citation": (
+                collect_citation_stats(all_records)
+                if include_citation
+                else {"success": 0, "failed": 0, "empty": 0}
+            ),
         },
         "exports": {
             "failed": export_failed,

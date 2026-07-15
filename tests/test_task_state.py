@@ -86,7 +86,36 @@ def test_load_last_task_upgrades_version_one_checkpoint(tmp_path, caplog):
         0,
         [["标题", "", "", ""]],
     )
+    assert loaded["include_citation"] is False
     assert "兼容升级" in caplog.text
+
+
+def test_citation_setting_round_trips_and_version_two_defaults_off(tmp_path):
+    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    state = task_state.make_task_state(
+        ["焊接"],
+        2,
+        "single",
+        "TS",
+        include_citation=True,
+    )
+    task_state.save_last_task(state)
+
+    loaded = task_state.load_last_task()
+    assert loaded is not None
+    assert loaded["include_citation"] is True
+    assert "引用格式 开启" in task_state.describe_task(loaded)
+
+    loaded["version"] = 2
+    loaded.pop("include_citation")
+    path = task_state.get_last_task_path()
+    assert path is not None
+    path.write_text(json.dumps(loaded, ensure_ascii=False), encoding="utf-8")
+
+    upgraded = task_state.load_last_task()
+    assert upgraded is not None
+    assert upgraded["version"] == task_state.TASK_STATE_VERSION
+    assert upgraded["include_citation"] is False
 
 
 def test_keyword_checkpoint_tracks_page_and_survives_failed_status():

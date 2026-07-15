@@ -29,6 +29,35 @@ def test_build_single_sheet_workbook_headers_and_rows():
     assert ws["E2"].hyperlink.target == detail_url
 
 
+def test_build_workbook_inserts_citation_before_detail_url():
+    detail_url = "https://kns.cnki.net/detail/1"
+    citation = "[1] 示例引文[J]. 测试期刊,2026."
+    wb = _build_single_sheet_workbook(
+        [["标题", "作者", "来源", "2026-01-01", detail_url, citation]],
+        include_citation=True,
+    )
+    ws = wb.active
+
+    assert ws is not None
+    assert [cell.value for cell in ws[1]] == [
+        "论文标题",
+        "作者",
+        "来源",
+        "发表日期",
+        "引用格式",
+        "详情链接",
+    ]
+    assert [cell.value for cell in ws[2]] == [
+        "标题",
+        "作者",
+        "来源",
+        "2026-01-01",
+        citation,
+        detail_url,
+    ]
+    assert ws["F2"].hyperlink.target == detail_url
+
+
 # ============ _sanitize_name 新边界（A11） ============
 def test_sanitize_name_pure_dots_and_empty_fallback():
     # strip 后为空（纯点 / 纯空白 / 空串）→ 兜底默认名
@@ -99,6 +128,51 @@ def test_save_all_single_csv_writes_keyword_column(monkeypatch, tmp_path):
     assert rows == [
         ["keyword", "title", "authors", "source", "publication_date", "detail_url"],
         ["焊接", "标题", "作者", "来源", "2026-01-01", "https://example.test/1"],
+    ]
+
+
+def test_save_all_single_csv_inserts_citation_before_detail_url(monkeypatch, tmp_path):
+    _patch_desktop(monkeypatch, tmp_path)
+    data = [[
+        "标题",
+        "作者",
+        "来源",
+        "2026-01-01",
+        "https://example.test/1",
+        "[1] 示例引文",
+    ]]
+
+    save_all(
+        "single_csv",
+        ["焊接"],
+        {"焊接": data},
+        "TS",
+        announce=False,
+        include_citation=True,
+    )
+
+    path = tmp_path / "cnki_titles_焊接_TS.csv"
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.reader(file))
+    assert rows == [
+        [
+            "keyword",
+            "title",
+            "authors",
+            "source",
+            "publication_date",
+            "citation",
+            "detail_url",
+        ],
+        [
+            "焊接",
+            "标题",
+            "作者",
+            "来源",
+            "2026-01-01",
+            "[1] 示例引文",
+            "https://example.test/1",
+        ],
     ]
 
 

@@ -1,14 +1,3 @@
-"""窗口置顶（第二层）—— Windows 专属 ctypes / user32 实现。
-
-用途：检测到知网安全验证(/verify)时，把浏览器窗口拽到最前抢用户注意力。
-只抢一次：置顶后立即取消 TOPMOST，避免常驻压住浏览器导致用户无法操作滑块
-（呼应「砍掉控制台常驻置顶」的决定）。
-
-诚实边界：受 Windows 前台锁定策略限制，SetForegroundWindow 不保证 100% 抢到
-焦点，系统策略严格时可能只是任务栏闪烁——这是 Win32 硬限制，不是代码缺陷。
-非 Windows 平台所有函数为 no-op，直接返回 False，绝不抛错、不影响抓取主流程。
-"""
-
 import sys
 import logging
 
