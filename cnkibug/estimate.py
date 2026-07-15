@@ -1,23 +1,36 @@
-"""抓取耗时预估 —— 纯函数，无副作用，可独立单测。
+"""抓取耗时与活动进度预估。"""
 
-标定数据（来自实测点位）：4 页 ≈ 36s、8 页 ≈ 88s、20 页 ≈ 208s。
-拟合下界约 8~13 秒/页；但 ETA 取“激进保守”档（10~18 秒/页），刻意高估，
-让显示时间只会比实际久、不会让用户空等到惊慌。实测三点仍落在新区间内并贴近下界。
-多关键词每个词另有一次重导航固定开销（约 12s）。
+from math import ceil
 
-开启引文时按每页最多 20 条、每条 2~5 秒额外估算。该区间有意偏保守，
-后续可根据真实页面的一页实测结果重新标定。
 
-0.1.8 计划：抓到知网“共找到 N 条”后，用真实结果页数替代用户填写页数，
-届时只需改本文件，不影响调用方。
-"""
-
-_SEC_PER_PAGE_LOW = 10
-_SEC_PER_PAGE_HIGH = 18
-_REDIRECT_OVERHEAD = 12
+_SEC_PER_PAGE_LOW = 8
+_SEC_PER_PAGE_HIGH = 12
+_INTER_KEYWORD_LOW = 5
+_INTER_KEYWORD_HIGH = 8
 _RESULTS_PER_PAGE = 20
-_SEC_PER_CITATION_LOW = 2
-_SEC_PER_CITATION_HIGH = 5
+_SEC_PER_CITATION_LOW = 0.95
+_SEC_PER_CITATION_HIGH = 1.25
+_STARTUP_OVERHEAD_LOW = 18
+_STARTUP_OVERHEAD_HIGH = 25
+
+
+def estimate_active_seconds(
+    pages: int,
+    keyword_count: int = 1,
+    include_citation: bool = False,
+) -> tuple[int, int]:
+    """返回正式抓取阶段的活动耗时区间。"""
+    effective_keyword_count = max(keyword_count, 1)
+    page_units = pages * effective_keyword_count
+    transition_count = max(effective_keyword_count - 1, 0)
+    low = page_units * _SEC_PER_PAGE_LOW + transition_count * _INTER_KEYWORD_LOW
+    high = page_units * _SEC_PER_PAGE_HIGH + transition_count * _INTER_KEYWORD_HIGH
+
+    if include_citation:
+        expected_records = page_units * _RESULTS_PER_PAGE
+        low += ceil(expected_records * _SEC_PER_CITATION_LOW)
+        high += ceil(expected_records * _SEC_PER_CITATION_HIGH)
+    return low, high
 
 
 def estimate_seconds(
@@ -25,20 +38,38 @@ def estimate_seconds(
     keyword_count: int = 1,
     include_citation: bool = False,
 ) -> tuple[int, int]:
-    """返回 (低, 高) 秒数区间。"""
-    per_word_low = pages * _SEC_PER_PAGE_LOW
-    per_word_high = pages * _SEC_PER_PAGE_HIGH
-    if keyword_count <= 1:
-        low, high = per_word_low, per_word_high
-    else:
-        low = keyword_count * (_REDIRECT_OVERHEAD + per_word_low)
-        high = keyword_count * (_REDIRECT_OVERHEAD + per_word_high)
+    """返回任务预览耗时，包含浏览器启动与预热。"""
+    low, high = estimate_active_seconds(
+        pages,
+        keyword_count,
+        include_citation=include_citation,
+    )
+    return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
 
-    if include_citation:
-        expected_records = max(keyword_count, 1) * pages * _RESULTS_PER_PAGE
-        low += expected_records * _SEC_PER_CITATION_LOW
-        high += expected_records * _SEC_PER_CITATION_HIGH
-    return low, high
+
+def estimate_progress(
+    elapsed_seconds: float,
+    low_seconds: int,
+    high_seconds: int,
+    completed: bool = False,
+) -> int:
+    """把活动耗时映射为预计进度。"""
+    if low_seconds <= 0:
+        raise ValueError("low_seconds must be greater than 0")
+    if high_seconds <= low_seconds:
+        raise ValueError("high_seconds must be greater than low_seconds")
+    if completed:
+        return 100
+    if elapsed_seconds <= 0:
+        return 0
+    if elapsed_seconds <= low_seconds:
+        return int(90 * elapsed_seconds / low_seconds)
+    if elapsed_seconds < high_seconds:
+        return int(
+            90
+            + 9 * (elapsed_seconds - low_seconds) / (high_seconds - low_seconds)
+        )
+    return 99
 
 
 def _fmt(seconds: int) -> str:

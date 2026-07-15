@@ -140,11 +140,26 @@ def _wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
     ).json_value()
 
 
+def _handle_verify_with_progress(
+    page: Any,
+    settings: ScraperSettings,
+    on_verify_state: Callable[[bool], None] | None,
+) -> str:
+    waiting = "/verify" in str(getattr(page, "url", ""))
+    if waiting and on_verify_state is not None:
+        on_verify_state(True)
+    result = handle_verify(page, settings)
+    if waiting and result != VERIFY_TIMEOUT and on_verify_state is not None:
+        on_verify_state(False)
+    return result
+
+
 def _position_after_checkpoint(
     session: ScrapeSession,
     completed_page: int,
     settings: ScraperSettings,
     keyword_ref: str,
+    on_verify_state: Callable[[bool], None] | None = None,
 ) -> bool:
     page = _require_page(session)
     for page_number in range(1, completed_page + 1):
@@ -168,7 +183,11 @@ def _position_after_checkpoint(
                 timeout=settings.timeout_selector_ms,
             )
             if not advanced:
-                verify_status = handle_verify(page, settings)
+                verify_status = _handle_verify_with_progress(
+                    page,
+                    settings,
+                    on_verify_state,
+                )
                 if verify_status == VERIFY_TIMEOUT:
                     session.request_stop("安全验证等待超时", verify_timeout=True)
                     _logger.warning(
@@ -193,7 +212,11 @@ def _position_after_checkpoint(
                     completed_page + 1,
                 )
                 return False
-            if handle_verify(page, settings) == VERIFY_TIMEOUT:
+            if _handle_verify_with_progress(
+                page,
+                settings,
+                on_verify_state,
+            ) == VERIFY_TIMEOUT:
                 session.request_stop("安全验证等待超时", verify_timeout=True)
                 _logger.warning(
                     "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
@@ -232,6 +255,8 @@ def scrape_keyword(
     initial_records: list[list[str]] | None = None,
     on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
     include_citation: bool = False,
+    on_page_start: Callable[[int], None] | None = None,
+    on_verify_state: Callable[[bool], None] | None = None,
 ) -> KeywordResult:
     page = _require_page(session)
     results = list(initial_records or [])
@@ -288,7 +313,11 @@ def scrape_keyword(
         return make_keyword_result(
             keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "首页预热失败"
         )
-    if handle_verify(page, settings) == VERIFY_TIMEOUT:
+    if _handle_verify_with_progress(
+        page,
+        settings,
+        on_verify_state,
+    ) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词因首页安全验证超时停止: %s", keyword_ref)
         return make_keyword_result(
@@ -309,7 +338,11 @@ def scrape_keyword(
         return make_keyword_result(
             keyword, keyword_index or 0, keyword_total or 0, results, STATUS_FAILED, "检索页加载失败"
         )
-    if handle_verify(page, settings) == VERIFY_TIMEOUT:
+    if _handle_verify_with_progress(
+        page,
+        settings,
+        on_verify_state,
+    ) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词因检索页安全验证超时停止: %s", keyword_ref)
         return make_keyword_result(
@@ -318,7 +351,11 @@ def scrape_keyword(
 
     _submit_search(page, keyword, settings)
     _logger.info("关键词检索已提交: %s", keyword_ref)
-    if handle_verify(page, settings) == VERIFY_TIMEOUT:
+    if _handle_verify_with_progress(
+        page,
+        settings,
+        on_verify_state,
+    ) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词提交后因安全验证超时停止: %s", keyword_ref)
         return make_keyword_result(
@@ -340,7 +377,11 @@ def scrape_keyword(
             break
 
         _logger.warning("等待检索结果期间检测到安全验证: %s", keyword_ref)
-        if handle_verify(page, settings) == VERIFY_TIMEOUT:
+        if _handle_verify_with_progress(
+            page,
+            settings,
+            on_verify_state,
+        ) == VERIFY_TIMEOUT:
             session.request_stop("安全验证等待超时", verify_timeout=True)
             return make_keyword_result(
                 keyword,
@@ -398,6 +439,7 @@ def scrape_keyword(
             start_page - 1,
             settings,
             keyword_ref,
+            on_verify_state,
         ):
             if session.stop_requested:
                 return make_keyword_result(
@@ -430,6 +472,9 @@ def scrape_keyword(
                 start_page=1,
                 initial_records=[],
                 on_page_complete=on_page_complete,
+                include_citation=include_citation,
+                on_page_start=on_page_start,
+                on_verify_state=on_verify_state,
             )
 
     with Progress(
@@ -453,13 +498,19 @@ def scrape_keyword(
 
         for current_page in range(start_page, max_pages + 1):
             try:
+                if on_page_start is not None:
+                    on_page_start(current_page)
                 progress.update(task, description=f"第 [bold]{current_page}[/bold] / {max_pages} 页")
                 try:
                     page.wait_for_selector(
                         SELECTOR_RESULT_ROWS, timeout=settings.timeout_selector_ms
                     )
                 except PlaywrightTimeoutError:
-                    verify_status = handle_verify(page, settings)
+                    verify_status = _handle_verify_with_progress(
+                        page,
+                        settings,
+                        on_verify_state,
+                    )
                     if verify_status == VERIFY_PASSED:
                         try:
                             page.wait_for_selector(
@@ -492,7 +543,11 @@ def scrape_keyword(
                         break
 
                 time.sleep(random.uniform(2, 5))
-                if handle_verify(page, settings) == VERIFY_TIMEOUT:
+                if _handle_verify_with_progress(
+                    page,
+                    settings,
+                    on_verify_state,
+                ) == VERIFY_TIMEOUT:
                     session.request_stop("安全验证等待超时", verify_timeout=True)
                     _logger.warning("结果页解析前安全验证超时: %s page=%d", keyword_ref, current_page)
                     break
@@ -590,7 +645,11 @@ def scrape_keyword(
                                 )
                                 break
                         time.sleep(random.uniform(1, 2))
-                        if handle_verify(page, settings) == VERIFY_TIMEOUT:
+                        if _handle_verify_with_progress(
+                            page,
+                            settings,
+                            on_verify_state,
+                        ) == VERIFY_TIMEOUT:
                             session.request_stop("安全验证等待超时", verify_timeout=True)
                             _logger.warning("翻页后安全验证超时: %s page=%d", keyword_ref, current_page)
                             break

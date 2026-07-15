@@ -6,7 +6,6 @@ from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
 
-from . import window
 from .settings import ScraperSettings
 from .ui import _console, print_verify_alert
 
@@ -23,7 +22,6 @@ def handle_verify(page: Any, settings: ScraperSettings) -> str:
         return VERIFY_NONE
 
     _logger.warning("检测到安全验证，等待用户手动完成")
-    window.bring_to_front()
     print_verify_alert()
 
     waited = 0.0

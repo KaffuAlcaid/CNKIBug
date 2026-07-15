@@ -202,7 +202,6 @@ CNKIBug/
 │   ├── runtime.py          # 运行目录、配置和日志
 │   ├── ui.py               # 控制台界面
 │   ├── version.py          # 应用版本读取
-│   └── window.py           # 浏览器窗口置顶
 ├── CNKIBug/                # 运行时数据目录
 │   ├── config.json         # 用户配置
 │   ├── cache/              # 会话与断点缓存
@@ -238,6 +237,7 @@ tests/
 ├── test_session_cache.py      # 会话缓存测试
 ├── test_settings.py           # 抓取配置测试
 ├── test_task_state.py         # 断点状态测试
+├── test_ui.py                 # Rich 预计进度展示测试
 └── test_version.py            # 版本读取测试
 ```
 

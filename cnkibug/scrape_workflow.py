@@ -12,6 +12,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import Error as PlaywrightError
 
 from .browser_runtime import create_browser_context, launch_browser
+from .estimate import estimate_active_seconds
 from .exporter import SaveResult, save_all
 from .keyword_scraper import scrape_keyword, warmup
 from .scrape_logging import keyword_log_ref
@@ -38,7 +39,7 @@ from .task_state import (
     stored_results,
     task_is_finished,
 )
-from .ui import _console, print_browser_banner
+from .ui import EstimatedProgressDisplay, _console, print_browser_banner
 
 
 _logger = logging.getLogger("cnkibug.scrape_workflow")
@@ -133,6 +134,7 @@ def scrape_cnki(
             ))
 
     session = ScrapeSession()
+    progress_display: EstimatedProgressDisplay | None = None
     _logger.info(
         "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s include_citation=%s",
         len(keywords),
@@ -169,6 +171,18 @@ def scrape_cnki(
                 else:
                     _logger.info("用户选择在预热失败后继续抓取")
             time.sleep(random.uniform(2, 4))
+
+            pending_keywords = [
+                keyword for keyword in keywords if keyword not in terminal_results
+            ]
+            if not session.stop_requested and pending_keywords:
+                eta_low, eta_high = estimate_active_seconds(
+                    max_pages,
+                    len(pending_keywords),
+                    include_citation=include_citation,
+                )
+                progress_display = EstimatedProgressDisplay(eta_low, eta_high)
+                progress_display.start()
 
             for idx, keyword in enumerate(keywords):
                 if session.stop_requested:
@@ -217,6 +231,15 @@ def scrape_cnki(
                         _console.print(
                             f"[dim][*] 关键词「{keyword}」上次未完整完成，将从第一页重新抓取。[/dim]"
                         )
+                if progress_display is not None:
+                    progress_display.update_status(
+                        keyword=keyword,
+                        keyword_index=idx + 1,
+                        keyword_total=len(keywords),
+                        page=min(completed_page + 1, max_pages),
+                        page_total=max_pages,
+                        records=sum(len(items) for items in all_results.values()),
+                    )
                 if idx > 0:
                     wait_sec = random.uniform(5, 8)
                     _logger.info(
@@ -237,6 +260,11 @@ def scrape_cnki(
                     all_results[keyword] = list(records)
                     mark_keyword_progress(task_state, keyword, completed, records)
                     _save_task_state(task_state, f"关键词第 {completed} 页检查点")
+                    if progress_display is not None:
+                        progress_display.update_status(
+                            page=max(completed, 1),
+                            records=sum(len(items) for items in all_results.values()),
+                        )
                     if completed:
                         _logger.info(
                             "页级断点已保存: %s completed_page=%d records=%d",
@@ -251,6 +279,18 @@ def scrape_cnki(
                             len(records),
                         )
 
+                def update_current_page(current_page: int) -> None:
+                    if progress_display is not None:
+                        progress_display.update_status(page=current_page)
+
+                def update_verify_state(waiting: bool) -> None:
+                    if progress_display is None:
+                        return
+                    if waiting:
+                        progress_display.pause()
+                    else:
+                        progress_display.resume()
+
                 try:
                     keyword_result = scrape_keyword(
                         session,
@@ -263,6 +303,8 @@ def scrape_cnki(
                         initial_records=checkpoint_records if completed_page else [],
                         on_page_complete=save_page_checkpoint,
                         include_citation=include_citation,
+                        on_page_start=update_current_page,
+                        on_verify_state=update_verify_state,
                     )
                 except PlaywrightTimeoutError as e:
                     _logger.warning(
@@ -329,6 +371,10 @@ def scrape_cnki(
                         len(merged_records),
                     )
                 all_results[keyword] = keyword_result.records
+                if progress_display is not None:
+                    progress_display.update_status(
+                        records=sum(len(items) for items in all_results.values()),
+                    )
                 report.add(keyword_result)
                 mark_keyword_done(task_state, keyword_result)
                 _save_task_state(task_state, "关键词结果更新")
@@ -394,6 +440,8 @@ def scrape_cnki(
         finally:
             report.stopped = session.stop_requested
             report.verify_timeout = session.verify_timeout
+            if progress_display is not None:
+                progress_display.saving()
             if context:
                 try:
                     save_cookie_state(context, settings.session_cache_enabled)
@@ -481,6 +529,22 @@ def scrape_cnki(
                 final_save_failed = True
                 _logger.exception("JSON 任务报告生成失败")
                 _console.print("[red][x] JSON 任务报告生成失败，详情见日志。[/red]")
+
+            display_completed = (
+                task_is_finished(task_state)
+                and not final_save_failed
+                and not session.stop_requested
+            )
+            if progress_display is not None:
+                if display_completed:
+                    progress_display.complete()
+                elif session.stop_requested:
+                    progress_display.stop("任务已停止，当前结果已保存")
+                elif final_save_failed:
+                    progress_display.stop("保存结果或任务报告失败")
+                else:
+                    progress_display.stop("任务未完整完成，已保留断点")
+                progress_display.close()
 
             try:
                 print_task_report(report, all_results)

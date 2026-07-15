@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from cnkibug import keyword_scraper
-from cnkibug.cnki_guard import VERIFY_NONE, VERIFY_PASSED
+from cnkibug.cnki_guard import VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
 from cnkibug.cnki_results import PageParseResult
 from cnkibug.scrape_report import STATUS_EMPTY, STATUS_FAILED, STATUS_SUCCESS
 from cnkibug.scrape_session import ScrapeSession
@@ -46,6 +46,44 @@ def test_wait_search_outcome_detects_verify_url():
     )
 
     assert outcome == "verify"
+
+
+def test_verify_progress_callback_pauses_and_resumes(monkeypatch):
+    page = SimpleNamespace(url="https://kns.cnki.net/verify")
+    events = []
+    monkeypatch.setattr(
+        keyword_scraper,
+        "handle_verify",
+        lambda page, settings: VERIFY_PASSED,
+    )
+
+    result = keyword_scraper._handle_verify_with_progress(
+        page,
+        _settings(),
+        events.append,
+    )
+
+    assert result == VERIFY_PASSED
+    assert events == [True, False]
+
+
+def test_verify_timeout_keeps_progress_paused(monkeypatch):
+    page = SimpleNamespace(url="https://kns.cnki.net/verify")
+    events = []
+    monkeypatch.setattr(
+        keyword_scraper,
+        "handle_verify",
+        lambda page, settings: VERIFY_TIMEOUT,
+    )
+
+    result = keyword_scraper._handle_verify_with_progress(
+        page,
+        _settings(),
+        events.append,
+    )
+
+    assert result == VERIFY_TIMEOUT
+    assert events == [True]
 
 
 def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
@@ -126,7 +164,7 @@ def test_scrape_keyword_resumes_after_completed_page(monkeypatch):
     monkeypatch.setattr(
         keyword_scraper,
         "_position_after_checkpoint",
-        lambda session, completed_page, settings, keyword_ref: positioned.append(completed_page) or True,
+        lambda session, completed_page, settings, keyword_ref, on_verify_state: positioned.append(completed_page) or True,
     )
     monkeypatch.setattr(
         keyword_scraper,
