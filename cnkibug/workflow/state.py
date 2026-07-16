@@ -6,8 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .runtime import get_paths
-from .scrape_report import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
+from ..cnki.models import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
+from ..core.events import EventSink, NULL_EVENTS
+from ..core.runtime import RuntimePaths
 
 
 LAST_TASK_FILENAME = "last_task.json"
@@ -18,10 +19,27 @@ _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
 
 
-def get_last_task_path() -> Path | None:
-    paths = get_paths()
-    if paths is None:
-        return None
+def persist_task_state(
+    state: dict,
+    context: str,
+    paths: RuntimePaths,
+    events: EventSink = NULL_EVENTS,
+) -> bool:
+    if save_last_task(state, paths) is not None:
+        return True
+    _logger.error("断点状态未写入，继续尝试保存抓取结果: context=%s", context)
+    events.emit(
+        "message",
+        text=(
+            "[!] 无法更新断点文件；若程序现在退出，本轮进度可能无法恢复。"
+            "程序将继续尝试保存结果文件。"
+        ),
+        level="warning",
+    )
+    return False
+
+
+def get_last_task_path(paths: RuntimePaths) -> Path:
     return paths.cache_dir / LAST_TASK_FILENAME
 
 
@@ -44,9 +62,9 @@ def make_task_state(
     }
 
 
-def load_last_task() -> dict[str, Any] | None:
-    path = get_last_task_path()
-    if path is None or not path.exists():
+def load_last_task(paths: RuntimePaths) -> dict[str, Any] | None:
+    path = get_last_task_path(paths)
+    if not path.exists():
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -68,11 +86,11 @@ def load_last_task() -> dict[str, Any] | None:
     return raw
 
 
-def save_last_task(state: dict[str, Any]) -> Path | None:
-    path = get_last_task_path()
-    if path is None:
-        _logger.warning("运行路径未初始化，跳过 last_task 保存")
-        return None
+def save_last_task(
+    state: dict[str, Any],
+    paths: RuntimePaths,
+) -> Path | None:
+    path = get_last_task_path(paths)
     tmp_path = path.with_suffix(".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,10 +114,8 @@ def save_last_task(state: dict[str, Any]) -> Path | None:
     return path
 
 
-def delete_last_task() -> bool:
-    path = get_last_task_path()
-    if path is None:
-        return False
+def delete_last_task(paths: RuntimePaths) -> bool:
+    path = get_last_task_path(paths)
     try:
         existed = path.exists()
         path.unlink(missing_ok=True)

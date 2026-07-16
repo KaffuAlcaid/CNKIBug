@@ -1,15 +1,17 @@
 import json
 
-from cnkibug import runtime
-from cnkibug.scrape_report import (
+from cnkibug.app import runtime
+from cnkibug.cnki.models import (
     STATUS_EMPTY,
     STATUS_FAILED,
     STATUS_SUCCESS,
+    make_keyword_result,
+)
+from cnkibug.workflow.report import (
     TaskReport,
     build_task_report,
     collect_citation_stats,
     collect_field_stats,
-    make_keyword_result,
     save_task_report,
 )
 
@@ -56,7 +58,7 @@ def test_collect_citation_stats_counts_empty_values_as_failures():
 
 
 def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
-    runtime.init_runtime(base_dir=tmp_path, configure_logging=False)
+    paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
     report = TaskReport(total_keywords=3, stopped=True)
     report.add(make_keyword_result(
         "成功",
@@ -108,7 +110,7 @@ def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
     assert payload["keywords"][0]["missing_fields"]["authors"] == 1
     assert all("records" not in item for item in payload["keywords"])
 
-    saved_path = save_task_report(payload, "TS")
+    saved_path = save_task_report(payload, "TS", paths)
 
     report_path = tmp_path / "CNKIBug" / "status" / "cnki_task_report_TS.json"
     assert saved_path == str(report_path.resolve())

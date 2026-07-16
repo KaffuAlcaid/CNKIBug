@@ -1,6 +1,6 @@
 import pytest
 
-from cnkibug.estimate import (
+from cnkibug.core.estimate import (
     estimate_active_seconds,
     estimate_progress,
     estimate_seconds,

@@ -1,4 +1,4 @@
-"""抓取耗时与活动进度预估。"""
+from __future__ import annotations
 
 from math import ceil
 
@@ -24,7 +24,6 @@ def estimate_active_seconds(
     transition_count = max(effective_keyword_count - 1, 0)
     low = page_units * _SEC_PER_PAGE_LOW + transition_count * _INTER_KEYWORD_LOW
     high = page_units * _SEC_PER_PAGE_HIGH + transition_count * _INTER_KEYWORD_HIGH
-
     if include_citation:
         expected_records = page_units * _RESULTS_PER_PAGE
         low += ceil(expected_records * _SEC_PER_CITATION_LOW)
@@ -44,13 +43,13 @@ def estimate_seconds(
     )
     return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
 
+
 def estimate_progress(
     elapsed_seconds: float,
     low_seconds: int,
     high_seconds: int,
     completed: bool = False,
 ) -> int:
-
     if low_seconds <= 0:
         raise ValueError("low_seconds must be greater than 0")
     if high_seconds <= low_seconds:
@@ -70,10 +69,10 @@ def estimate_progress(
 
 
 def _fmt(seconds: int) -> str:
-    m, s = divmod(int(seconds), 60)
-    if m > 0:
-        return f"{m} 分 {s} 秒"
-    return f"{s} 秒"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes > 0:
+        return f"{minutes} 分 {secs} 秒"
+    return f"{secs} 秒"
 
 
 def format_eta(low: int, high: int) -> str:

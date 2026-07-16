@@ -1,11 +1,11 @@
-from cnkibug.cnki_page import (
+from cnkibug.cnki.selectors import (
     SELECTOR_CURRENT_PAGE,
     SELECTOR_NEXT_PAGE,
     SELECTOR_PAGE_COUNT,
     SELECTOR_RESULT_ROWS,
     SELECTOR_RESULT_TITLE,
 )
-from cnkibug.cnki_results import (
+from cnkibug.cnki.pagination import (
     get_first_result_href,
     get_next_page_marker,
     get_result_page_numbers,

@@ -1,4 +1,4 @@
-from cnkibug import cnki_page
+from cnkibug.cnki import selectors as cnki_page
 
 
 class FakeParent:

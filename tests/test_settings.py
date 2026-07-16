@@ -1,5 +1,5 @@
-from cnkibug.runtime import DEFAULT_CONFIG
-from cnkibug.settings import ScraperSettings, get_scraper_settings
+from cnkibug.app.runtime import DEFAULT_CONFIG
+from cnkibug.core.settings import ScraperSettings, get_scraper_settings
 
 
 def test_get_scraper_settings_uses_config_values():
@@ -24,6 +24,7 @@ def test_get_scraper_settings_uses_config_values():
         max_advance_fail=6,
         session_cache_enabled=False,
         session_cache_ttl_hours=7,
+        log_save_path=True,
         log_keywords=False,
         log_scraped_records=False,
     )

@@ -1,9 +1,10 @@
 from types import SimpleNamespace
 
-from cnkibug import browser_runtime
+from cnkibug.app.runtime import get_runtime_paths
+from cnkibug.browser import runtime as browser_runtime
 
 
-def test_create_browser_context_uses_browser_default_user_agent(monkeypatch):
+def test_create_browser_context_uses_browser_default_user_agent(monkeypatch, tmp_path):
     captured_options = []
 
     class Browser:
@@ -17,7 +18,11 @@ def test_create_browser_context_uses_browser_default_user_agent(monkeypatch):
         session_cache_ttl_hours=12,
     )
 
-    context = browser_runtime.create_browser_context(Browser(), settings)
+    context = browser_runtime.create_browser_context(
+        Browser(),
+        settings,
+        get_runtime_paths(tmp_path),
+    )
 
     assert context is not None
     assert captured_options == [{"no_viewport": True}]

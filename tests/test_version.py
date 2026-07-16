@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cnkibug.version import APP_VERSION, read_project_version
+from cnkibug.core.version import APP_VERSION, read_project_version
 from generate_version_info import build_version_info
 
 

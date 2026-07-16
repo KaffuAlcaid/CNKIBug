@@ -3,7 +3,7 @@ import logging
 import pytest
 from playwright.sync_api import sync_playwright
 
-from cnkibug.citation_fetcher import fetch_gbt_citation
+from cnkibug.cnki.citation import fetch_gbt_citation
 
 
 @pytest.fixture(scope="module")

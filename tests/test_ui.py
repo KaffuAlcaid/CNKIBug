@@ -3,7 +3,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
-from cnkibug.ui import EstimatedProgressDisplay
+from cnkibug.app.ui import EstimatedProgressDisplay
 
 
 class FakeClock:

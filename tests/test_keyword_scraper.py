@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
-from cnkibug import keyword_scraper
-from cnkibug.cnki_guard import VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
-from cnkibug.cnki_results import PageParseResult
-from cnkibug.scrape_report import STATUS_EMPTY, STATUS_FAILED, STATUS_SUCCESS
-from cnkibug.scrape_session import ScrapeSession
-from cnkibug.settings import ScraperSettings
+from cnkibug.browser.session import ScrapeSession
+from cnkibug.cnki import guard, keyword as keyword_scraper, pages, search
+from cnkibug.cnki.guard import VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
+from cnkibug.cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_SUCCESS
+from cnkibug.cnki.results import PageParseResult
+from cnkibug.cnki.search import SEARCH_RESULTS, SearchResult
+from cnkibug.core.events import EventSink
+from cnkibug.core.settings import ScraperSettings
 
 
 def _settings(max_advance_fail=1):
@@ -18,17 +20,19 @@ def _settings(max_advance_fail=1):
         max_advance_fail=max_advance_fail,
         session_cache_enabled=False,
         session_cache_ttl_hours=1,
+        log_save_path=True,
         log_keywords=False,
         log_scraped_records=False,
     )
 
 
 def _patch_search_setup(monkeypatch):
-    monkeypatch.setattr(keyword_scraper, "_open_home_page", lambda page, settings: None)
-    monkeypatch.setattr(keyword_scraper, "_open_search_page", lambda page, settings: None)
-    monkeypatch.setattr(keyword_scraper, "_submit_search", lambda page, keyword, settings: None)
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (None, None))
-    monkeypatch.setattr(keyword_scraper.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        keyword_scraper,
+        "run_keyword_search",
+        lambda *args, **kwargs: SearchResult(SEARCH_RESULTS),
+    )
+    monkeypatch.setattr(pages.time, "sleep", lambda seconds: None)
 
 
 def test_wait_search_outcome_detects_verify_url():
@@ -41,7 +45,7 @@ def test_wait_search_outcome_detects_verify_url():
             assert "location.pathname.includes('/verify')" in script
             return Result()
 
-    outcome = keyword_scraper._wait_search_outcome(
+    outcome = search.wait_search_outcome(
         Page(),
         SimpleNamespace(timeout_selector_ms=10),
     )
@@ -51,58 +55,67 @@ def test_wait_search_outcome_detects_verify_url():
 
 def test_verify_progress_callback_pauses_and_resumes(monkeypatch):
     page = SimpleNamespace(url="https://kns.cnki.net/verify")
-    events = []
+    recorded = []
+
+    class Events(EventSink):
+        def emit(self, name, **payload):
+            recorded.append(name)
+
     monkeypatch.setattr(
-        keyword_scraper,
-        "handle_verify",
-        lambda page, settings: VERIFY_PASSED,
+        guard.time,
+        "sleep",
+        lambda seconds: setattr(page, "url", "https://kns.cnki.net/"),
     )
 
-    result = keyword_scraper._handle_verify_with_progress(
+    result = guard.handle_verify_with_progress(
         page,
         _settings(),
-        events.append,
+        Events(),
     )
 
     assert result == VERIFY_PASSED
-    assert events == [True, False]
+    assert recorded == [
+        "progress_paused",
+        "verify_required",
+        "verify_passed",
+        "progress_resumed",
+    ]
 
 
 def test_verify_timeout_keeps_progress_paused(monkeypatch):
     page = SimpleNamespace(url="https://kns.cnki.net/verify")
-    events = []
-    monkeypatch.setattr(
-        keyword_scraper,
-        "handle_verify",
-        lambda page, settings: VERIFY_TIMEOUT,
-    )
+    recorded = []
 
-    result = keyword_scraper._handle_verify_with_progress(
+    class Events(EventSink):
+        def emit(self, name, **payload):
+            recorded.append(name)
+
+    monkeypatch.setattr(guard.time, "sleep", lambda seconds: None)
+
+    result = guard.handle_verify_with_progress(
         page,
         _settings(),
-        events.append,
+        Events(),
     )
 
     assert result == VERIFY_TIMEOUT
-    assert events == [True]
+    assert recorded == ["progress_paused", "verify_required", "verify_timeout"]
 
 
 def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
-    _patch_search_setup(monkeypatch)
     outcomes = iter(["verify", "no_content"])
     verify_calls = 0
 
-    def handle_verify(page, settings):
+    def handle_verify(page, settings, events=None):
         nonlocal verify_calls
         verify_calls += 1
         return VERIFY_PASSED if verify_calls == 4 else VERIFY_NONE
 
-    monkeypatch.setattr(keyword_scraper, "handle_verify", handle_verify)
-    monkeypatch.setattr(
-        keyword_scraper,
-        "_wait_search_outcome",
-        lambda page, settings: next(outcomes),
-    )
+    monkeypatch.setattr(search, "open_home_page", lambda page, settings, events=None: None)
+    monkeypatch.setattr(search, "open_search_page", lambda page, settings, events=None: None)
+    monkeypatch.setattr(search, "submit_search", lambda page, keyword, settings, events=None: None)
+    monkeypatch.setattr(search, "wait_search_outcome", lambda page, settings: next(outcomes))
+    monkeypatch.setattr(guard, "handle_verify", handle_verify)
     session = ScrapeSession()
     session.page = object()
 
@@ -114,18 +127,17 @@ def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
 
 def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(records=[["标题", "", "", ""]], rows_seen=1),
     )
-    monkeypatch.setattr(keyword_scraper, "get_first_result_href", lambda page: "/detail/1")
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 2))
+    monkeypatch.setattr(pages, "get_first_result_href", lambda page: "/detail/1")
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 2))
     confirm_calls = []
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "wait_result_page_advanced",
         lambda *args, **kwargs: confirm_calls.append(True) or False,
     )
@@ -138,7 +150,7 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
             return None
 
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "query_first",
         lambda page, group: NextButton() if group == "next_page" else None,
     )
@@ -177,12 +189,11 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
 
 def test_scrape_keyword_accepts_missing_next_button_on_confirmed_last_page(monkeypatch):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
-    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(pages, "query_first", lambda page, group: None)
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(
             records=[["标题", "", "", "", "https://example.test/1"]],
@@ -207,12 +218,11 @@ def test_scrape_keyword_accepts_missing_next_button_on_confirmed_last_page(monke
 
 def test_scrape_keyword_rejects_missing_next_button_without_last_page_proof(monkeypatch):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, None))
-    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, None))
+    monkeypatch.setattr(pages, "query_first", lambda page, group: None)
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(
             records=[["标题", "", "", "", "https://example.test/1"]],
@@ -248,11 +258,10 @@ def test_scrape_keyword_rejects_missing_next_button_without_last_page_proof(monk
 
 def test_scrape_keyword_rejects_page_when_all_titles_are_unreadable(monkeypatch):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(rows_seen=2, skipped_no_title=2),
     )
@@ -282,17 +291,17 @@ def test_scrape_keyword_rejects_page_when_all_titles_are_unreadable(monkeypatch)
 
 def test_scrape_keyword_resumes_after_completed_page(monkeypatch):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
     monkeypatch.setattr(keyword_scraper, "get_first_result_title", lambda page: "旧标题")
     positioned = []
     monkeypatch.setattr(
         keyword_scraper,
-        "_position_after_checkpoint",
-        lambda session, completed_page, settings, keyword_ref, on_verify_state: positioned.append(completed_page) or True,
+        "position_after_checkpoint",
+        lambda session, completed_page, settings, keyword_ref: positioned.append(completed_page) or True,
     )
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (2, 2))
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(
             records=[["新标题", "", "", "", "https://example.test/new"]],
@@ -350,13 +359,12 @@ def test_scrape_keyword_finishes_from_last_page_checkpoint_without_network():
 
 def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_changes(monkeypatch, caplog):
     _patch_search_setup(monkeypatch)
-    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
     monkeypatch.setattr(keyword_scraper, "get_first_result_title", lambda page: "新首页标题")
-    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
-    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(pages, "query_first", lambda page, group: None)
     monkeypatch.setattr(
-        keyword_scraper,
+        pages,
         "parse_result_rows",
         lambda page, seen, stats: PageParseResult(
             records=[["新首页标题", "", "", "", "https://example.test/fresh"]],

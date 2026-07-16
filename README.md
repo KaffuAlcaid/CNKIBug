@@ -61,7 +61,7 @@
 3. 双击 `CNKIBug.exe`，按提示手动输入关键词，或在多关键词模式中导入 TXT 文件
 4. 请注意：**一定要手动通过知网的滑块人机验证**
 
-首次运行后，程序会在 `CNKIBug.exe` 同目录创建 `CNKIBug/` 运行数据目录。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志；`status/` 保存 JSON 任务报告
+首次运行后，打包版会在 `CNKIBug.exe` 同目录创建 `CNKIBug/` 运行数据目录，源码版则固定创建在 `run.py` 同目录。目标目录不可写时程序会明确报错，不会改存到其他位置。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志；`status/` 保存 JSON 任务报告
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装
 
@@ -180,28 +180,49 @@ CNKIBug/
 ├── run.py                  # 程序入口
 ├── cnkibug/
 │   ├── __init__.py         # Python 包入口
-│   ├── browser_runtime.py  # 浏览器启动与上下文
-│   ├── cnki_guard.py       # 安全验证检测
-│   ├── cnki_page.py        # CNKI 页面选择器
-│   ├── citation_fetcher.py # GB/T 引文获取
-│   ├── keyword_import.py   # TXT 关键词导入
-│   ├── scrape_workflow.py  # 抓取任务编排
-│   ├── keyword_scraper.py  # 单关键词抓取
-│   ├── cnki_results.py     # 结果解析
-│   ├── environment.py      # 运行环境检查
-│   ├── errors.py           # 错误提示
-│   ├── estimate.py         # 抓取耗时估算
-│   ├── exporter.py         # XLSX/CSV 导出
-│   ├── scrape_logging.py   # 抓取日志与统计
-│   ├── scrape_report.py    # 任务报告
-│   ├── scrape_session.py   # 单轮抓取状态
-│   ├── scraper.py          # 抓取兼容入口
-│   ├── session_cache.py    # 浏览器会话缓存
-│   ├── settings.py         # 抓取配置读取
-│   ├── task_state.py       # 断点恢复
-│   ├── runtime.py          # 运行目录、配置和日志
-│   ├── ui.py               # 控制台界面
-│   ├── version.py          # 应用版本读取
+│   ├── app/                # 菜单、配置、运行环境和控制台界面
+│   │   ├── cli.py          # 主菜单与任务循环
+│   │   ├── console.py      # 控制台输入与清屏
+│   │   ├── environment.py  # 运行环境检查
+│   │   ├── errors.py       # 致命错误提示
+│   │   ├── events.py       # 控制台事件适配
+│   │   ├── prompts.py      # 抓取参数输入与任务预览
+│   │   ├── report_view.py  # 任务报告展示
+│   │   ├── runtime.py      # 运行目录、配置和日志
+│   │   └── ui.py           # Rich 进度显示
+│   ├── browser/            # 浏览器生命周期与会话缓存
+│   │   ├── cache.py        # cookies 缓存
+│   │   ├── runtime.py      # 浏览器启动与上下文
+│   │   └── session.py      # 单轮抓取状态
+│   ├── cnki/               # CNKI 页面操作与单关键词抓取
+│   │   ├── citation.py     # GB/T 引文获取
+│   │   ├── guard.py        # 安全验证检测
+│   │   ├── keyword.py      # 单关键词流程
+│   │   ├── metrics.py      # 页面抓取指标
+│   │   ├── models.py       # 抓取结果模型
+│   │   ├── pages.py        # 当前页处理与翻页状态
+│   │   ├── pagination.py   # 页码与页面变化判断
+│   │   ├── results.py      # 结果解析
+│   │   ├── resume.py       # 页级断点定位
+│   │   ├── search.py       # 搜索与预热
+│   │   └── selectors.py    # 页面选择器
+│   ├── core/               # 界面无关的核心模型与接口
+│   │   ├── estimate.py     # 抓取耗时估算
+│   │   ├── events.py       # 任务事件接口
+│   │   ├── runtime.py      # 运行路径模型
+│   │   ├── settings.py     # 抓取配置模型
+│   │   └── version.py      # 应用版本读取
+│   ├── fileio/             # 文件输入输出
+│   │   ├── exporter.py     # XLSX/CSV 导出
+│   │   ├── keyword_input.py # TXT 关键词导入
+│   │   └── paths.py        # 输出目录定位
+│   └── workflow/           # 多关键词任务编排与收尾
+│       ├── finalize.py     # 保存、报告和浏览器关闭
+│       ├── keyword_run.py  # 单个关键词的任务级执行
+│       ├── report.py       # 任务报告数据
+│       ├── runner.py       # 总任务入口
+│       ├── state.py        # 断点状态
+│       └── task.py         # 任务上下文与初始化
 ├── CNKIBug/                # 运行时数据目录
 │   ├── config.json         # 用户配置
 │   ├── cache/              # 会话与断点缓存
@@ -221,6 +242,8 @@ tests/
 │   ├── cnki_no_results.html  # 无结果页面样本
 │   ├── cnki_results.html     # 搜索结果页面样本
 │   └── verify/               # 安全验证页面样本
+├── test_architecture.py       # 分层依赖约束测试
+├── test_browser_runtime.py    # 浏览器启动测试
 ├── test_cnki_page.py          # 页面选择器测试
 ├── test_cnki_pagination.py    # 结果翻页测试
 ├── test_cnki_records.py       # 结果解析测试
@@ -230,6 +253,7 @@ tests/
 ├── test_exporter.py           # 结果导出测试
 ├── test_keyword_import.py     # 关键词导入测试
 ├── test_keyword_scraper.py    # 单关键词抓取测试
+├── test_prompts.py            # 参数输入测试
 ├── test_run.py                # 程序入口测试
 ├── test_runtime.py            # 运行目录与配置测试
 ├── test_scrape_report.py      # 任务报告测试

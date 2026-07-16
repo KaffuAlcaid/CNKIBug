@@ -3,10 +3,11 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import sync_playwright
 
-from cnkibug.cnki_page import query_first
-from cnkibug.cnki_results import get_result_page_numbers, parse_result_rows
-from cnkibug.keyword_scraper import _wait_search_outcome
-from cnkibug.scrape_logging import new_scrape_stats
+from cnkibug.cnki.metrics import new_scrape_stats
+from cnkibug.cnki.pagination import get_result_page_numbers
+from cnkibug.cnki.results import parse_result_rows
+from cnkibug.cnki.search import wait_search_outcome
+from cnkibug.cnki.selectors import query_first
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -52,7 +53,7 @@ def test_result_fixture_matches_selectors_and_parser(page):
 def test_no_result_fixture_matches_outcome_contract(page):
     page.goto((FIXTURES / "cnki_no_results.html").as_uri())
 
-    outcome = _wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
+    outcome = wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
 
     assert outcome == "no_content"
 
@@ -60,6 +61,6 @@ def test_no_result_fixture_matches_outcome_contract(page):
 def test_verify_fixture_matches_url_contract(page):
     page.goto((FIXTURES / "verify" / "index.html").as_uri())
 
-    outcome = _wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
+    outcome = wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
 
     assert outcome == "verify"

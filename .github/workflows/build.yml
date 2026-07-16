@@ -69,8 +69,8 @@ jobs:
       - name: Smoke test source imports on Windows
         shell: bash
         run: |
-          python -m py_compile run.py cnkibug/*.py
-          python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+          python -m compileall -q run.py cnkibug
+          python -c "import cnkibug.app.cli, cnkibug.browser.runtime, cnkibug.cnki.keyword, cnkibug.fileio.exporter, cnkibug.workflow.runner; print('import graph OK')"
 
       - name: Unit tests
         shell: bash
@@ -84,6 +84,7 @@ jobs:
           pyinstaller --onefile --console --icon="icon.ico" \
             --version-file="version.txt" \
             --copy-metadata cnkibug \
+            --add-data "pyproject.toml:." \
             --name CNKIBug \
             run.py
 
@@ -94,7 +95,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged executable self-check failed"
           }
-          $expected = python -c "from cnkibug.version import APP_VERSION; print(APP_VERSION)"
+          $expected = python -c "from cnkibug.core.version import APP_VERSION; print(APP_VERSION)"
           if (($output -join "`n").Trim() -ne "CNKIBug self-check OK: $expected") {
             throw "Packaged executable version does not match project version"
           }

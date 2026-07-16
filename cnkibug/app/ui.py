@@ -18,7 +18,7 @@ from rich.progress import (
 )
 from rich.text import Text
 
-from .estimate import estimate_progress
+from ..core.estimate import estimate_progress
 
 _console = Console(highlight=False)
 

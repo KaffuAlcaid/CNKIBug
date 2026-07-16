@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .runtime import get_paths
+from ..core.runtime import RuntimePaths
 
 
 COOKIE_STATE_FILENAME = "cookies"
@@ -15,26 +15,21 @@ COOKIE_STATE_FILENAME = "cookies"
 _logger = logging.getLogger("cnkibug.session_cache")
 
 
-def get_cookie_state_path() -> Path | None:
-    paths = get_paths()
-    if paths is None:
-        return None
+def get_cookie_state_path(paths: RuntimePaths) -> Path:
     return paths.cache_dir / COOKIE_STATE_FILENAME
 
 
 def prepare_cookie_state(
     enabled: bool,
     ttl_hours: int,
+    paths: RuntimePaths,
     now: float | None = None,
 ) -> Path | None:
     if not enabled:
         _logger.info("cookies 会话缓存未启用")
         return None
 
-    path = get_cookie_state_path()
-    if path is None:
-        _logger.warning("运行路径未初始化，跳过 cookies 会话缓存")
-        return None
+    path = get_cookie_state_path(paths)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -67,14 +62,15 @@ def discard_cookie_state(path: Path, reason: str) -> None:
     _delete_cookie_state(path, reason)
 
 
-def save_cookie_state(context: Any, enabled: bool) -> Path | None:
+def save_cookie_state(
+    context: Any,
+    enabled: bool,
+    paths: RuntimePaths,
+) -> Path | None:
     if not enabled:
         return None
 
-    path = get_cookie_state_path()
-    if path is None:
-        _logger.warning("运行路径未初始化，跳过 cookies 会话缓存保存")
-        return None
+    path = get_cookie_state_path(paths)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     _secure_cookie_permissions(path)

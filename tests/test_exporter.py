@@ -3,8 +3,8 @@ import os
 
 import openpyxl
 
-from cnkibug import exporter
-from cnkibug.exporter import (
+from cnkibug.fileio import exporter
+from cnkibug.fileio.exporter import (
     _build_single_sheet_workbook,
     _sanitize_name,
     _try_save_workbook,
@@ -94,7 +94,7 @@ def _load(path):
 def test_save_all_single_writes_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     data = [["t1", "a1", "s1", "2026-01-01"], ["t2", "a2", "s2", "2026-02-02"]]
-    result = save_all("single", ["焊接"], {"焊接": data}, "TS", announce=False)
+    result = save_all("single", ["焊接"], {"焊接": data}, "TS")
 
     files = list(tmp_path.glob("cnki_titles_焊接_TS.xlsx"))
     assert len(files) == 1
@@ -108,7 +108,7 @@ def test_save_all_single_writes_file(monkeypatch, tmp_path):
 
 def test_save_all_single_no_data_skips_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
-    result = save_all("single", ["焊接"], {"焊接": []}, "TS", announce=False)
+    result = save_all("single", ["焊接"], {"焊接": []}, "TS")
     assert result.attempted == 0
     assert result.failed == 0
     assert result.saved_paths == []
@@ -119,7 +119,7 @@ def test_save_all_single_csv_writes_keyword_column(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     data = [["标题", "作者", "来源", "2026-01-01", "https://example.test/1"]]
 
-    result = save_all("single_csv", ["焊接"], {"焊接": data}, "TS", announce=False)
+    result = save_all("single_csv", ["焊接"], {"焊接": data}, "TS")
 
     path = tmp_path / "cnki_titles_焊接_TS.csv"
     assert result.saved_paths == [str(path.resolve())]
@@ -147,7 +147,6 @@ def test_save_all_single_csv_inserts_citation_before_detail_url(monkeypatch, tmp
         ["焊接"],
         {"焊接": data},
         "TS",
-        announce=False,
         include_citation=True,
     )
 
@@ -183,7 +182,7 @@ def test_save_all_multi_split_one_file_per_keyword(monkeypatch, tmp_path):
         "焊接": [["t", "a", "s", "d"]],
         "增材": [["t2", "a2", "s2", "d2"], ["t3", "a3", "s3", "d3"]],
     }
-    save_all("multi_split", list(all_results), all_results, "TS", announce=False)
+    save_all("multi_split", list(all_results), all_results, "TS")
 
     assert (tmp_path / "cnki_titles_焊接_TS.xlsx").exists()
     f2 = tmp_path / "cnki_titles_增材_TS.xlsx"
@@ -198,7 +197,7 @@ def test_save_all_multi_split_avoids_sanitized_name_collision(monkeypatch, tmp_p
         "AI:ML": [["second", "a", "s", "d"]],
     }
 
-    result = save_all("multi_split", list(all_results), all_results, "TS", announce=False)
+    result = save_all("multi_split", list(all_results), all_results, "TS")
 
     first = tmp_path / "cnki_titles_AI_ML_TS.xlsx"
     second = tmp_path / "cnki_titles_AI_ML_2_TS.xlsx"
@@ -213,7 +212,7 @@ def test_save_all_multi_split_avoids_sanitized_name_collision(monkeypatch, tmp_p
 def test_save_all_multi_split_skips_empty_keyword(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     all_results = {"有": [["t", "a", "s", "d"]], "无": []}
-    save_all("multi_split", ["有", "无"], all_results, "TS", announce=False)
+    save_all("multi_split", ["有", "无"], all_results, "TS")
 
     assert (tmp_path / "cnki_titles_有_TS.xlsx").exists()
     assert not (tmp_path / "cnki_titles_无_TS.xlsx").exists()
@@ -226,7 +225,7 @@ def test_save_all_multi_merge_one_file_multi_sheet(monkeypatch, tmp_path):
         "焊接": [["t", "a", "s", "d"]],
         "增材": [["t2", "a2", "s2", "d2"]],
     }
-    save_all("multi_merge", list(all_results), all_results, "TS", announce=False)
+    save_all("multi_merge", list(all_results), all_results, "TS")
 
     files = list(tmp_path.glob("cnki_titles_多词汇总_TS.xlsx"))
     assert len(files) == 1
@@ -241,7 +240,7 @@ def test_multi_merge_sheet_name_truncated_and_deduped(monkeypatch, tmp_path):
     k1 = "X" * 35
     k2 = "X" * 31 + "YYYY"  # 前 31 字符与 k1 相同 → 截断后撞名
     all_results = {k1: [["t", "a", "s", "d"]], k2: [["t2", "a2", "s2", "d2"]]}
-    save_all("multi_merge", [k1, k2], all_results, "TS", announce=False)
+    save_all("multi_merge", [k1, k2], all_results, "TS")
 
     wb = _load(tmp_path / "cnki_titles_多词汇总_TS.xlsx")
     names = wb.sheetnames
@@ -253,7 +252,7 @@ def test_multi_merge_sheet_name_truncated_and_deduped(monkeypatch, tmp_path):
 
 def test_save_all_multi_merge_all_empty_no_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
-    save_all("multi_merge", ["a", "b"], {"a": [], "b": []}, "TS", announce=False)
+    save_all("multi_merge", ["a", "b"], {"a": [], "b": []}, "TS")
     assert list(tmp_path.glob("*.xlsx")) == []
 
 
@@ -264,7 +263,7 @@ def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
         "增材": [["标题,二", "作者乙", "来源乙", "", ""]],
     }
 
-    result = save_all("multi_csv", list(all_results), all_results, "TS", announce=False)
+    result = save_all("multi_csv", list(all_results), all_results, "TS")
 
     path = tmp_path / "cnki_titles_多词汇总_TS.csv"
     assert result.saved_paths == [str(path.resolve())]
@@ -280,7 +279,7 @@ def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
 def test_save_all_multi_csv_skips_empty_results(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
 
-    result = save_all("multi_csv", ["空"], {"空": []}, "TS", announce=False)
+    result = save_all("multi_csv", ["空"], {"空": []}, "TS")
 
     assert result.attempted == 0
     assert list(tmp_path.glob("*.csv")) == []
@@ -302,7 +301,7 @@ def test_try_save_workbook_falls_back_to_cwd_on_permission_error(monkeypatch, tm
         return real_save(path)
 
     monkeypatch.setattr(wb, "save", fake_save)
-    saved = _try_save_workbook(wb, target, announce=False)
+    saved = _try_save_workbook(wb, target)
 
     assert saved is not None
     assert os.path.basename(saved) == "out.xlsx"
@@ -312,14 +311,13 @@ def test_try_save_workbook_falls_back_to_cwd_on_permission_error(monkeypatch, tm
 
 def test_save_all_reports_failed_save(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
-    monkeypatch.setattr(exporter, "_try_save_workbook", lambda wb, filepath, announce: None)
+    monkeypatch.setattr(exporter, "_try_save_workbook", lambda wb, filepath, **kwargs: None)
 
     result = save_all(
         "single",
         ["焊接"],
         {"焊接": [["t", "a", "s", "d"]]},
         "TS",
-        announce=False,
     )
 
     assert result.attempted == 1

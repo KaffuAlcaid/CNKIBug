@@ -1,7 +1,7 @@
 import pytest
 
-from cnkibug import keyword_import
-from cnkibug.keyword_import import KeywordImportError, dedupe_keywords, load_keywords_txt
+from cnkibug.fileio import keyword_input as keyword_import
+from cnkibug.fileio.keyword_input import KeywordImportError, dedupe_keywords, load_keywords_txt
 
 
 def test_dedupe_keywords_trims_ends_and_preserves_order_and_internal_spaces():

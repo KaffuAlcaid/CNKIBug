@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ..core.runtime import RuntimePaths
 
 
 APP_DATA_DIR_NAME = "CNKIBug"
@@ -31,16 +31,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 @dataclass(frozen=True)
-class RuntimePaths:
-    base_dir: Path
-    data_dir: Path
-    config_path: Path
-    cache_dir: Path
-    log_dir: Path
-    status_dir: Path
-
-
-@dataclass(frozen=True)
 class RuntimeState:
     paths: RuntimePaths
     config: dict[str, Any]
@@ -48,35 +38,11 @@ class RuntimeState:
     events: list[tuple[str, str]]
 
 
-_CONFIG: dict[str, Any] = DEFAULT_CONFIG.copy()
-_PATHS: RuntimePaths | None = None
-
-
-def get_program_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[1]
-
-
-def get_user_data_base_dir() -> Path:
-    if sys.platform == "win32":
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            return Path(local_app_data)
-        return Path.home() / "AppData" / "Local"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support"
-    xdg_data_home = os.environ.get("XDG_DATA_HOME")
-    if xdg_data_home:
-        return Path(xdg_data_home)
-    return Path.home() / ".local" / "share"
-
-
-def get_runtime_paths(base_dir: str | Path | None = None) -> RuntimePaths:
-    resolved_base = Path(base_dir).resolve() if base_dir is not None else get_program_dir()
-    data_dir = resolved_base / APP_DATA_DIR_NAME
+def get_runtime_paths(program_dir: str | Path) -> RuntimePaths:
+    resolved_program_dir = Path(program_dir).resolve()
+    data_dir = resolved_program_dir / APP_DATA_DIR_NAME
     return RuntimePaths(
-        base_dir=resolved_base,
+        program_dir=resolved_program_dir,
         data_dir=data_dir,
         config_path=data_dir / "config.json",
         cache_dir=data_dir / "cache",
@@ -85,45 +51,19 @@ def get_runtime_paths(base_dir: str | Path | None = None) -> RuntimePaths:
     )
 
 
-def get_config() -> dict[str, Any]:
-    return _CONFIG.copy()
-
-
-def get_paths() -> RuntimePaths | None:
-    return _PATHS
-
-
 def build_log_path(paths: RuntimePaths, now: datetime | None = None) -> Path:
     current = now or datetime.now()
     return paths.log_dir / f"cnkibug_{current:%Y%m%d}.log"
 
 
 def init_runtime(
-    base_dir: str | Path | None = None,
+    program_dir: str | Path,
     app_version: str | None = None,
     configure_logging: bool = True,
 ) -> RuntimeState:
-    paths = get_runtime_paths(base_dir)
-    try:
-        config, events = load_or_create_config(paths)
-    except OSError as exc:
-        if base_dir is not None:
-            raise
-        failed_paths = paths
-        paths = get_runtime_paths(get_user_data_base_dir())
-        config, events = load_or_create_config(paths)
-        events.insert(
-            0,
-            (
-                "WARNING",
-                f"程序目录不可写，已改用用户数据目录: {paths.data_dir} (原目录: {failed_paths.data_dir}, 错误: {exc})",
-            ),
-        )
+    paths = get_runtime_paths(program_dir)
+    config, events = load_or_create_config(paths)
     log_path = build_log_path(paths)
-
-    global _CONFIG, _PATHS
-    _CONFIG = config.copy()
-    _PATHS = paths
 
     if configure_logging:
         setup_file_logging(log_path, config)

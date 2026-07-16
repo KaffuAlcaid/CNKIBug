@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 
-from cnkibug.version import read_project_version
+from cnkibug.core.version import read_project_version
 
 
 def build_version_info(version: str) -> str:

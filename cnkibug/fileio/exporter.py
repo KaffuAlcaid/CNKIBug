@@ -6,9 +6,7 @@ from dataclasses import dataclass, field
 
 import openpyxl
 
-from .ui import _console
-from .environment import get_real_desktop_path
-from .runtime import get_config
+from .paths import get_real_desktop_path
 
 _HEADERS = ["论文标题", "作者", "来源", "发表日期", "详情链接"]
 _CSV_HEADERS = ["keyword", "title", "authors", "source", "publication_date", "detail_url"]
@@ -16,15 +14,30 @@ _logger = logging.getLogger("cnkibug.exporter")
 
 
 @dataclass
+class SavedFile:
+    path: str
+    keyword: str = ""
+    record_count: int = 0
+
+
+@dataclass
 class SaveResult:
     attempted: int = 0
     saved_paths: list[str] = field(default_factory=list)
+    files: list[SavedFile] = field(default_factory=list)
     failed: int = 0
 
-    def record(self, saved_path: str | None) -> None:
+    def record(
+        self,
+        saved_path: str | None,
+        *,
+        keyword: str = "",
+        record_count: int = 0,
+    ) -> None:
         self.attempted += 1
         if saved_path:
             self.saved_paths.append(saved_path)
+            self.files.append(SavedFile(saved_path, keyword, record_count))
         else:
             self.failed += 1
 
@@ -49,64 +62,49 @@ def _get_output_path(filename: str) -> str:
         return os.path.join(os.getcwd(), filename)
 
 
-def _try_save_fallback(wb, filepath: str, save_err: OSError, announce: bool) -> str | None:
+def _try_save_fallback(
+    wb,
+    filepath: str,
+    save_err: OSError,
+    log_save_path: bool,
+) -> str | None:
     fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
-    if _log_save_path_enabled():
+    if log_save_path:
         _logger.warning("文件保存失败，尝试备用路径: target=%s fallback=%s error=%s", filepath, fallback, save_err)
     else:
         _logger.warning("文件保存失败，尝试备用路径: error=%s", save_err)
-    if announce:
-        _console.print(f"\n[red][x] 文件保存失败：{save_err}[/red]")
-        _console.print("    可能原因：桌面不可写、同名 Excel 正在打开，或目录权限不足。")
-        _console.print(f"    正在尝试保存到备用位置：{fallback}")
 
     try:
         wb.save(fallback)
         saved_path = os.path.abspath(fallback)
-        _log_save_success(saved_path, announce)
-        if announce:
-            _console.print(f"    已保存至备用位置：{saved_path}")
+        _log_save_success(saved_path, log_save_path, "fallback")
         return saved_path
     except OSError as fb_err:
         _logger.error("备用路径保存失败: %s", fb_err)
-        if announce:
-            _console.print(f"[red][x] 备用路径也保存失败：{fb_err}[/red]")
-            _console.print("[yellow]请关闭已打开的同名 Excel 文件，并检查桌面或程序目录写入权限。[/yellow]")
         return None
 
 
-def _log_save_path_enabled() -> bool:
-    return bool(get_config().get("log_save_path", True))
-
-
-def _log_save_success(saved_path: str, announce: bool) -> None:
-    save_type = "final" if announce else "incremental"
-    if _log_save_path_enabled():
+def _log_save_success(saved_path: str, log_save_path: bool, save_type: str) -> None:
+    if log_save_path:
         _logger.info("文件保存成功: type=%s path=%s", save_type, saved_path)
     else:
         _logger.info("文件保存成功: type=%s", save_type)
 
 
-def _try_save_workbook(wb, filepath: str, announce: bool = True) -> str | None:
-    """写盘并返回实际保存路径。
-
-    announce=False 时静默（不显示 spinner、不打印失败提示），供每抓完一个
-    关键词的增量落盘使用；失败由调用方记日志、最终保存时再提示。
-    """
+def _try_save_workbook(
+    wb,
+    filepath: str,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
+) -> str | None:
     try:
-        if announce:
-            with _console.status(
-                "[bold magenta]少女祈祷中...[/bold magenta]",
-                spinner="bouncingBar",
-            ):
-                wb.save(filepath)
-        else:
-            wb.save(filepath)
+        wb.save(filepath)
         saved_path = os.path.abspath(filepath)
-        _log_save_success(saved_path, announce)
+        _log_save_success(saved_path, log_save_path, save_type)
         return saved_path
     except OSError as save_err:
-        return _try_save_fallback(wb, filepath, save_err, announce)
+        return _try_save_fallback(wb, filepath, save_err, log_save_path)
 
 
 def _export_headers(include_citation: bool) -> list[str]:
@@ -149,44 +147,41 @@ def _save_single(
     keyword: str,
     results: list,
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ):
     save_result = SaveResult()
     if not results:
-        if announce:
-            _console.print("[yellow][!] 未抓取到任何数据，不生成文件。[/yellow]")
         return save_result
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
     wb = _build_single_sheet_workbook(results, include_citation)
 
-    saved_path = _try_save_workbook(wb, filepath, announce)
-    save_result.record(saved_path)
-    if saved_path and announce:
-        _console.print("\n" + "═" * 50)
-        _console.print(f"[bold green][*] 共抓取 {len(results)} 条数据。[/bold green]")
-        _console.print(f"[*] 文件已保存至：")
-        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
-        _console.print("═" * 50 + "\n")
+    saved_path = _try_save_workbook(
+        wb,
+        filepath,
+        log_save_path=log_save_path,
+        save_type=save_type,
+    )
+    save_result.record(saved_path, keyword=keyword, record_count=len(results))
     return save_result
 
 
 def _save_multi_split(
     all_results: dict[str, list],
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ):
     save_result = SaveResult()
-    total = 0
-    saved_files = []
     used_names: set[str] = set()
     for keyword, results in all_results.items():
         if not results:
-            if announce:
-                _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过生成文件。[/yellow]")
             continue
 
         base_keyword = _sanitize_name(keyword)
@@ -204,33 +199,26 @@ def _save_multi_split(
         used_names.add(clean_keyword.casefold())
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
         wb = _build_single_sheet_workbook(results, include_citation)
-        saved_path = _try_save_workbook(wb, filepath, announce)
-        save_result.record(saved_path)
-        if saved_path:
-            saved_files.append((keyword, len(results), saved_path))
-            total += len(results)
-
-    if announce:
-        _console.print("\n" + "═" * 50)
-        _console.print(
-            f"[bold green][*] 全部抓取完毕，共 {total} 条数据，生成 {len(saved_files)} 个文件：[/bold green]"
+        saved_path = _try_save_workbook(
+            wb,
+            filepath,
+            log_save_path=log_save_path,
+            save_type=save_type,
         )
-        for kw, cnt, path in saved_files:
-            _console.print(f"  · [cyan][{kw}][/cyan] {cnt} 条  ->  {path}")
-        _console.print("═" * 50 + "\n")
+        save_result.record(saved_path, keyword=keyword, record_count=len(results))
     return save_result
 
 
 def _save_multi_merge(
     all_results: dict[str, list],
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ):
     save_result = SaveResult()
     if not any(len(v) > 0 for v in all_results.values()):
-        if announce:
-            _console.print("[yellow][!] 所有关键词均未抓取到数据，不生成文件。[/yellow]")
         return save_result
 
     filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.xlsx")
@@ -242,8 +230,6 @@ def _save_multi_merge(
     used_sheet_names: set[str] = set()
     for keyword, results in all_results.items():
         if not results:
-            if announce:
-                _console.print(f"[yellow][!] 关键词「{keyword}」无数据，跳过该 Sheet。[/yellow]")
             continue
         clean_keyword = _sanitize_name(keyword)
         base_name = clean_keyword[:31]
@@ -260,18 +246,13 @@ def _save_multi_merge(
         _append_records(ws, results, include_citation)
         total += len(results)
 
-    saved_path = _try_save_workbook(wb, filepath, announce)
-    save_result.record(saved_path)
-    if saved_path and announce:
-        _console.print("\n" + "═" * 50)
-        _console.print(f"[bold green][*] 全部抓取完毕，共 {total} 条数据。[/bold green]")
-        _console.print(f"[*] 已合并保存至：")
-        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
-        for kw, results in all_results.items():
-            if not results:
-                continue
-            _console.print(f"  · Sheet [cyan][{kw}][/cyan]：{len(results)} 条")
-        _console.print("═" * 50 + "\n")
+    saved_path = _try_save_workbook(
+        wb,
+        filepath,
+        log_save_path=log_save_path,
+        save_type=save_type,
+    )
+    save_result.record(saved_path, record_count=total)
     return save_result
 
 
@@ -295,17 +276,19 @@ def _write_multi_csv(
 def _try_save_csv(
     filepath: str,
     all_results: dict[str, list],
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ) -> str | None:
     try:
         _write_multi_csv(filepath, all_results, include_citation)
         saved_path = os.path.abspath(filepath)
-        _log_save_success(saved_path, announce)
+        _log_save_success(saved_path, log_save_path, save_type)
         return saved_path
     except OSError as save_err:
         fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
-        if _log_save_path_enabled():
+        if log_save_path:
             _logger.warning(
                 "CSV 保存失败，尝试备用路径: target=%s fallback=%s error=%s",
                 filepath,
@@ -314,43 +297,38 @@ def _try_save_csv(
             )
         else:
             _logger.warning("CSV 保存失败，尝试备用路径: error=%s", save_err)
-        if announce:
-            _console.print(f"\n[red][x] CSV 文件保存失败：{save_err}[/red]")
-            _console.print(f"    正在尝试保存到备用位置：{fallback}")
         try:
             _write_multi_csv(fallback, all_results, include_citation)
             saved_path = os.path.abspath(fallback)
-            _log_save_success(saved_path, announce)
+            _log_save_success(saved_path, log_save_path, "fallback")
             return saved_path
         except OSError as fallback_err:
             _logger.error("CSV 备用路径保存失败: %s", fallback_err)
-            if announce:
-                _console.print(f"[red][x] CSV 备用路径也保存失败：{fallback_err}[/red]")
             return None
 
 
 def _save_multi_csv(
     all_results: dict[str, list],
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ) -> SaveResult:
     save_result = SaveResult()
     total = sum(len(records) for records in all_results.values())
     if total == 0:
-        if announce:
-            _console.print("[yellow][!] 所有关键词均未抓取到数据，不生成 CSV 文件。[/yellow]")
         return save_result
 
     filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.csv")
-    saved_path = _try_save_csv(filepath, all_results, announce, include_citation)
-    save_result.record(saved_path)
-    if saved_path and announce:
-        _console.print("\n" + "═" * 50)
-        _console.print(f"[bold green][*] 全部抓取完毕，共 {total} 条数据。[/bold green]")
-        _console.print("[*] CSV 文件已保存至：")
-        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
-        _console.print("═" * 50 + "\n")
+    saved_path = _try_save_csv(
+        filepath,
+        all_results,
+        include_citation,
+        log_save_path=log_save_path,
+        save_type=save_type,
+    )
+    save_result.record(saved_path, record_count=total)
     return save_result
 
 
@@ -358,13 +336,13 @@ def _save_single_csv(
     keyword: str,
     results: list,
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ) -> SaveResult:
     save_result = SaveResult()
     if not results:
-        if announce:
-            _console.print("[yellow][!] 未抓取到任何数据，不生成 CSV 文件。[/yellow]")
         return save_result
 
     clean_keyword = _sanitize_name(keyword)
@@ -372,16 +350,11 @@ def _save_single_csv(
     saved_path = _try_save_csv(
         filepath,
         {keyword: results},
-        announce,
         include_citation,
+        log_save_path=log_save_path,
+        save_type=save_type,
     )
-    save_result.record(saved_path)
-    if saved_path and announce:
-        _console.print("\n" + "═" * 50)
-        _console.print(f"[bold green][*] 共抓取 {len(results)} 条数据。[/bold green]")
-        _console.print("[*] CSV 文件已保存至：")
-        _console.print(f"    [bold]>>> {saved_path} <<<[/bold]")
-        _console.print("═" * 50 + "\n")
+    save_result.record(saved_path, keyword=keyword, record_count=len(results))
     return save_result
 
 
@@ -390,27 +363,21 @@ def save_all(
     keywords: list[str],
     all_results: dict[str, list],
     ts: str,
-    announce: bool,
     include_citation: bool = False,
+    *,
+    log_save_path: bool = True,
+    save_type: str = "final",
 ) -> SaveResult:
-    """统一保存入口（幂等）。
-
-    - 增量调用（announce=False）：静默写盘，用于每抓完一个关键词的阶段性落盘。
-    - 最终调用（announce=True）：写盘并打印完整汇总，用于流程结束（含中断）时。
-
-    文件名以传入的 ts 固定，增量与最终写同一文件、覆盖而非堆积，从而保证
-    中途任何异常（含保存阶段的二次 Ctrl+C）都不会丢失已抓取的数据。
-
-    claude opus4.8生成的神秘注释
-    """
+    """Persist the current result snapshot without producing UI output."""
     if save_mode == "single":
         if keywords:
             return _save_single(
                 keywords[0],
                 all_results.get(keywords[0], []),
                 ts,
-                announce,
                 include_citation,
+                log_save_path=log_save_path,
+                save_type=save_type,
             )
     elif save_mode == "single_csv":
         if keywords:
@@ -418,13 +385,32 @@ def save_all(
                 keywords[0],
                 all_results.get(keywords[0], []),
                 ts,
-                announce,
                 include_citation,
+                log_save_path=log_save_path,
+                save_type=save_type,
             )
     elif save_mode == "multi_split":
-        return _save_multi_split(all_results, ts, announce, include_citation)
+        return _save_multi_split(
+            all_results,
+            ts,
+            include_citation,
+            log_save_path=log_save_path,
+            save_type=save_type,
+        )
     elif save_mode == "multi_merge":
-        return _save_multi_merge(all_results, ts, announce, include_citation)
+        return _save_multi_merge(
+            all_results,
+            ts,
+            include_citation,
+            log_save_path=log_save_path,
+            save_type=save_type,
+        )
     elif save_mode == "multi_csv":
-        return _save_multi_csv(all_results, ts, announce, include_citation)
+        return _save_multi_csv(
+            all_results,
+            ts,
+            include_citation,
+            log_save_path=log_save_path,
+            save_type=save_type,
+        )
     return SaveResult()

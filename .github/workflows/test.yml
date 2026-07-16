@@ -41,7 +41,7 @@ jobs:
         run: python -m compileall -q run.py cnkibug tests generate_version_info.py
 
       - name: Import check
-        run: python -c "import cnkibug.errors, cnkibug.ui, cnkibug.environment, cnkibug.exporter, cnkibug.scraper; print('import graph OK')"
+        run: python -c "import cnkibug.app.cli, cnkibug.browser.runtime, cnkibug.cnki.keyword, cnkibug.fileio.exporter, cnkibug.workflow.runner; print('import graph OK')"
 
       - name: Unit and DOM contract tests
         run: python -m pytest -q

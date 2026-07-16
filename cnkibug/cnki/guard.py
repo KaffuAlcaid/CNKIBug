@@ -6,8 +6,8 @@ from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
 
-from .settings import ScraperSettings
-from .ui import _console, print_verify_alert
+from ..core.events import EventSink, NULL_EVENTS
+from ..core.settings import ScraperSettings
 
 
 VERIFY_NONE = "none"
@@ -17,12 +17,17 @@ VERIFY_TIMEOUT = "timeout"
 _logger = logging.getLogger("cnkibug.cnki_guard")
 
 
-def handle_verify(page: Any, settings: ScraperSettings) -> str:
+def handle_verify(
+    page: Any,
+    settings: ScraperSettings,
+    events: EventSink = NULL_EVENTS,
+) -> str:
     if "/verify" not in page.url:
         return VERIFY_NONE
 
     _logger.warning("检测到安全验证，等待用户手动完成")
-    print_verify_alert()
+    events.emit("progress_paused")
+    events.emit("verify_required")
 
     waited = 0.0
     interval = 1.0
@@ -30,29 +35,40 @@ def handle_verify(page: Any, settings: ScraperSettings) -> str:
     while "/verify" in page.url:
         if waited >= settings.verify_wait_timeout_sec:
             _logger.warning("安全验证等待超时: waited_sec=%d", int(waited))
-            _console.print("[yellow][!] 等待安全验证超时，将保存已抓取的数据。[/yellow]")
+            events.emit("verify_timeout")
             return VERIFY_TIMEOUT
         if waited >= next_notice:
             remaining = int(settings.verify_wait_timeout_sec - waited)
             _logger.info("仍在等待安全验证: waited_sec=%d remaining_sec=%d", int(waited), remaining)
-            _console.print(
-                f"[dim][*] 仍在等待手动完成安全验证…（剩余约 {remaining} 秒，完成后自动继续）[/dim]"
-            )
+            events.emit("verify_waiting", remaining=remaining)
             next_notice += settings.verify_notice_interval_sec
         time.sleep(interval)
         waited += interval
-    _console.print("[green][*] 验证已通过，继续抓取。[/green]")
+    events.emit("verify_passed")
+    events.emit("progress_resumed")
     _logger.info("安全验证已通过: waited_sec=%d", int(waited))
     return VERIFY_PASSED
 
 
-def print_page_debug(page: Any, context: str) -> None:
-    _console.print(f"[yellow][debug] {context}[/yellow]")
+def handle_verify_with_progress(
+    page: Any,
+    settings: ScraperSettings,
+    events: EventSink = NULL_EVENTS,
+) -> str:
+    return handle_verify(page, settings, events)
+
+
+def print_page_debug(
+    page: Any,
+    context: str,
+    events: EventSink = NULL_EVENTS,
+) -> None:
     try:
-        _console.print(f"[dim]当前 URL: {page.url}[/dim]")
+        url = str(page.url)
     except PlaywrightError:
-        _console.print("[dim]当前 URL: <无法读取>[/dim]")
+        url = "<无法读取>"
     try:
-        _console.print(f"[dim]页面标题: {page.title()}[/dim]")
+        title = str(page.title())
     except PlaywrightError:
-        _console.print("[dim]页面标题: <无法读取>[/dim]")
+        title = "<无法读取>"
+    events.emit("page_debug", context=context, url=url, title=title)

@@ -1,13 +1,13 @@
-from cnkibug.cnki_page import (
+from cnkibug.cnki.selectors import (
     SELECTOR_AUTHOR,
     SELECTOR_DATE,
     SELECTOR_RESULT_ROWS,
     SELECTOR_RESULT_TITLE,
     SELECTOR_SOURCE,
 )
-from cnkibug import cnki_results
-from cnkibug.cnki_results import parse_result_rows
-from cnkibug.scrape_logging import new_scrape_stats
+from cnkibug.cnki import results as cnki_results
+from cnkibug.cnki.metrics import new_scrape_stats
+from cnkibug.cnki.results import parse_result_rows
 
 
 class FakeElement:

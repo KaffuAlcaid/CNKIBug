@@ -15,7 +15,7 @@ def read_project_version(pyproject_path: Path) -> str:
 
 
 def get_app_version() -> str:
-    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
     if pyproject_path.is_file():
         try:
             return read_project_version(pyproject_path)

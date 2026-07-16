@@ -1,9 +1,14 @@
 from pathlib import Path
-from types import SimpleNamespace
 
-from cnkibug import scrape_workflow, task_state
-from cnkibug.exporter import SaveResult
-from cnkibug.scrape_report import STATUS_FAILED, STATUS_SUCCESS, make_keyword_result
+from cnkibug.app.runtime import DEFAULT_CONFIG, get_runtime_paths
+from cnkibug.browser.runtime import BrowserLaunchResult
+from cnkibug.cnki.models import STATUS_FAILED, STATUS_SUCCESS, make_keyword_result
+from cnkibug.core.events import EventSink
+from cnkibug.core.settings import get_scraper_settings
+from cnkibug.fileio.exporter import SaveResult
+from cnkibug.workflow import finalize, keyword_run
+from cnkibug.workflow import runner as scrape_workflow
+from cnkibug.workflow import state as task_state
 
 
 class _PlaywrightContext:
@@ -27,69 +32,46 @@ class _Browser:
         return None
 
 
-def _patch_workflow(monkeypatch, saved_results, deleted, progress_events=None):
-    progress_events = progress_events if progress_events is not None else []
+class RecordingEvents(EventSink):
+    def __init__(self, events):
+        self.events = events
 
-    class ProgressDisplay:
-        def __init__(self, low_seconds, high_seconds):
-            progress_events.append(("init", low_seconds, high_seconds))
+    def emit(self, name, **payload):
+        self.events.append((name, payload))
 
-        def start(self):
-            progress_events.append(("start",))
 
-        def update_status(self, **status):
-            progress_events.append(("status", status))
-
-        def pause(self):
-            progress_events.append(("pause",))
-
-        def resume(self):
-            progress_events.append(("resume",))
-
-        def saving(self):
-            progress_events.append(("saving",))
-
-        def complete(self):
-            progress_events.append(("complete",))
-
-        def stop(self, message):
-            progress_events.append(("stop", message))
-
-        def close(self):
-            progress_events.append(("close",))
+def _patch_workflow(monkeypatch, tmp_path, saved_results, deleted, recorded=None):
+    recorded = recorded if recorded is not None else []
+    events = RecordingEvents(recorded)
 
     monkeypatch.setattr(scrape_workflow, "sync_playwright", lambda: _PlaywrightContext())
-    monkeypatch.setattr(scrape_workflow, "launch_browser", lambda playwright: _Browser())
+    monkeypatch.setattr(
+        scrape_workflow,
+        "launch_browser",
+        lambda playwright, events: BrowserLaunchResult(_Browser(), "chromium"),
+    )
     monkeypatch.setattr(
         scrape_workflow,
         "create_browser_context",
-        lambda browser, settings: _BrowserContext(),
+        lambda browser, settings, paths: _BrowserContext(),
     )
     monkeypatch.setattr(scrape_workflow, "warmup", lambda session, settings: True)
-    monkeypatch.setattr(scrape_workflow, "save_cookie_state", lambda context, enabled: None)
-    monkeypatch.setattr(scrape_workflow, "print_browser_banner", lambda: None)
-    monkeypatch.setattr(scrape_workflow, "print_task_report", lambda report, results: None)
-    monkeypatch.setattr(scrape_workflow, "EstimatedProgressDisplay", ProgressDisplay)
+    monkeypatch.setattr(finalize, "save_cookie_state", lambda context, enabled, paths: None)
     monkeypatch.setattr(
-        scrape_workflow,
+        finalize,
         "save_task_report",
-        lambda payload, ts: "/tmp/task_report.json",
+        lambda payload, ts, paths: "/tmp/task_report.json",
     )
     monkeypatch.setattr(scrape_workflow.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(
-        scrape_workflow,
-        "get_scraper_settings",
-        lambda: SimpleNamespace(log_keywords=False, session_cache_enabled=False),
-    )
-    monkeypatch.setattr(
-        scrape_workflow,
+        task_state,
         "save_last_task",
-        lambda state: Path("/tmp/last_task.json"),
+        lambda state, paths: Path("/tmp/last_task.json"),
     )
     monkeypatch.setattr(
-        scrape_workflow,
+        finalize,
         "delete_last_task",
-        lambda: deleted.append(True),
+        lambda paths: deleted.append(True),
     )
 
     def save_all(
@@ -97,19 +79,25 @@ def _patch_workflow(monkeypatch, saved_results, deleted, progress_events=None):
         keywords,
         all_results,
         ts,
-        announce,
         include_citation=False,
+        **kwargs,
     ):
         saved_results.append({key: list(value) for key, value in all_results.items()})
         return SaveResult()
 
-    monkeypatch.setattr(scrape_workflow, "save_all", save_all)
+    monkeypatch.setattr(keyword_run, "save_all", save_all)
+    monkeypatch.setattr(finalize, "save_all", save_all)
+    return {
+        "settings": get_scraper_settings(DEFAULT_CONFIG),
+        "paths": get_runtime_paths(tmp_path),
+        "events": events,
+    }
 
 
-def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch):
+def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch, tmp_path):
     saved_results = []
     deleted = []
-    _patch_workflow(monkeypatch, saved_results, deleted)
+    run_context = _patch_workflow(monkeypatch, tmp_path, saved_results, deleted)
     state = task_state.make_task_state(["焊接"], 2, "single", "TS")
     task_state.mark_keyword_done(
         state,
@@ -147,9 +135,15 @@ def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch):
             STATUS_SUCCESS,
         )
 
-    monkeypatch.setattr(scrape_workflow, "scrape_keyword", scrape_keyword)
+    monkeypatch.setattr(keyword_run, "scrape_keyword", scrape_keyword)
 
-    scrape_workflow.scrape_cnki(["ignored"], 1, "single", resume_state=state)
+    scrape_workflow.scrape_cnki(
+        ["ignored"],
+        1,
+        "single",
+        resume_state=state,
+        **run_context,
+    )
 
     assert calls == [(2, [["old", "", "", ""]])]
     assert saved_results[-1] == {"焊接": [["complete", "", "", ""]]}
@@ -158,11 +152,17 @@ def test_resume_retries_failed_keyword_and_deletes_finished_task(monkeypatch):
     assert deleted == [True]
 
 
-def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, caplog):
+def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, tmp_path, caplog):
     saved_results = []
     deleted = []
     progress_events = []
-    _patch_workflow(monkeypatch, saved_results, deleted, progress_events)
+    run_context = _patch_workflow(
+        monkeypatch,
+        tmp_path,
+        saved_results,
+        deleted,
+        progress_events,
+    )
     state = task_state.make_task_state(["焊接"], 2, "single", "TS")
     task_state.mark_keyword_done(
         state,
@@ -176,7 +176,7 @@ def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, caplog):
         ),
     )
     monkeypatch.setattr(
-        scrape_workflow,
+        keyword_run,
         "scrape_keyword",
         lambda *args, **kwargs: make_keyword_result(
             "焊接",
@@ -188,34 +188,48 @@ def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, caplog):
         ),
     )
 
-    scrape_workflow.scrape_cnki(["ignored"], 1, "single", resume_state=state)
+    scrape_workflow.scrape_cnki(
+        ["ignored"],
+        1,
+        "single",
+        resume_state=state,
+        **run_context,
+    )
 
     expected = {"焊接": [["old", "", "", ""], ["new", "", "", ""]]}
     assert saved_results[-1] == expected
     assert state["completed"]["焊接"]["records"] == expected["焊接"]
     assert deleted == []
-    assert ("stop", "任务未完整完成，已保留断点") in progress_events
-    assert ("complete",) not in progress_events
+    assert (
+        "progress_stopped",
+        {"message": "任务未完整完成，已保留断点"},
+    ) in progress_events
+    assert not any(name == "progress_completed" for name, _ in progress_events)
     assert "已合并保留部分结果" in caplog.text
 
 
-def test_browser_launch_failure_still_writes_not_started_report(monkeypatch):
+def test_browser_launch_failure_still_writes_not_started_report(monkeypatch, tmp_path):
     saved_results = []
     deleted = []
     captured_reports = []
-    _patch_workflow(monkeypatch, saved_results, deleted)
+    run_context = _patch_workflow(monkeypatch, tmp_path, saved_results, deleted)
 
-    def fail_launch(playwright):
+    def fail_launch(playwright, events):
         raise RuntimeError("browser unavailable")
 
     monkeypatch.setattr(scrape_workflow, "launch_browser", fail_launch)
     monkeypatch.setattr(
-        scrape_workflow,
+        finalize,
         "save_task_report",
-        lambda payload, ts: captured_reports.append(payload) or "/tmp/report.json",
+        lambda payload, ts, paths: captured_reports.append(payload) or "/tmp/report.json",
     )
 
-    scrape_workflow.scrape_cnki(["焊接", "增材"], 2, "multi_csv")
+    scrape_workflow.scrape_cnki(
+        ["焊接", "增材"],
+        2,
+        "multi_csv",
+        **run_context,
+    )
 
     assert saved_results[-1] == {}
     assert captured_reports[0]["execution"]["stopped"] is True
@@ -226,12 +240,12 @@ def test_browser_launch_failure_still_writes_not_started_report(monkeypatch):
     assert deleted == []
 
 
-def test_new_task_propagates_citation_setting(monkeypatch):
+def test_new_task_propagates_citation_setting(monkeypatch, tmp_path):
     saved_results = []
     deleted = []
     captured_reports = []
     citation_flags = []
-    _patch_workflow(monkeypatch, saved_results, deleted)
+    run_context = _patch_workflow(monkeypatch, tmp_path, saved_results, deleted)
 
     def scrape_keyword(*args, **kwargs):
         assert kwargs["include_citation"] is True
@@ -251,12 +265,13 @@ def test_new_task_propagates_citation_setting(monkeypatch):
         citation_flags.append(include_citation)
         return SaveResult()
 
-    monkeypatch.setattr(scrape_workflow, "scrape_keyword", scrape_keyword)
-    monkeypatch.setattr(scrape_workflow, "save_all", save_all)
+    monkeypatch.setattr(keyword_run, "scrape_keyword", scrape_keyword)
+    monkeypatch.setattr(keyword_run, "save_all", save_all)
+    monkeypatch.setattr(finalize, "save_all", save_all)
     monkeypatch.setattr(
-        scrape_workflow,
+        finalize,
         "save_task_report",
-        lambda payload, ts: captured_reports.append(payload) or "/tmp/report.json",
+        lambda payload, ts, paths: captured_reports.append(payload) or "/tmp/report.json",
     )
 
     scrape_workflow.scrape_cnki(
@@ -264,6 +279,7 @@ def test_new_task_propagates_citation_setting(monkeypatch):
         1,
         "single",
         include_citation=True,
+        **run_context,
     )
 
     assert citation_flags == [True, True]
@@ -276,33 +292,43 @@ def test_new_task_propagates_citation_setting(monkeypatch):
     assert deleted == [True]
 
 
-def test_progress_display_receives_page_verify_save_and_complete_events(monkeypatch):
+def test_progress_display_receives_page_verify_save_and_complete_events(monkeypatch, tmp_path):
     saved_results = []
     deleted = []
     progress_events = []
-    _patch_workflow(monkeypatch, saved_results, deleted, progress_events)
+    run_context = _patch_workflow(
+        monkeypatch,
+        tmp_path,
+        saved_results,
+        deleted,
+        progress_events,
+    )
 
     records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
 
     def scrape_keyword(*args, **kwargs):
-        kwargs["on_page_start"](1)
-        kwargs["on_verify_state"](True)
-        kwargs["on_verify_state"](False)
+        session = args[0]
+        session.events.emit("progress_updated", page=1)
+        session.events.emit("progress_paused")
+        session.events.emit("progress_resumed")
         kwargs["on_page_complete"](1, records)
         return make_keyword_result("焊接", 1, 1, records, STATUS_SUCCESS)
 
-    monkeypatch.setattr(scrape_workflow, "scrape_keyword", scrape_keyword)
+    monkeypatch.setattr(keyword_run, "scrape_keyword", scrape_keyword)
 
-    scrape_workflow.scrape_cnki(["焊接"], 1, "single")
+    scrape_workflow.scrape_cnki(["焊接"], 1, "single", **run_context)
 
-    assert progress_events[0] == ("init", 8, 12)
-    assert ("start",) in progress_events
-    assert ("pause",) in progress_events
-    assert ("resume",) in progress_events
-    assert ("saving",) in progress_events
-    assert ("complete",) in progress_events
-    assert progress_events[-1] == ("close",)
+    assert (
+        "progress_started",
+        {"low_seconds": 8, "high_seconds": 12},
+    ) in progress_events
+    assert ("progress_paused", {}) in progress_events
+    assert ("progress_resumed", {}) in progress_events
+    assert ("progress_saving", {}) in progress_events
+    assert ("progress_completed", {}) in progress_events
+    assert progress_events[-1][0] == "task_report"
+    assert ("progress_closed", {}) in progress_events
     assert any(
-        event[0] == "status" and event[1].get("records") == 1
+        event[0] == "progress_updated" and event[1].get("records") == 1
         for event in progress_events
     )
