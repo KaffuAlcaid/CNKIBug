@@ -19,7 +19,6 @@ def estimate_active_seconds(
     keyword_count: int = 1,
     include_citation: bool = False,
 ) -> tuple[int, int]:
-    """返回正式抓取阶段的活动耗时区间。"""
     effective_keyword_count = max(keyword_count, 1)
     page_units = pages * effective_keyword_count
     transition_count = max(effective_keyword_count - 1, 0)
@@ -38,7 +37,6 @@ def estimate_seconds(
     keyword_count: int = 1,
     include_citation: bool = False,
 ) -> tuple[int, int]:
-    """返回任务预览耗时，包含浏览器启动与预热。"""
     low, high = estimate_active_seconds(
         pages,
         keyword_count,
@@ -46,14 +44,13 @@ def estimate_seconds(
     )
     return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
 
-
 def estimate_progress(
     elapsed_seconds: float,
     low_seconds: int,
     high_seconds: int,
     completed: bool = False,
 ) -> int:
-    """把活动耗时映射为预计进度。"""
+
     if low_seconds <= 0:
         raise ValueError("low_seconds must be greater than 0")
     if high_seconds <= low_seconds:
@@ -80,5 +77,4 @@ def _fmt(seconds: int) -> str:
 
 
 def format_eta(low: int, high: int) -> str:
-    """把秒数区间转成人话，如 '约 1 分 4 秒 ~ 1 分 44 秒'。"""
     return f"约 {_fmt(low)} ~ {_fmt(high)}"
