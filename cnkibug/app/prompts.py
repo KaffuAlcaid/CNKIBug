@@ -15,6 +15,7 @@ from .ui import _console
 
 
 _logger = logging.getLogger("cnkibug.app.prompts")
+_LONG_TASK_WARNING_SECONDS = 10 * 60
 
 
 @dataclass(frozen=True)
@@ -43,21 +44,14 @@ def collect_task_request() -> TaskRequest | None:
                 return None
             keywords, save_mode, keyword_source, import_result = collected
 
-        max_pages = _ask_page_count(keywords, mode)
+        max_pages = _ask_page_count(keywords)
         include_citation = _ask_citation()
         eta_low, eta_high = estimate_seconds(
             max_pages,
             len(keywords),
             include_citation=include_citation,
         )
-        if mode == "1":
-            _console.print(
-                f"\n[dim][*] 预计耗时 {format_eta(eta_low, eta_high)}"
-                "（实际受网络与知网反爬等待波动，仅供参考）[/dim]"
-            )
-            return TaskRequest(keywords, max_pages, save_mode, include_citation)
-
-        preview_action = _preview_batch_task(
+        preview_action = _preview_task(
             keywords,
             max_pages,
             save_mode,
@@ -72,7 +66,7 @@ def collect_task_request() -> TaskRequest | None:
         if preview_action == "exit":
             _console.print("\n[bold green]任务已取消，程序退出。[/bold green]")
             return None
-        _logger.info("用户从批量任务预览返回重新设置")
+        _logger.info("用户从任务预览返回重新设置")
 
 
 def _collect_single_keyword() -> tuple[list[str], str]:
@@ -158,12 +152,16 @@ def _read_keyword_file() -> tuple[KeywordImportResult, str]:
             _console.print(f"[red][x] 导入失败：{error}[/red]")
 
 
-def _ask_page_count(keywords: list[str], mode: str) -> int:
+def _ask_page_count(keywords: list[str]) -> int:
+    _console.print(
+        "\n[dim]知网每页通常约 20 条结果，例如抓取约 100 条可填写 5 页；"
+        "实际数量以知网页面为准。[/dim]"
+    )
     while True:
         prompt = (
-            "\n请输入每个关键词想抓取的页数（纯数字，值不要太大）: "
+            "请输入每个关键词想抓取的页数（纯数字）: "
             if len(keywords) > 1
-            else "\n请输入想抓取的页数（纯数字，值不要太大）: "
+            else "请输入想抓取的页数（纯数字）: "
         )
         try:
             pages = int(safe_input(prompt).strip())
@@ -173,13 +171,6 @@ def _ask_page_count(keywords: list[str], mode: str) -> int:
         if pages <= 0:
             print("  [!] 页数必须大于 0，请重新输入。")
             continue
-        if mode == "1" and pages > 20:
-            _console.print(
-                f"\n[yellow][!] 您输入的页数较大（{pages}页），"
-                "预计将耗时较长，且容易触发知网反爬验证。[/yellow]"
-            )
-            if safe_input("确定要继续吗？(y/n): ").strip().lower() != "y":
-                continue
         return pages
 
 
@@ -195,43 +186,53 @@ def _ask_citation() -> bool:
         print("[!] 无效选项，请输入 y 或 n。")
 
 
-def _preview_batch_task(
+def _preview_task(
     keywords: list[str],
     max_pages: int,
     save_mode: str,
     include_citation: bool,
     keyword_source: str,
-    import_result: KeywordImportResult,
+    import_result: KeywordImportResult | None,
     eta_low: int,
     eta_high: int,
 ) -> str:
     save_mode_text = {
+        "single": "单文件 Excel",
+        "single_csv": "单文件 CSV",
         "multi_split": "分文件 Excel",
         "multi_merge": "单文件多 Sheet Excel",
         "multi_csv": "单文件 CSV",
     }[save_mode]
+    is_single = save_mode in {"single", "single_csv"}
     total_pages = max_pages * len(keywords)
     preview_keywords = keywords[:20]
     _console.print("\n" + "=" * 50)
-    _console.print("[bold cyan]批量任务预览[/bold cyan]")
+    _console.print("[bold cyan]任务预览[/bold cyan]")
     _console.print(f"  输入来源：{keyword_source}")
-    _console.print(f"  读取行数：{import_result.total_lines}")
-    _console.print(f"  空行：{import_result.blank_lines}")
-    _console.print(f"  重复：{import_result.duplicate_count}")
-    _console.print(f"  最终关键词：{len(keywords)}")
-    _console.print(f"  每词抓取：{max_pages} 页")
-    _console.print(f"  理论最多：{total_pages} 页")
+    if import_result is not None:
+        _console.print(f"  读取行数：{import_result.total_lines}")
+        _console.print(f"  空行：{import_result.blank_lines}")
+        _console.print(f"  重复：{import_result.duplicate_count}")
+    if is_single:
+        _console.print(f"  关键词：{keywords[0]}")
+        _console.print(f"  抓取页数：{max_pages} 页")
+    else:
+        _console.print(f"  最终关键词：{len(keywords)}")
+        _console.print(f"  每词抓取：{max_pages} 页")
+        _console.print(f"  理论最多：{total_pages} 页")
     _console.print(f"  预计耗时：{format_eta(eta_low, eta_high)}")
     _console.print(f"  GB/T 引用格式：{'开启' if include_citation else '关闭'}")
     _console.print(f"  保存方式：{save_mode_text}")
-    _console.print(f"  关键词预览：{preview_keywords}")
+    if not is_single:
+        _console.print(f"  关键词预览：{preview_keywords}")
     if len(keywords) > len(preview_keywords):
         _console.print(
             f"  [dim]另有 {len(keywords) - len(preview_keywords)} 个关键词未展开显示[/dim]"
         )
-    if max_pages > 20 or total_pages > 100:
+    if eta_high > _LONG_TASK_WARNING_SECONDS:
         _console.print(
-            "  [yellow]风险提示：任务较大，预计耗时较长，且容易触发知网反爬验证。[/yellow]"
+            "  [bold yellow]风险提示：预计耗时上限已超过 10 分钟，"
+            "任务较大且更容易触发知网反爬验证。[/bold yellow]"
         )
     _console.print("=" * 50)
     choice = _ask_choice(

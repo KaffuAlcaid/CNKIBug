@@ -51,6 +51,8 @@ def fetch_gbt_citation(
         quote_cell = quote_row.locator("td.quote-r").first
         quote_cell.wait_for(state="visible", timeout=timeout_ms)
         citation = (quote_cell.inner_text(timeout=timeout_ms) or "").strip()
+        if citation.startswith("[1]"):
+            citation = citation[3:].lstrip()
         if not citation:
             _logger.warning("GB/T 引文内容为空: %s", log_ref)
         return citation

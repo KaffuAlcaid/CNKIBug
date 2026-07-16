@@ -7,7 +7,7 @@ def _patch_inputs(monkeypatch, values):
 
 
 def test_collect_single_keyword_request(monkeypatch):
-    _patch_inputs(monkeypatch, ["1", "焊接", "1", "2", ""])
+    _patch_inputs(monkeypatch, ["1", "焊接", "1", "2", "", "1"])
 
     request = prompts.collect_task_request()
 
@@ -33,3 +33,67 @@ def test_collect_batch_request_after_preview(monkeypatch):
         save_mode="multi_csv",
         include_citation=True,
     )
+
+
+def test_single_keyword_preview_can_return_to_settings(monkeypatch):
+    _patch_inputs(
+        monkeypatch,
+        ["1", "旧关键词", "1", "1", "", "2", "1", "新关键词", "2", "3", "y", "1"],
+    )
+
+    request = prompts.collect_task_request()
+
+    assert request == prompts.TaskRequest(
+        keywords=["新关键词"],
+        max_pages=3,
+        save_mode="single_csv",
+        include_citation=True,
+    )
+
+
+def test_page_count_explains_results_per_page(monkeypatch, capsys):
+    _patch_inputs(monkeypatch, ["5"])
+
+    assert prompts._ask_page_count(["焊接"]) == 5
+
+    output = capsys.readouterr().out
+    assert "每页通常约 20 条结果" in output
+    assert "约 100 条可填写 5 页" in output
+
+
+def test_task_preview_warns_when_eta_upper_bound_exceeds_ten_minutes(
+    monkeypatch,
+    capsys,
+):
+    _patch_inputs(monkeypatch, ["1"])
+
+    action = prompts._preview_task(
+        ["焊接"],
+        48,
+        "single",
+        False,
+        "手动输入",
+        None,
+        402,
+        601,
+    )
+
+    assert action == "start"
+    assert "预计耗时上限已超过 10 分钟" in capsys.readouterr().out
+
+
+def test_task_preview_does_not_warn_at_ten_minutes(monkeypatch, capsys):
+    _patch_inputs(monkeypatch, ["1"])
+
+    prompts._preview_task(
+        ["焊接"],
+        47,
+        "single",
+        False,
+        "手动输入",
+        None,
+        394,
+        600,
+    )
+
+    assert "预计耗时上限已超过 10 分钟" not in capsys.readouterr().out

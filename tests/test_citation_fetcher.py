@@ -52,8 +52,24 @@ def test_fetch_gbt_citation_clicks_inner_icon_and_closes_popup(page):
         timeout_ms=500,
     )
 
-    assert citation == "[1] 示例引文[J]. 测试期刊,2026."
+    assert citation == "示例引文[J]. 测试期刊,2026."
     assert page.locator(".quote-pop").count() == 0
+
+
+def test_fetch_gbt_citation_only_removes_leading_one_index(page):
+    _set_page_content(page, """
+        <tr><td class="quote-l">GB/T 7714-2025 格式引文</td>
+        <td class="quote-r">[2] 示例引文[J]. 测试期刊,2026.</td></tr>
+    """)
+
+    citation = fetch_gbt_citation(
+        page,
+        page.query_selector("#result-row"),
+        log_ref="page=1 row=1",
+        timeout_ms=500,
+    )
+
+    assert citation == "[2] 示例引文[J]. 测试期刊,2026."
 
 
 def test_fetch_gbt_citation_returns_empty_when_gbt_row_is_missing(page, caplog):

@@ -241,15 +241,21 @@ class EstimatedProgressDisplay:
     def _render(self) -> Group:
         with self._lock:
             percentage, headline, details = self._snapshot_at(self._clock())
+            show_interrupt_hint = self._mode in {"running", "paused"}
         self._bar.update(
             self._task_id,
             completed=percentage,
             description=headline,
         )
-        return Group(
+        renderables = [
             self._bar.get_renderable(),
             Text("\n".join(details), style="dim"),
-        )
+        ]
+        if show_interrupt_hint:
+            renderables.append(
+                Text("按 Ctrl+C 可安全停止，已完成页会保存", style="bold yellow")
+            )
+        return Group(*renderables)
 
 
 def print_browser_banner():
@@ -258,8 +264,9 @@ def print_browser_banner():
         Panel.fit(
             "[bold yellow]浏览器已在新窗口打开[/bold yellow]\n"
             "· 全程请[bold]勿关闭[/bold]该浏览器窗口\n"
-            "· 若出现滑块 / 验证码属正常现象，请手动完成后回到本窗口\n"
-            "· 抓取过程中页面会自动翻页，请勿手动操作",
+            "· 滑块 / 验证码[bold red]必须由你手动完成[/bold red]，程序不会自动验证\n"
+            "· 验证通过后程序会自动继续；抓取过程中页面会自动翻页\n"
+            "· 除完成验证外，请勿手动操作浏览器",
             title="[bold]⚠ 请切换到浏览器窗口[/bold]",
             border_style="yellow",
         )
@@ -271,8 +278,8 @@ def print_verify_alert():
     _console.print(
         Panel.fit(
             "[bold]检测到知网安全验证（滑块）[/bold]\n"
-            "· 请切换到浏览器窗口完成滑块验证\n"
-            "· 完成后[bold]无需操作本窗口[/bold]，程序会自动继续抓取",
+            "· 程序无法自动完成验证，请切换到浏览器窗口手动操作\n"
+            "· 验证通过后程序会自动继续，无需在本窗口输入",
             title="[bold red]需要手动验证[/bold red]",
             border_style="red",
         )

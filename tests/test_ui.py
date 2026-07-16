@@ -3,6 +3,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
+from cnkibug.app import ui
 from cnkibug.app.ui import EstimatedProgressDisplay
 
 
@@ -25,6 +26,18 @@ def make_display(clock: FakeClock) -> EstimatedProgressDisplay:
         width=120,
     )
     return EstimatedProgressDisplay(40, 72, console=console, clock=clock)
+
+
+def render_text(display: EstimatedProgressDisplay) -> str:
+    output = StringIO()
+    console = Console(
+        file=output,
+        force_terminal=False,
+        color_system=None,
+        width=120,
+    )
+    console.print(display._render())
+    return output.getvalue()
 
 
 def test_estimated_progress_pauses_and_only_completes_on_event():
@@ -80,3 +93,41 @@ def test_estimated_progress_shows_overtime_at_99_percent():
     assert display.percentage == 99
     assert display.status_text.startswith("测试结束")
     display.close()
+
+
+def test_interrupt_hint_only_appears_while_scraping_can_be_stopped():
+    clock = FakeClock()
+    display = make_display(clock)
+    display.start()
+
+    assert "按 Ctrl+C 可安全停止，已完成页会保存" in render_text(display)
+    display.pause()
+    assert "按 Ctrl+C 可安全停止，已完成页会保存" in render_text(display)
+
+    display.saving()
+    assert "按 Ctrl+C 可安全停止，已完成页会保存" not in render_text(display)
+    display.complete()
+    assert "按 Ctrl+C 可安全停止，已完成页会保存" not in render_text(display)
+    display.close()
+
+
+def test_verification_copy_distinguishes_manual_verification_from_automation(
+    monkeypatch,
+):
+    output = StringIO()
+    console = Console(
+        file=output,
+        force_terminal=False,
+        color_system=None,
+        width=120,
+    )
+    monkeypatch.setattr(ui, "_console", console)
+
+    ui.print_browser_banner()
+    ui.print_verify_alert()
+
+    text = output.getvalue()
+    assert "必须由你手动完成" in text
+    assert "程序不会自动验证" in text
+    assert "程序无法自动完成验证" in text
+    assert "验证通过后程序会自动继续" in text
