@@ -27,6 +27,7 @@ def _patch_search_setup(monkeypatch):
     monkeypatch.setattr(keyword_scraper, "_open_home_page", lambda page, settings: None)
     monkeypatch.setattr(keyword_scraper, "_open_search_page", lambda page, settings: None)
     monkeypatch.setattr(keyword_scraper, "_submit_search", lambda page, keyword, settings: None)
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (None, None))
     monkeypatch.setattr(keyword_scraper.time, "sleep", lambda seconds: None)
 
 
@@ -121,7 +122,13 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
         lambda page, seen, stats: PageParseResult(records=[["标题", "", "", ""]], rows_seen=1),
     )
     monkeypatch.setattr(keyword_scraper, "get_first_result_href", lambda page: "/detail/1")
-    monkeypatch.setattr(keyword_scraper, "wait_result_page_advanced", lambda *args, **kwargs: False)
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 2))
+    confirm_calls = []
+    monkeypatch.setattr(
+        keyword_scraper,
+        "wait_result_page_advanced",
+        lambda *args, **kwargs: confirm_calls.append(True) or False,
+    )
 
     class NextButton:
         def get_attribute(self, name):
@@ -130,7 +137,11 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
         def click(self, **kwargs):
             return None
 
-    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: NextButton())
+    monkeypatch.setattr(
+        keyword_scraper,
+        "query_first",
+        lambda page, group: NextButton() if group == "next_page" else None,
+    )
 
     class Page:
         url = "https://kns.cnki.net/kns8s/"
@@ -147,12 +158,126 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
     session = ScrapeSession()
     session.page = Page()
 
-    result = keyword_scraper.scrape_keyword(session, "焊接", 2, _settings())
+    checkpoints = []
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        2,
+        _settings(max_advance_fail=2),
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
 
     assert result.status == STATUS_FAILED
     assert result.records == [["标题", "", "", ""]]
-    assert "连续翻页失败" in result.reason
+    assert "翻页结果未确认" in result.reason
+    assert checkpoints == [(1, result.records)]
+    assert len(confirm_calls) == 2
     assert "关键词部分完成，将在恢复时重试" in caplog.text
+
+
+def test_scrape_keyword_accepts_missing_next_button_on_confirmed_last_page(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
+    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
+    monkeypatch.setattr(
+        keyword_scraper,
+        "parse_result_rows",
+        lambda page, seen, stats: PageParseResult(
+            records=[["标题", "", "", "", "https://example.test/1"]],
+            rows_seen=1,
+        ),
+    )
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+    session = ScrapeSession()
+    session.page = Page()
+
+    result = keyword_scraper.scrape_keyword(session, "焊接", 2, _settings())
+
+    assert result.status == STATUS_SUCCESS
+    assert len(result.records) == 1
+
+
+def test_scrape_keyword_rejects_missing_next_button_without_last_page_proof(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
+    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, None))
+    monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
+    monkeypatch.setattr(
+        keyword_scraper,
+        "parse_result_rows",
+        lambda page, seen, stats: PageParseResult(
+            records=[["标题", "", "", "", "https://example.test/1"]],
+            rows_seen=1,
+        ),
+    )
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        def title(self):
+            return "results"
+
+    checkpoints = []
+    session = ScrapeSession()
+    session.page = Page()
+
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        2,
+        _settings(),
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
+
+    assert result.status == STATUS_FAILED
+    assert "无法确认末页" in result.reason
+    assert checkpoints == [(1, result.records)]
+
+
+def test_scrape_keyword_rejects_page_when_all_titles_are_unreadable(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
+    monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(
+        keyword_scraper,
+        "parse_result_rows",
+        lambda page, seen, stats: PageParseResult(rows_seen=2, skipped_no_title=2),
+    )
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+    checkpoints = []
+    session = ScrapeSession()
+    session.page = Page()
+
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        1,
+        _settings(),
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
+
+    assert result.status == STATUS_FAILED
+    assert "全部结果均无法解析标题" in result.reason
+    assert checkpoints == []
 
 
 def test_scrape_keyword_resumes_after_completed_page(monkeypatch):
@@ -228,6 +353,7 @@ def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_changes(monkeyp
     monkeypatch.setattr(keyword_scraper, "handle_verify", lambda page, settings: VERIFY_NONE)
     monkeypatch.setattr(keyword_scraper, "_wait_search_outcome", lambda page, settings: "has_results")
     monkeypatch.setattr(keyword_scraper, "get_first_result_title", lambda page: "新首页标题")
+    monkeypatch.setattr(keyword_scraper, "get_result_page_numbers", lambda page: (1, 1))
     monkeypatch.setattr(keyword_scraper, "query_first", lambda page, group: None)
     monkeypatch.setattr(
         keyword_scraper,

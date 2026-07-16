@@ -31,6 +31,7 @@ from .cnki_page import (
 from .cnki_results import (
     get_first_result_href,
     get_first_result_title,
+    get_result_page_numbers,
     parse_result_rows,
     record_dedup_key,
     wait_result_page_advanced,
@@ -177,11 +178,13 @@ def _position_after_checkpoint(
                 return False
             old_first_href = get_first_result_href(page)
             old_next_page = next_btn.get_attribute("data-curpage") or ""
+            old_current_page, _ = get_result_page_numbers(page)
             next_btn.click(timeout=settings.timeout_selector_ms)
             advanced = wait_result_page_advanced(
                 page,
                 old_href=old_first_href,
                 old_next_page=old_next_page,
+                old_current_page=old_current_page,
                 timeout=settings.timeout_selector_ms,
             )
             if not advanced:
@@ -204,6 +207,7 @@ def _position_after_checkpoint(
                         page,
                         old_href=old_first_href,
                         old_next_page=old_next_page,
+                        old_current_page=old_current_page,
                         timeout=settings.timeout_selector_ms,
                     )
             if not advanced:
@@ -495,7 +499,6 @@ def scrape_keyword(
             completed=start_page - 1,
         )
 
-        consecutive_advance_fail = 0
         incomplete_reason: str | None = None
 
         for current_page in range(start_page, max_pages + 1):
@@ -554,6 +557,23 @@ def scrape_keyword(
                     _logger.warning("结果页解析前安全验证超时: %s page=%d", keyword_ref, current_page)
                     break
 
+                actual_page, _ = get_result_page_numbers(page)
+                if actual_page is not None and actual_page != current_page:
+                    incomplete_reason = (
+                        f"页面实际为第 {actual_page} 页，与预期第 {current_page} 页不一致"
+                    )
+                    _logger.warning(
+                        "结果页页码与预期不一致，提前结束关键词: %s expected_page=%d actual_page=%d",
+                        keyword_ref,
+                        current_page,
+                        actual_page,
+                    )
+                    progress.console.print(
+                        f"[yellow][!] 当前页面显示为第 {actual_page} 页，"
+                        f"但程序预期第 {current_page} 页，已保留断点并停止当前关键词。[/yellow]"
+                    )
+                    break
+
                 citation_options = {}
                 if include_citation:
                     citation_options = {
@@ -567,6 +587,35 @@ def scrape_keyword(
                     stats,
                     **citation_options,
                 )
+                unreadable_rows = page_parse.skipped_no_title + page_parse.parse_errors
+                if page_parse.rows_seen == 0:
+                    incomplete_reason = f"第 {current_page} 页结果行在解析时消失"
+                    _logger.warning(
+                        "结果页解析时未发现任何结果行，提前结束关键词: %s page=%d",
+                        keyword_ref,
+                        current_page,
+                    )
+                    progress.console.print(
+                        f"[yellow][!] 第 {current_page} 页结果区域异常，"
+                        "已保留断点并停止当前关键词。[/yellow]"
+                    )
+                    break
+                if unreadable_rows == page_parse.rows_seen:
+                    incomplete_reason = f"第 {current_page} 页全部结果均无法解析标题"
+                    _logger.warning(
+                        "结果页所有行均无法解析，提前结束关键词: "
+                        "%s page=%d rows=%d skipped_no_title=%d parse_errors=%d",
+                        keyword_ref,
+                        current_page,
+                        page_parse.rows_seen,
+                        page_parse.skipped_no_title,
+                        page_parse.parse_errors,
+                    )
+                    progress.console.print(
+                        f"[yellow][!] 第 {current_page} 页有结果，但论文标题均无法读取，"
+                        "可能是知网页面结构发生变化；已保留断点。[/yellow]"
+                    )
+                    break
                 citation_success += page_parse.citation_success
                 citation_failed += page_parse.citation_failed
                 results.extend(page_parse.records)
@@ -610,42 +659,73 @@ def scrape_keyword(
                     if next_btn:
                         old_first_href = get_first_result_href(page)
                         old_next_page = next_btn.get_attribute("data-curpage") or ""
+                        old_current_page, _ = get_result_page_numbers(page)
                         next_btn.click(timeout=settings.timeout_selector_ms)
-                        if wait_result_page_advanced(
-                            page,
-                            old_href=old_first_href,
-                            old_next_page=old_next_page,
-                            timeout=settings.timeout_selector_ms,
-                        ):
-                            consecutive_advance_fail = 0
-                        else:
-                            consecutive_advance_fail += 1
+                        page_advanced = False
+                        for confirm_attempt in range(1, settings.max_advance_fail + 1):
+                            if wait_result_page_advanced(
+                                page,
+                                old_href=old_first_href,
+                                old_next_page=old_next_page,
+                                old_current_page=old_current_page,
+                                timeout=settings.timeout_selector_ms,
+                            ):
+                                page_advanced = True
+                                break
+
+                            verify_status = _handle_verify_with_progress(
+                                page,
+                                settings,
+                                on_verify_state,
+                            )
+                            if verify_status == VERIFY_TIMEOUT:
+                                session.request_stop("安全验证等待超时", verify_timeout=True)
+                                _logger.warning(
+                                    "翻页确认期间安全验证超时: %s page=%d",
+                                    keyword_ref,
+                                    current_page,
+                                )
+                                break
+                            if verify_status == VERIFY_PASSED and wait_result_page_advanced(
+                                page,
+                                old_href=old_first_href,
+                                old_next_page=old_next_page,
+                                old_current_page=old_current_page,
+                                timeout=settings.timeout_selector_ms,
+                            ):
+                                page_advanced = True
+                                break
+
                             _logger.warning(
-                                "翻页后未确认到结果变化: %s page=%d consecutive_fail=%d max_fail=%d",
+                                "翻页后未确认到结果变化: %s page=%d confirm_attempt=%d max_attempts=%d",
                                 keyword_ref,
                                 current_page,
-                                consecutive_advance_fail,
+                                confirm_attempt,
                                 settings.max_advance_fail,
                             )
                             progress.console.print(
-                                f"[yellow][!] 翻页后未确认到结果变化"
-                                f"（连续 {consecutive_advance_fail}/{settings.max_advance_fail} 次）。[/yellow]"
+                                f"[yellow][!] 翻页结果尚未确认"
+                                f"（{confirm_attempt}/{settings.max_advance_fail}）。[/yellow]"
                             )
-                            print_page_debug(page, f"第 {current_page} 页翻页确认超时")
-                            if consecutive_advance_fail >= settings.max_advance_fail:
-                                incomplete_reason = f"第 {current_page} 页后连续翻页失败"
-                                _logger.warning(
-                                    "连续翻页失败，提前结束关键词: %s effective_pages=%d requested_pages=%d",
-                                    keyword_ref,
-                                    current_page,
-                                    max_pages,
-                                )
-                                progress.console.print(
-                                    f"[red][x] 连续翻页失败，提前结束关键词「{keyword}」："
-                                    f"实际有效页数约 {current_page} 页"
-                                    f"（共请求 {max_pages} 页）。[/red]"
-                                )
-                                break
+
+                        if session.stop_requested:
+                            break
+                        if not page_advanced:
+                            incomplete_reason = f"第 {current_page} 页后翻页结果未确认"
+                            _logger.warning(
+                                "翻页结果无法确认，提前结束关键词: "
+                                "%s effective_pages=%d requested_pages=%d",
+                                keyword_ref,
+                                current_page,
+                                max_pages,
+                            )
+                            progress.console.print(
+                                f"[red][x] 无法确认是否已进入下一页，"
+                                f"已在第 {current_page} 页保留断点并停止关键词「{keyword}」。[/red]"
+                            )
+                            print_page_debug(page, f"第 {current_page} 页翻页结果无法确认")
+                            break
+
                         time.sleep(random.uniform(1, 2))
                         if _handle_verify_with_progress(
                             page,
@@ -656,10 +736,37 @@ def scrape_keyword(
                             _logger.warning("翻页后安全验证超时: %s page=%d", keyword_ref, current_page)
                             break
                     else:
-                        _logger.info("未找到下一页按钮，结束关键词: %s page=%d", keyword_ref, current_page)
-                        progress.console.print(
-                            "[yellow][!] 没找到下一页按钮，可能已到最后一页。[/yellow]"
-                        )
+                        actual_page, total_pages = get_result_page_numbers(page)
+                        if (
+                            actual_page is not None
+                            and total_pages is not None
+                            and actual_page >= total_pages
+                        ):
+                            _logger.info(
+                                "已确认到达结果末页: %s page=%d actual_page=%d total_pages=%d",
+                                keyword_ref,
+                                current_page,
+                                actual_page,
+                                total_pages,
+                            )
+                            progress.console.print(
+                                f"[dim][*] 已到结果末页（{actual_page}/{total_pages}）。[/dim]"
+                            )
+                        else:
+                            incomplete_reason = f"第 {current_page} 页后未找到下一页且无法确认末页"
+                            _logger.warning(
+                                "下一页按钮缺失且无法确认末页，提前结束关键词: "
+                                "%s page=%d actual_page=%s total_pages=%s",
+                                keyword_ref,
+                                current_page,
+                                actual_page,
+                                total_pages,
+                            )
+                            progress.console.print(
+                                "[yellow][!] 没找到下一页按钮，也无法确认已经到达末页；"
+                                "已保留断点。[/yellow]"
+                            )
+                            print_page_debug(page, f"第 {current_page} 页无法确认是否末页")
                         break
 
             except PlaywrightError:
@@ -704,7 +811,7 @@ def scrape_keyword(
         )
         _console.print(
             f"[yellow][!] 当前关键词仅完成部分抓取，已保留 {len(results)} 条记录；"
-            "下次恢复时将从第一页重试。[/yellow]"
+            "下次恢复时将从最后保存的断点继续。[/yellow]"
         )
         return make_keyword_result(
             keyword,

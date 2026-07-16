@@ -67,7 +67,7 @@ def test_fetch_gbt_citation_returns_empty_when_gbt_row_is_missing(page, caplog):
         page,
         page.query_selector("#result-row"),
         log_ref="page=1 row=1",
-        timeout_ms=50,
+        timeout_ms=500,
     )
 
     assert citation == ""

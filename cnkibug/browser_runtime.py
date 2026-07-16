@@ -13,12 +13,6 @@ from .settings import ScraperSettings
 from .ui import _console
 
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
-
 _logger = logging.getLogger("cnkibug.browser_runtime")
 
 
@@ -98,7 +92,6 @@ def create_browser_context(browser: Any, settings: ScraperSettings) -> Any:
     )
     context_options: dict[str, Any] = {
         "no_viewport": True,
-        "user_agent": USER_AGENT,
     }
     if cookie_state_path is not None:
         context_options["storage_state"] = str(cookie_state_path)

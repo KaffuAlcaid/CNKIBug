@@ -13,6 +13,8 @@ SELECTOR_GROUPS: dict[str, list[str]] = {
     "date": ["td.date"],
     "no_content": ["#briefBox p.no-content"],
     "next_page": ["a#PageNext"],
+    "page_count": ["span.countPageMark"],
+    "current_page": [".pages a.cur[data-curpage]", "#curPageHid"],
 }
 
 SELECTOR_SEARCH_INPUT = SELECTOR_GROUPS["search_input"][0]
@@ -24,6 +26,9 @@ SELECTOR_SOURCE = SELECTOR_GROUPS["source"][0]
 SELECTOR_DATE = SELECTOR_GROUPS["date"][0]
 SELECTOR_NO_CONTENT = SELECTOR_GROUPS["no_content"][0]
 SELECTOR_NEXT_PAGE = SELECTOR_GROUPS["next_page"][0]
+SELECTOR_PAGE_COUNT = SELECTOR_GROUPS["page_count"][0]
+SELECTOR_CURRENT_PAGE = SELECTOR_GROUPS["current_page"][0]
+
 
 def query_first(parent: Any, group: str) -> Any | None:
     for candidate in SELECTOR_GROUPS[group]:

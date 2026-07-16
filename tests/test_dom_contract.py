@@ -4,7 +4,7 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 from cnkibug.cnki_page import query_first
-from cnkibug.cnki_results import parse_result_rows
+from cnkibug.cnki_results import get_result_page_numbers, parse_result_rows
 from cnkibug.keyword_scraper import _wait_search_outcome
 from cnkibug.scrape_logging import new_scrape_stats
 
@@ -45,6 +45,7 @@ def test_result_fixture_matches_selectors_and_parser(page):
         ],
     ]
     assert query_first(page, "next_page") is not None
+    assert get_result_page_numbers(page) == (1, 2)
     assert stats["missing_authors"] == 1
 
 
