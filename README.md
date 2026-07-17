@@ -1,6 +1,6 @@
 # CNKIBug 
 
-> 中国知网（CNKI）论文标题批量爬取工具。Windows 下可打包为独立 `.exe` 开箱即用，无需安装任何环境；Linux / macOS 可通过源码运行。
+> 中国知网（CNKI）论文信息批量抓取工具。Windows 下可打包为独立 `.exe` 开箱即用，无需安装任何环境；Linux / macOS 可通过源码运行。
 
 ![Python](https://img.shields.io/badge/Python-3.10--3.13-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -14,6 +14,7 @@
 -  输入关键词或从 UTF-8 TXT 文件批量导入，自动去重并在执行前预览任务规模和预计耗时
 -  结果可导出为 `.xlsx` Excel 文件或带 `keyword` 列的单文件 `.csv`，Excel 中包含可点击的 CNKI 详情链接
 -  可选抓取 GB/T 7714 引文；逐篇获取会明显增加耗时，默认关闭
+-  可选抓取论文关键词和摘要；可按配置额外生成能重新导入软件的关键词 TXT，默认关闭
 -  优先调用系统自带的 **Microsoft Edge**（Windows）；找不到时自动回退到 Playwright 的 Chromium，故 Linux / macOS 亦可运行
 -  自动保存配置、会话缓存、日志和任务报告
 -  支持复用 `CNKIBug/cache/cookies` 中的浏览器会话状态，默认 12 小时有效，可降低重复验证码概率
@@ -69,11 +70,13 @@
 
 TXT 导入仅用于多关键词模式，文件必须使用 UTF-8 编码，每个非空行表示一个独立关键词。程序会去除行首、行尾空白，忽略空行，并按首次出现顺序精确去重；关键词内部空格会保留。单个文件不能超过 1 MiB，去重后最多 1000 个关键词
 
-所有任务在启动浏览器前都会显示关键词、页数、保存方式、引文设置和预计耗时，并可返回重新设置。知网每页通常约 20 条结果，例如抓取约 100 条可填写 5 页；预计耗时上限超过 10 分钟时会显示风险提示。批量导入还会显示读取行数、空行数、重复数、最终关键词数和理论最多页数，所有关键词共用同一个抓取页数、保存方式和引文设置
+所有任务在启动浏览器前都会显示关键词、页数、保存方式、引文、论文详情和预计耗时，并可返回重新设置。知网每页通常约 20 条结果，例如抓取约 100 条可填写 5 页；预计耗时上限超过 10 分钟时会显示风险提示。批量导入还会显示读取行数、空行数、重复数、最终关键词数和理论最多页数，所有关键词共用同一个抓取页数和保存设置
 
-单关键词任务可以选择 Excel 或 CSV；多关键词任务支持每个关键词一个 Excel、单个 Excel 多 Sheet 或单个 CSV。开启引文后，结果列为“论文标题、作者、来源、发表日期、引用格式、详情链接”；程序会移除 GB/T 引文开头的 `[1]`，保留 `[J]`、`[D]` 等文献类型标记，单条引文获取失败时留空并继续。CSV 使用 UTF-8 BOM 编码，并在开启引文时于 `publication_date` 和 `detail_url` 之间增加 `citation` 列
+单关键词任务可以选择 Excel 或 CSV；多关键词任务支持每个关键词一个 Excel、单个 Excel 多 Sheet 或单个 CSV。开启论文详情后，程序会复用一个详情标签页串行获取关键词和摘要；英文文献没有关键词时正常留空。全部可选字段开启时，Excel 列为“论文标题、作者、来源、发表日期、论文关键词、摘要、引用格式、详情链接”。单条详情或引文获取失败时留空、记录日志并继续
 
-每轮任务还会在 `CNKIBug/status/` 中生成 `cnki_task_report_时间戳.json`，记录所有关键词的执行状态、失败原因、记录数、字段缺失和引文获取统计。报告不包含完整论文记录；中止时尚未执行的关键词标记为 `not_started`
+将 `detail_txt_export` 设为 `true` 后，开启论文详情的任务会额外生成 `cnki_paper_keywords_时间戳.txt`。该文件使用 UTF-8 BOM、一行一个关键词，保留原始顺序和重复项，可直接重新导入软件，由导入流程统一去重和检查数量
+
+每轮任务还会在 `CNKIBug/status/` 中生成 `cnki_task_report_时间戳.json`，记录所有关键词的执行状态、失败原因、记录数、字段缺失、引文和论文详情统计。报告不包含完整论文记录；中止时尚未执行的关键词标记为 `not_started`
 
 ### 方式二：源码运行（Linux / macOS 用户，或开发者）
 
@@ -113,7 +116,7 @@ CNKIBug/config.json
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "timeout_goto_ms": 30000,
   "timeout_load_ms": 20000,
   "timeout_selector_ms": 15000,
@@ -125,13 +128,14 @@ CNKIBug/config.json
   "log_level": "INFO",
   "log_save_path": true,
   "log_keywords": false,
-  "log_scraped_records": false
+  "log_scraped_records": false,
+  "detail_txt_export": false
 }
 ```
 
 | 参数                           | 默认值      | 可填值                                | 作用                                   |
 |------------------------------|----------|------------------------------------|--------------------------------------|
-| `version`                    | `1`      | 正整数                                | 配置文件版本号，不建议手动修改                      |
+| `version`                    | `2`      | 正整数                                | 配置文件版本号，不建议手动修改                      |
 | `timeout_goto_ms`            | `30000`  | 正整数，毫秒                             | 打开 CNKI 页面时的最长等待时间                   |
 | `timeout_load_ms`            | `20000`  | 正整数，毫秒                             | 等待页面加载的最长时间                          |
 | `timeout_selector_ms`        | `15000`  | 正整数，毫秒                             | 等待搜索框、结果表格、翻页按钮等元素的最长时间              |
@@ -144,6 +148,7 @@ CNKIBug/config.json
 | `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                       |
 | `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |
 | `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
+| `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                |
 
 ### 常见调整
 
@@ -151,6 +156,7 @@ CNKIBug/config.json
 - 验证码来不及处理：把 `verify_wait_timeout_sec` 调大
 - 会话状态异常：删除 `CNKIBug/cache/cookies`，或把 `session_cache_enabled` 改为 `false` 后重启
 - 不想日志记录本机路径：把 `log_save_path` 改为 `false`
+- 需要把论文关键词重新导入软件：把 `detail_txt_export` 改为 `true` 后重启
 
 ---
 
@@ -167,7 +173,7 @@ CNKIBug/config.json
 
 ## 不支持范围
 
-CNKIBug 仅面向中国知网（CNKI）基础检索结果标题抓取，不支持 Web of Science / SCI 数据库，也不支持通过校园 WebVPN、统一认证网关或代管账号密码的方式抓取机构资源。
+CNKIBug 仅面向中国知网（CNKI）基础检索结果及公开详情页信息抓取，不支持 Web of Science / SCI 数据库，也不支持通过校园 WebVPN、统一认证网关或代管账号密码的方式抓取机构资源。
 
 遇到这类访问环境时，请改用浏览器手动访问对应平台。
 
@@ -196,6 +202,7 @@ CNKIBug/
 │   │   └── session.py      # 单轮抓取状态
 │   ├── cnki/               # CNKI 页面操作与单关键词抓取
 │   │   ├── citation.py     # GB/T 引文获取
+│   │   ├── details.py      # 论文关键词和摘要获取
 │   │   ├── guard.py        # 安全验证检测
 │   │   ├── keyword.py      # 单关键词流程
 │   │   ├── metrics.py      # 页面抓取指标
@@ -213,7 +220,7 @@ CNKIBug/
 │   │   ├── settings.py     # 抓取配置模型
 │   │   └── version.py      # 应用版本读取
 │   ├── fileio/             # 文件输入输出
-│   │   ├── exporter.py     # XLSX/CSV 导出
+│   │   ├── exporter.py     # XLSX、CSV 和关键词 TXT 导出
 │   │   ├── keyword_input.py # TXT 关键词导入
 │   │   └── paths.py        # 输出目录定位
 │   └── workflow/           # 多关键词任务编排与收尾
@@ -247,6 +254,7 @@ tests/
 ├── test_cnki_page.py          # 页面选择器测试
 ├── test_cnki_pagination.py    # 结果翻页测试
 ├── test_cnki_records.py       # 结果解析测试
+├── test_cnki_details.py       # 论文关键词和摘要测试
 ├── test_citation_fetcher.py   # GB/T 引文获取测试
 ├── test_dom_contract.py       # CNKI DOM 结构契约测试
 ├── test_estimate.py           # 耗时估算测试
