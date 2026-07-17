@@ -28,6 +28,10 @@ class PageParseResult:
     parse_errors: int = 0
     citation_success: int = 0
     citation_failed: int = 0
+    detail_success: int = 0
+    detail_failed: int = 0
+    keywords_present: int = 0
+    abstracts_present: int = 0
 
     @property
     def records_added(self) -> int:
@@ -125,4 +129,3 @@ def record_dedup_key(record: list) -> Any:
     source = str(record[2]).strip() if len(record) > 2 else ""
     date = str(record[3]).strip() if len(record) > 3 else ""
     return title, source, date
-

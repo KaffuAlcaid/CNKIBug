@@ -8,6 +8,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from ..browser.runtime import BrowserLaunchError, create_browser_context, launch_browser
+from ..cnki.details import ArticleDetailFetcher
 from ..cnki.search import warmup
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
@@ -26,6 +27,8 @@ def scrape_cnki(
     save_mode: str,
     resume_state: dict | None = None,
     include_citation: bool = False,
+    include_details: bool = False,
+    detail_txt_export: bool = False,
     *,
     settings: ScraperSettings,
     paths: RuntimePaths,
@@ -41,16 +44,21 @@ def scrape_cnki(
         save_mode,
         resume_state,
         include_citation,
+        include_details,
+        detail_txt_export,
         settings,
         paths,
         events,
     )
     _logger.info(
-        "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s include_citation=%s",
+        "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s "
+        "include_citation=%s include_details=%s detail_txt_export=%s",
         len(task.keywords),
         task.max_pages,
         task.save_mode,
         task.include_citation,
+        task.include_details,
+        task.detail_txt_export,
     )
 
     with sync_playwright() as playwright:
@@ -92,6 +100,12 @@ def _open_browser(task: TaskContext, playwright) -> None:
         task.paths,
     )
     task.session.page = task.browser_context.new_page()
+    if task.include_details:
+        task.detail_fetcher = ArticleDetailFetcher(
+            task.browser_context,
+            task.settings,
+            task.events,
+        )
     task.events.emit("browser_ready")
 
 

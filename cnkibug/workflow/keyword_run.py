@@ -42,6 +42,7 @@ def start_progress(task: TaskContext) -> None:
         task.max_pages,
         len(pending),
         include_citation=task.include_citation,
+        include_details=task.include_details,
     )
     task.events.emit(
         "progress_started",
@@ -234,6 +235,7 @@ def _scrape_with_errors(
             initial_records=checkpoint_records if completed_page else [],
             on_page_complete=on_page_complete,
             include_citation=task.include_citation,
+            detail_fetcher=task.detail_fetcher,
         )
     except PlaywrightTimeoutError as error:
         _logger.warning("关键词页面等待超时，跳过: %s error=%s", keyword_ref, error)
@@ -332,6 +334,8 @@ def _save_incremental(task: TaskContext, index: int) -> None:
             task.all_results,
             task.ts,
             include_citation=task.include_citation,
+            include_details=task.include_details,
+            detail_txt_export=task.detail_txt_export,
             log_save_path=task.settings.log_save_path,
             save_type="incremental",
         )

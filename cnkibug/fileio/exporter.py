@@ -1,14 +1,14 @@
 import csv
+import logging
 import os
 import re
-import logging
 from dataclasses import dataclass, field
 
 import openpyxl
 
+from ..cnki.models import record_article_details, record_citation
 from .paths import get_real_desktop_path
 
-_HEADERS = ["论文标题", "作者", "来源", "发表日期", "详情链接"]
 _CSV_HEADERS = ["keyword", "title", "authors", "source", "publication_date", "detail_url"]
 _logger = logging.getLogger("cnkibug.exporter")
 
@@ -26,6 +26,8 @@ class SaveResult:
     saved_paths: list[str] = field(default_factory=list)
     files: list[SavedFile] = field(default_factory=list)
     failed: int = 0
+    keyword_txt_path: str | None = None
+    keyword_txt_failed: bool = False
 
     def record(
         self,
@@ -107,37 +109,72 @@ def _try_save_workbook(
         return _try_save_fallback(wb, filepath, save_err, log_save_path)
 
 
-def _export_headers(include_citation: bool) -> list[str]:
+def _export_headers(
+    include_citation: bool,
+    include_details: bool = False,
+) -> list[str]:
+    headers = ["论文标题", "作者", "来源", "发表日期"]
+    if include_details:
+        headers.extend(("论文关键词", "摘要"))
     if include_citation:
-        return ["论文标题", "作者", "来源", "发表日期", "引用格式", "详情链接"]
-    return list(_HEADERS)
+        headers.append("引用格式")
+    headers.append("详情链接")
+    return headers
 
 
-def _export_record(record: list, include_citation: bool) -> list:
+def _export_record(
+    record: list,
+    include_citation: bool,
+    include_details: bool = False,
+) -> list:
     values = list(record[:5])
     values.extend([""] * (5 - len(values)))
+    exported = list(values[:4])
+    if include_details:
+        keywords, abstract = record_article_details(record, include_citation)
+        exported.extend((
+            "；".join(item.strip() for item in keywords.splitlines() if item.strip()),
+            _clean_cell_text(abstract),
+        ))
     if include_citation:
-        citation = record[5] if len(record) > 5 else ""
-        return [*values[:4], citation, values[4]]
-    return values
+        exported.append(record_citation(record, include_citation))
+    exported.append(values[4])
+    return exported
 
 
-def _build_single_sheet_workbook(results: list, include_citation: bool = False):
+def _clean_cell_text(value: str) -> str:
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value))
+    if len(cleaned) > 32767:
+        _logger.warning("导出字段超过 Excel 单元格上限，已截断: length=%d", len(cleaned))
+        return cleaned[:32767]
+    return cleaned
+
+
+def _build_single_sheet_workbook(
+    results: list,
+    include_citation: bool = False,
+    include_details: bool = False,
+):
     """构建单 Sheet 工作簿（single / multi_split 共用）。"""
     wb = openpyxl.Workbook()
     ws = wb.active
     assert ws is not None
     ws.title = "论文标题"
-    ws.append(_export_headers(include_citation))
-    _append_records(ws, results, include_citation)
+    ws.append(_export_headers(include_citation, include_details))
+    _append_records(ws, results, include_citation, include_details)
     return wb
 
 
-def _append_records(ws, results: list, include_citation: bool = False) -> None:
+def _append_records(
+    ws,
+    results: list,
+    include_citation: bool = False,
+    include_details: bool = False,
+) -> None:
     for row in results:
-        ws.append(_export_record(row, include_citation))
+        ws.append(_export_record(row, include_citation, include_details))
         if len(row) > 4 and str(row[4]).strip():
-            link_column = 6 if include_citation else 5
+            link_column = len(_export_headers(include_citation, include_details))
             link_cell = ws.cell(row=ws.max_row, column=link_column)
             link_cell.hyperlink = str(row[4]).strip()
             link_cell.style = "Hyperlink"
@@ -148,6 +185,7 @@ def _save_single(
     results: list,
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
@@ -158,7 +196,7 @@ def _save_single(
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
-    wb = _build_single_sheet_workbook(results, include_citation)
+    wb = _build_single_sheet_workbook(results, include_citation, include_details)
 
     saved_path = _try_save_workbook(
         wb,
@@ -174,6 +212,7 @@ def _save_multi_split(
     all_results: dict[str, list],
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
@@ -198,7 +237,7 @@ def _save_multi_split(
             )
         used_names.add(clean_keyword.casefold())
         filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
-        wb = _build_single_sheet_workbook(results, include_citation)
+        wb = _build_single_sheet_workbook(results, include_citation, include_details)
         saved_path = _try_save_workbook(
             wb,
             filepath,
@@ -213,6 +252,7 @@ def _save_multi_merge(
     all_results: dict[str, list],
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
@@ -242,8 +282,8 @@ def _save_multi_merge(
         used_sheet_names.add(sheet_name)
 
         ws = wb.create_sheet(title=sheet_name)
-        ws.append(_export_headers(include_citation))
-        _append_records(ws, results, include_citation)
+        ws.append(_export_headers(include_citation, include_details))
+        _append_records(ws, results, include_citation, include_details)
         total += len(results)
 
     saved_path = _try_save_workbook(
@@ -260,16 +300,19 @@ def _write_multi_csv(
     filepath: str,
     all_results: dict[str, list],
     include_citation: bool = False,
+    include_details: bool = False,
 ) -> None:
     with open(filepath, "w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
         headers = list(_CSV_HEADERS)
+        if include_details:
+            headers[5:5] = ["paper_keywords", "abstract"]
         if include_citation:
-            headers.insert(5, "citation")
+            headers.insert(7 if include_details else 5, "citation")
         writer.writerow(headers)
         for keyword, records in all_results.items():
             for record in records:
-                values = _export_record(record, include_citation)
+                values = _export_record(record, include_citation, include_details)
                 writer.writerow([keyword, *values])
 
 
@@ -277,12 +320,13 @@ def _try_save_csv(
     filepath: str,
     all_results: dict[str, list],
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
 ) -> str | None:
     try:
-        _write_multi_csv(filepath, all_results, include_citation)
+        _write_multi_csv(filepath, all_results, include_citation, include_details)
         saved_path = os.path.abspath(filepath)
         _log_save_success(saved_path, log_save_path, save_type)
         return saved_path
@@ -298,7 +342,7 @@ def _try_save_csv(
         else:
             _logger.warning("CSV 保存失败，尝试备用路径: error=%s", save_err)
         try:
-            _write_multi_csv(fallback, all_results, include_citation)
+            _write_multi_csv(fallback, all_results, include_citation, include_details)
             saved_path = os.path.abspath(fallback)
             _log_save_success(saved_path, log_save_path, "fallback")
             return saved_path
@@ -311,6 +355,7 @@ def _save_multi_csv(
     all_results: dict[str, list],
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
@@ -325,6 +370,7 @@ def _save_multi_csv(
         filepath,
         all_results,
         include_citation,
+        include_details,
         log_save_path=log_save_path,
         save_type=save_type,
     )
@@ -337,6 +383,7 @@ def _save_single_csv(
     results: list,
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
@@ -351,11 +398,60 @@ def _save_single_csv(
         filepath,
         {keyword: results},
         include_citation,
+        include_details,
         log_save_path=log_save_path,
         save_type=save_type,
     )
     save_result.record(saved_path, keyword=keyword, record_count=len(results))
     return save_result
+
+
+def _save_keyword_txt(
+    result: SaveResult,
+    all_results: dict[str, list],
+    ts: str,
+    include_citation: bool,
+    log_save_path: bool,
+    save_type: str,
+) -> None:
+    lines = []
+    for records in all_results.values():
+        for record in records:
+            keywords, _ = record_article_details(record, include_citation)
+            lines.extend(item.strip() for item in keywords.splitlines() if item.strip())
+    if not lines:
+        return
+
+    filepath = _get_output_path(f"cnki_paper_keywords_{ts}.txt")
+    try:
+        _write_keyword_txt(filepath, lines)
+        result.keyword_txt_path = os.path.abspath(filepath)
+        _log_save_success(result.keyword_txt_path, log_save_path, save_type)
+        return
+    except OSError as save_error:
+        fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
+        if log_save_path:
+            _logger.warning(
+                "关键词 TXT 保存失败，尝试备用路径: target=%s fallback=%s error=%s",
+                filepath,
+                fallback,
+                save_error,
+            )
+        else:
+            _logger.warning("关键词 TXT 保存失败，尝试备用路径: error=%s", save_error)
+    try:
+        _write_keyword_txt(fallback, lines)
+        result.keyword_txt_path = os.path.abspath(fallback)
+        _log_save_success(result.keyword_txt_path, log_save_path, "fallback")
+    except OSError as fallback_error:
+        result.keyword_txt_failed = True
+        _logger.error("关键词 TXT 备用路径保存失败: %s", fallback_error)
+
+
+def _write_keyword_txt(filepath: str, lines: list[str]) -> None:
+    with open(filepath, "w", encoding="utf-8-sig", newline="\n") as file:
+        for line in lines:
+            file.write(line + "\n")
 
 
 def save_all(
@@ -364,53 +460,70 @@ def save_all(
     all_results: dict[str, list],
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
+    detail_txt_export: bool = False,
     *,
     log_save_path: bool = True,
     save_type: str = "final",
 ) -> SaveResult:
     """Persist the current result snapshot without producing UI output."""
+    result = SaveResult()
     if save_mode == "single":
         if keywords:
-            return _save_single(
+            result = _save_single(
                 keywords[0],
                 all_results.get(keywords[0], []),
                 ts,
                 include_citation,
+                include_details,
                 log_save_path=log_save_path,
                 save_type=save_type,
             )
     elif save_mode == "single_csv":
         if keywords:
-            return _save_single_csv(
+            result = _save_single_csv(
                 keywords[0],
                 all_results.get(keywords[0], []),
                 ts,
                 include_citation,
+                include_details,
                 log_save_path=log_save_path,
                 save_type=save_type,
             )
     elif save_mode == "multi_split":
-        return _save_multi_split(
+        result = _save_multi_split(
             all_results,
             ts,
             include_citation,
+            include_details,
             log_save_path=log_save_path,
             save_type=save_type,
         )
     elif save_mode == "multi_merge":
-        return _save_multi_merge(
+        result = _save_multi_merge(
             all_results,
             ts,
             include_citation,
+            include_details,
             log_save_path=log_save_path,
             save_type=save_type,
         )
     elif save_mode == "multi_csv":
-        return _save_multi_csv(
+        result = _save_multi_csv(
             all_results,
             ts,
             include_citation,
+            include_details,
             log_save_path=log_save_path,
             save_type=save_type,
         )
-    return SaveResult()
+    if include_details and detail_txt_export:
+        _save_keyword_txt(
+            result,
+            all_results,
+            ts,
+            include_citation,
+            log_save_path,
+            save_type,
+        )
+    return result

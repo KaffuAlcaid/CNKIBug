@@ -6,6 +6,7 @@ from typing import Any
 
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
+from .details import ArticleDetailFetcher
 from .metrics import keyword_log_ref, missing_field_text, new_scrape_stats
 from .models import (
     STATUS_EMPTY,
@@ -41,6 +42,7 @@ def scrape_keyword(
     initial_records: list[list[str]] | None = None,
     on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
     include_citation: bool = False,
+    detail_fetcher: ArticleDetailFetcher | None = None,
 ) -> KeywordResult:
     current_start_page = start_page
     current_records = list(initial_records or [])
@@ -56,6 +58,7 @@ def scrape_keyword(
             initial_records=current_records,
             on_page_complete=on_page_complete,
             include_citation=include_citation,
+            detail_fetcher=detail_fetcher,
         )
         if result is not None:
             return result
@@ -75,6 +78,7 @@ def _scrape_keyword_attempt(
     initial_records: list[list[str]],
     on_page_complete: Callable[[int, list[list[str]]], None] | None,
     include_citation: bool,
+    detail_fetcher: ArticleDetailFetcher | None,
 ) -> KeywordResult | None:
     page = require_page(session)
     events = session.events
@@ -195,6 +199,7 @@ def _scrape_keyword_attempt(
         seen=seen,
         stats=stats,
         include_citation=include_citation,
+        detail_fetcher=detail_fetcher,
         on_page_complete=on_page_complete,
     )
     if session.stop_requested:
@@ -240,7 +245,8 @@ def _scrape_keyword_attempt(
     _logger.info(
         "关键词完成: %s total_records=%d rows_seen=%d duplicates=%d "
         "skipped_no_title=%d parse_errors=%d citation_success=%d "
-        "citation_failed=%d missing_fields=(%s)",
+        "citation_failed=%d detail_success=%d detail_failed=%d "
+        "keywords_present=%d abstracts_present=%d missing_fields=(%s)",
         keyword_ref,
         len(results),
         stats["rows_seen"],
@@ -249,6 +255,10 @@ def _scrape_keyword_attempt(
         stats["row_parse_errors"],
         pages.citation_success,
         pages.citation_failed,
+        pages.detail_success,
+        pages.detail_failed,
+        pages.keywords_present,
+        pages.abstracts_present,
         missing_field_text(stats),
     )
     status = STATUS_SUCCESS if results else STATUS_FAILED

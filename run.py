@@ -9,6 +9,7 @@ def _run_self_check() -> int:
     try:
         import cnkibug.app.runtime
         import cnkibug.browser.runtime
+        import cnkibug.cnki.details
         import cnkibug.cnki.keyword
         import cnkibug.fileio.exporter
         import cnkibug.workflow.runner

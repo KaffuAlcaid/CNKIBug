@@ -12,9 +12,10 @@ from ..core.runtime import RuntimePaths
 
 
 APP_DATA_DIR_NAME = "CNKIBug"
+CONFIG_VERSION = 2
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "version": 1,
+    "version": CONFIG_VERSION,
     "timeout_goto_ms": 30000,
     "timeout_load_ms": 20000,
     "timeout_selector_ms": 15000,
@@ -27,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "log_save_path": True,
     "log_keywords": False,
     "log_scraped_records": False,
+    "detail_txt_export": False,
 }
 
 
@@ -158,12 +160,19 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     events: list[tuple[str, str]] = []
     changed = False
 
+    raw_version = raw.get("version")
     for key, default in DEFAULT_CONFIG.items():
         if key not in raw:
             changed = True
-            events.append(("WARNING", f"配置项缺失，已使用默认值: {key}={default!r}"))
+            level = "INFO" if raw_version == 1 and key == "detail_txt_export" else "WARNING"
+            events.append((level, f"配置项缺失，已使用默认值: {key}={default!r}"))
             continue
         config[key] = raw[key]
+
+    if config.get("version") == 1:
+        config["version"] = CONFIG_VERSION
+        changed = True
+        events.append(("INFO", f"配置文件已升级到版本 {CONFIG_VERSION}"))
 
     int_keys = (
         "version",
@@ -191,6 +200,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
         "log_save_path",
         "log_keywords",
         "log_scraped_records",
+        "detail_txt_export",
     )
     for key in bool_keys:
         if not isinstance(config.get(key), bool):

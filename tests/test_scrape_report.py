@@ -11,6 +11,7 @@ from cnkibug.workflow.report import (
     TaskReport,
     build_task_report,
     collect_citation_stats,
+    collect_detail_stats,
     collect_field_stats,
     save_task_report,
 )
@@ -55,6 +56,20 @@ def test_collect_citation_stats_counts_empty_values_as_failures():
     ])
 
     assert stats == {"success": 1, "failed": 2, "empty": 2}
+
+
+def test_collect_detail_stats_uses_optional_citation_offset():
+    stats = collect_detail_stats([
+        ["标题", "", "", "", "url", "引文", "关键词一\n关键词二", "摘要"],
+        ["标题2", "", "", "", "url2", "", "", ""],
+    ], include_citation=True)
+
+    assert stats == {
+        "keywords_present": 1,
+        "keywords_missing": 1,
+        "abstracts_present": 1,
+        "abstracts_missing": 1,
+    }
 
 
 def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
@@ -115,5 +130,5 @@ def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
     report_path = tmp_path / "CNKIBug" / "status" / "cnki_task_report_TS.json"
     assert saved_path == str(report_path.resolve())
     written = json.loads(report_path.read_text(encoding="utf-8"))
-    assert written["schema_version"] == 2
+    assert written["schema_version"] == 3
     assert written["keywords"][2]["keyword"] == "未开始"

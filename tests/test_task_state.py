@@ -85,6 +85,8 @@ def test_load_last_task_upgrades_version_one_checkpoint(tmp_path, caplog):
         [["标题", "", "", ""]],
     )
     assert loaded["include_citation"] is False
+    assert loaded["include_details"] is False
+    assert loaded["detail_txt_export"] is False
     assert "兼容升级" in caplog.text
 
 
@@ -113,6 +115,40 @@ def test_citation_setting_round_trips_and_version_two_defaults_off(tmp_path):
     assert upgraded is not None
     assert upgraded["version"] == task_state.TASK_STATE_VERSION
     assert upgraded["include_citation"] is False
+    assert upgraded["include_details"] is False
+    assert upgraded["detail_txt_export"] is False
+
+
+def test_detail_settings_round_trip_and_version_three_defaults_off(tmp_path):
+    paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
+    state = task_state.make_task_state(
+        ["焊接"],
+        2,
+        "single",
+        "TS",
+        include_citation=True,
+        include_details=True,
+        detail_txt_export=True,
+    )
+    task_state.save_last_task(state, paths)
+
+    loaded = task_state.load_last_task(paths)
+    assert loaded is not None
+    assert loaded["include_details"] is True
+    assert loaded["detail_txt_export"] is True
+    assert "关键词和摘要 开启" in task_state.describe_task(loaded)
+
+    loaded["version"] = 3
+    loaded.pop("include_details")
+    loaded.pop("detail_txt_export")
+    path = task_state.get_last_task_path(paths)
+    path.write_text(json.dumps(loaded, ensure_ascii=False), encoding="utf-8")
+
+    upgraded = task_state.load_last_task(paths)
+    assert upgraded is not None
+    assert upgraded["include_citation"] is True
+    assert upgraded["include_details"] is False
+    assert upgraded["detail_txt_export"] is False
 
 
 def test_keyword_checkpoint_tracks_page_and_survives_failed_status():

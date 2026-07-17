@@ -292,6 +292,67 @@ def test_new_task_propagates_citation_setting(monkeypatch, tmp_path):
     assert deleted == [True]
 
 
+def test_new_task_propagates_detail_settings(monkeypatch, tmp_path):
+    saved_results = []
+    deleted = []
+    captured_reports = []
+    export_flags = []
+    run_context = _patch_workflow(monkeypatch, tmp_path, saved_results, deleted)
+    records = [[
+        "标题",
+        "作者",
+        "来源",
+        "日期",
+        "https://example.test/1",
+        "关键词一\n关键词二",
+        "完整摘要",
+    ]]
+
+    def scrape_keyword(*args, **kwargs):
+        assert kwargs["detail_fetcher"] is not None
+        kwargs["on_page_complete"](1, records)
+        return make_keyword_result("焊接", 1, 1, records, STATUS_SUCCESS)
+
+    def save_all(
+        *args,
+        include_details=False,
+        detail_txt_export=False,
+        **kwargs,
+    ):
+        export_flags.append((include_details, detail_txt_export))
+        return SaveResult(keyword_txt_path="/tmp/keywords.txt")
+
+    monkeypatch.setattr(keyword_run, "scrape_keyword", scrape_keyword)
+    monkeypatch.setattr(keyword_run, "save_all", save_all)
+    monkeypatch.setattr(finalize, "save_all", save_all)
+    monkeypatch.setattr(
+        finalize,
+        "save_task_report",
+        lambda payload, ts, paths: captured_reports.append(payload) or "/tmp/report.json",
+    )
+
+    scrape_workflow.scrape_cnki(
+        ["焊接"],
+        1,
+        "single",
+        include_details=True,
+        detail_txt_export=True,
+        **run_context,
+    )
+
+    assert export_flags == [(True, True), (True, True)]
+    assert captured_reports[0]["request"]["include_details"] is True
+    assert captured_reports[0]["request"]["detail_txt_export"] is True
+    assert captured_reports[0]["execution"]["details"] == {
+        "keywords_present": 1,
+        "keywords_missing": 0,
+        "abstracts_present": 1,
+        "abstracts_missing": 0,
+    }
+    assert captured_reports[0]["exports"]["keyword_txt"]["path"] == "/tmp/keywords.txt"
+    assert deleted == [True]
+
+
 def test_progress_display_receives_page_verify_save_and_complete_events(monkeypatch, tmp_path):
     saved_results = []
     deleted = []

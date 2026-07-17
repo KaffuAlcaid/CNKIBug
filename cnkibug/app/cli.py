@@ -50,21 +50,29 @@ def main(program_dir: Path) -> None:
                     clear_screen()
                     continue
 
-                request = collect_task_request()
+                request = collect_task_request(
+                    detail_txt_export=settings.detail_txt_export,
+                    config_path=runtime_state.paths.config_path,
+                )
                 if request is None:
                     break
                 _logger.info(
-                    "用户选择: save_mode=%s keyword_count=%d pages=%d include_citation=%s",
+                    "用户选择: save_mode=%s keyword_count=%d pages=%d "
+                    "include_citation=%s include_details=%s detail_txt_export=%s",
                     request.save_mode,
                     len(request.keywords),
                     request.max_pages,
                     request.include_citation,
+                    request.include_details,
+                    request.detail_txt_export,
                 )
                 scrape_cnki(
                     request.keywords,
                     max_pages=request.max_pages,
                     save_mode=request.save_mode,
                     include_citation=request.include_citation,
+                    include_details=request.include_details,
+                    detail_txt_export=request.detail_txt_export,
                     settings=settings,
                     paths=runtime_state.paths,
                     events=events,

@@ -6,6 +6,7 @@ from ..cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_STOPPED, STATUS_SU
 from ..workflow.report import (
     TaskReport,
     collect_citation_stats,
+    collect_detail_stats,
     collect_field_stats,
     has_missing_fields,
 )
@@ -39,6 +40,18 @@ def print_task_report(report: TaskReport, all_results: dict[str, list]) -> None:
             "  引用格式："
             f"成功 {citation_stats['success']}，"
             f"失败/留空 {citation_stats['failed']}"
+        )
+    if report.include_details:
+        detail_stats = collect_detail_stats(
+            [record for records in all_results.values() for record in records],
+            report.include_citation,
+        )
+        _console.print(
+            "  论文详情："
+            f"关键词有值 {detail_stats['keywords_present']}，"
+            f"关键词留空 {detail_stats['keywords_missing']}，"
+            f"摘要有值 {detail_stats['abstracts_present']}，"
+            f"摘要留空 {detail_stats['abstracts_missing']}"
         )
     if report.verify_timeout:
         _console.print("  [yellow]安全验证等待超时：是[/yellow]")

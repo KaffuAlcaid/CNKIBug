@@ -27,4 +27,5 @@ def test_get_scraper_settings_uses_config_values():
         log_save_path=True,
         log_keywords=False,
         log_scraped_records=False,
+        detail_txt_export=False,
     )

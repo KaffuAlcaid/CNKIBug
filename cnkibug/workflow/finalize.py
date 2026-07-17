@@ -65,6 +65,8 @@ def _save_final_results(task: TaskContext) -> tuple[SaveResult, bool]:
             task.all_results,
             task.ts,
             include_citation=task.include_citation,
+            include_details=task.include_details,
+            detail_txt_export=task.detail_txt_export,
             log_save_path=task.settings.log_save_path,
             save_type="final",
         )
@@ -129,6 +131,10 @@ def _save_json_report(
             save_result.saved_paths,
             export_failed,
             include_citation=task.include_citation,
+            include_details=task.include_details,
+            detail_txt_export=task.detail_txt_export,
+            keyword_txt_path=save_result.keyword_txt_path,
+            keyword_txt_failed=save_result.keyword_txt_failed,
         )
         report_path = save_task_report(payload, task.ts, task.paths)
         if report_path:

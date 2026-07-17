@@ -72,11 +72,29 @@ def test_load_or_create_config_repairs_missing_and_invalid_values(tmp_path):
     assert config["log_save_path"] is True
     assert config["log_keywords"] is False
     assert config["log_scraped_records"] is False
+    assert config["detail_txt_export"] is False
+    assert config["version"] == runtime.CONFIG_VERSION
     assert any(level == "WARNING" for level, _ in events)
 
     written = json.loads(paths.config_path.read_text(encoding="utf-8"))
     assert "unused" not in written
     assert written == config
+
+
+def test_load_or_create_config_migrates_version_one_without_warning(tmp_path):
+    paths = runtime.get_runtime_paths(tmp_path)
+    paths.data_dir.mkdir()
+    old_config = runtime.DEFAULT_CONFIG.copy()
+    old_config["version"] = 1
+    old_config.pop("detail_txt_export")
+    paths.config_path.write_text(json.dumps(old_config), encoding="utf-8")
+
+    config, events = runtime.load_or_create_config(paths)
+
+    assert config["version"] == runtime.CONFIG_VERSION
+    assert config["detail_txt_export"] is False
+    assert not any(level == "WARNING" for level, _ in events)
+    assert any("已升级到版本 2" in message for _, message in events)
 
 
 def test_load_or_create_config_backs_up_broken_json(tmp_path):

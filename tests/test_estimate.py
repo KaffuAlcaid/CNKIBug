@@ -25,6 +25,17 @@ def test_estimate_with_citations_uses_paired_sample_range():
     assert estimate_seconds(1, 2, include_citation=True) == (77, 107)
 
 
+def test_estimate_with_details_uses_conservative_per_record_range():
+    assert estimate_active_seconds(1, 1, include_details=True) == (68, 172)
+    assert estimate_seconds(1, 1, include_details=True) == (86, 197)
+    assert estimate_seconds(
+        1,
+        1,
+        include_citation=True,
+        include_details=True,
+    ) == (105, 222)
+
+
 def test_estimate_matches_three_page_paired_samples():
     assert estimate_active_seconds(3, 1) == (24, 36)
     assert estimate_seconds(3, 1) == (42, 61)

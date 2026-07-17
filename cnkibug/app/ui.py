@@ -61,6 +61,8 @@ class EstimatedProgressDisplay:
         self._page = 0
         self._page_total = 0
         self._records = 0
+        self._detail_index = 0
+        self._detail_total = 0
 
         self._bar = Progress(
             SpinnerColumn(spinner_name="dots", style="bold cyan"),
@@ -112,6 +114,8 @@ class EstimatedProgressDisplay:
         page: int | None = None,
         page_total: int | None = None,
         records: int | None = None,
+        detail_index: int | None = None,
+        detail_total: int | None = None,
     ) -> None:
         with self._lock:
             if keyword is not None:
@@ -126,6 +130,10 @@ class EstimatedProgressDisplay:
                 self._page_total = page_total
             if records is not None:
                 self._records = records
+            if detail_index is not None:
+                self._detail_index = detail_index
+            if detail_total is not None:
+                self._detail_total = detail_total
         self._refresh()
 
     def pause(self, message: str = "等待手动验证，任务计时已暂停") -> None:
@@ -235,6 +243,8 @@ class EstimatedProgressDisplay:
             )
         if self._page_total:
             details.append(f"当前页面：第 {self._page}/{self._page_total} 页")
+        if self._detail_total:
+            details.append(f"当前详情：{self._detail_index}/{self._detail_total}")
         details.append(f"已获取：{self._records} 条")
         return percentage, headline, details
 

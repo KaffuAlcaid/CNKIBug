@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from ..browser.session import ScrapeSession
+from ..cnki.details import ArticleDetailFetcher
 from ..cnki.models import STATUS_FAILED, make_keyword_result
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
@@ -28,6 +29,8 @@ class TaskContext:
     max_pages: int
     save_mode: str
     include_citation: bool
+    include_details: bool
+    detail_txt_export: bool
     ts: str
     state: dict
     all_results: dict[str, list]
@@ -39,6 +42,7 @@ class TaskContext:
     session: ScrapeSession
     browser: Any | None = None
     browser_context: Any | None = None
+    detail_fetcher: ArticleDetailFetcher | None = None
 
     @property
     def total_records(self) -> int:
@@ -51,6 +55,8 @@ def initialize_task(
     save_mode: str,
     resume_state: dict | None,
     include_citation: bool,
+    include_details: bool,
+    detail_txt_export: bool,
     settings: ScraperSettings,
     paths: RuntimePaths,
     events: EventSink,
@@ -60,6 +66,8 @@ def initialize_task(
         max_pages = int(resume_state["max_pages"])
         save_mode = str(resume_state["save_mode"])
         include_citation = bool(resume_state.get("include_citation", False))
+        include_details = bool(resume_state.get("include_details", False))
+        detail_txt_export = bool(resume_state.get("detail_txt_export", False))
         ts = str(resume_state["ts"])
         state = resume_state
         all_results = stored_results(state)
@@ -74,13 +82,16 @@ def initialize_task(
         )
         _logger.info(
             "恢复未完成任务: keyword_count=%d completed=%d stored_results=%d "
-            "max_pages=%d save_mode=%s include_citation=%s ts=%s",
+            "max_pages=%d save_mode=%s include_citation=%s "
+            "include_details=%s detail_txt_export=%s ts=%s",
             len(keywords),
             len(terminal_results),
             len(all_results),
             max_pages,
             save_mode,
             include_citation,
+            include_details,
+            detail_txt_export,
             ts,
         )
     else:
@@ -93,12 +104,15 @@ def initialize_task(
             save_mode,
             ts,
             include_citation=include_citation,
+            include_details=include_details,
+            detail_txt_export=detail_txt_export,
         )
         persist_task_state(state, "创建新任务", paths, events)
 
     report = TaskReport(
         total_keywords=len(keywords),
         include_citation=include_citation,
+        include_details=include_details,
     )
     completed_state = state.get("completed", {})
     if isinstance(completed_state, dict):
@@ -120,6 +134,8 @@ def initialize_task(
         max_pages=max_pages,
         save_mode=save_mode,
         include_citation=include_citation,
+        include_details=include_details,
+        detail_txt_export=detail_txt_export,
         ts=ts,
         state=state,
         all_results=all_results,

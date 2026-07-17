@@ -12,6 +12,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
+from .details import ArticleDetailFetcher
 from .guard import VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify_with_progress, print_page_debug
 from .metrics import missing_field_text
 from .pagination import (
@@ -20,6 +21,7 @@ from .pagination import (
     wait_result_page_advanced,
 )
 from .results import PageParseResult, parse_result_rows
+from .models import append_article_details
 from .selectors import SELECTOR_RESULT_ROWS, query_first
 
 
@@ -48,6 +50,10 @@ class PageLoopResult:
     incomplete_reason: str | None = None
     citation_success: int = 0
     citation_failed: int = 0
+    detail_success: int = 0
+    detail_failed: int = 0
+    keywords_present: int = 0
+    abstracts_present: int = 0
 
 
 def scrape_result_pages(
@@ -62,6 +68,7 @@ def scrape_result_pages(
     seen: set[Any],
     stats: dict[str, int],
     include_citation: bool = False,
+    detail_fetcher: ArticleDetailFetcher | None = None,
     on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
 ) -> PageLoopResult:
     page = require_page(session)
@@ -69,6 +76,10 @@ def scrape_result_pages(
     incomplete_reason = None
     citation_success = 0
     citation_failed = 0
+    detail_success = 0
+    detail_failed = 0
+    keywords_present = 0
+    abstracts_present = 0
 
     for current_page in range(start_page, max_pages + 1):
         try:
@@ -81,6 +92,7 @@ def scrape_result_pages(
                 seen=seen,
                 stats=stats,
                 include_citation=include_citation,
+                detail_fetcher=detail_fetcher,
             )
             if step.parsed is None:
                 incomplete_reason = step.failure_reason
@@ -89,6 +101,10 @@ def scrape_result_pages(
             page_parse = step.parsed
             citation_success += page_parse.citation_success
             citation_failed += page_parse.citation_failed
+            detail_success += page_parse.detail_success
+            detail_failed += page_parse.detail_failed
+            keywords_present += page_parse.keywords_present
+            abstracts_present += page_parse.abstracts_present
             results.extend(page_parse.records)
             _log_page_result(
                 page_parse,
@@ -158,6 +174,10 @@ def scrape_result_pages(
         incomplete_reason=incomplete_reason,
         citation_success=citation_success,
         citation_failed=citation_failed,
+        detail_success=detail_success,
+        detail_failed=detail_failed,
+        keywords_present=keywords_present,
+        abstracts_present=abstracts_present,
     )
 
 
@@ -170,6 +190,7 @@ def process_result_page(
     seen: set[Any],
     stats: dict[str, int],
     include_citation: bool,
+    detail_fetcher: ArticleDetailFetcher | None,
 ) -> PageStepResult:
     page = require_page(session)
     events = session.events
@@ -257,6 +278,15 @@ def process_result_page(
             "log_titles": settings.log_scraped_records,
         }
     page_parse = parse_result_rows(page, seen, stats, **citation_options)
+    if detail_fetcher is not None and not _append_page_details(
+        session,
+        page_parse,
+        detail_fetcher,
+        keyword_ref=keyword_ref,
+        current_page=current_page,
+        log_titles=settings.log_scraped_records,
+    ):
+        return PageStepResult()
     unreadable_rows = page_parse.skipped_no_title + page_parse.parse_errors
     if page_parse.rows_seen == 0:
         reason = f"第 {current_page} 页结果行在解析时消失"
@@ -292,6 +322,45 @@ def process_result_page(
         )
         return PageStepResult(failure_reason=reason)
     return PageStepResult(parsed=page_parse)
+
+
+def _append_page_details(
+    session: ScrapeSession,
+    page_parse: PageParseResult,
+    detail_fetcher: ArticleDetailFetcher,
+    *,
+    keyword_ref: str,
+    current_page: int,
+    log_titles: bool,
+) -> bool:
+    total = len(page_parse.records)
+    for row_index, record in enumerate(page_parse.records, start=1):
+        session.events.emit(
+            "progress_updated",
+            detail_index=row_index,
+            detail_total=total,
+        )
+        log_ref = f"{keyword_ref} page={current_page} row={row_index}"
+        if log_titles and record:
+            log_ref = f"{log_ref} title={record[0]!r}"
+        detail_url = str(record[4]).strip() if len(record) > 4 else ""
+        details = detail_fetcher.fetch(detail_url, log_ref=log_ref)
+        if details.verify_timeout:
+            session.request_stop("安全验证等待超时", verify_timeout=True)
+            session.events.emit("progress_updated", detail_index=0, detail_total=0)
+            return False
+        append_article_details(record, details.keywords, details.abstract)
+        if details.failed:
+            page_parse.detail_failed += 1
+        else:
+            page_parse.detail_success += 1
+        if details.keywords:
+            page_parse.keywords_present += 1
+        if details.abstract:
+            page_parse.abstracts_present += 1
+
+    session.events.emit("progress_updated", detail_index=0, detail_total=0)
+    return True
 
 
 def advance_result_page(

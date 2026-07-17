@@ -12,8 +12,8 @@ from ..core.runtime import RuntimePaths
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 3
-_LEGACY_TASK_STATE_VERSIONS = {1, 2}
+TASK_STATE_VERSION = 4
+_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3}
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -49,6 +49,8 @@ def make_task_state(
     save_mode: str,
     ts: str,
     include_citation: bool = False,
+    include_details: bool = False,
+    detail_txt_export: bool = False,
 ) -> dict[str, Any]:
     return {
         "version": TASK_STATE_VERSION,
@@ -57,6 +59,8 @@ def make_task_state(
         "save_mode": save_mode,
         "max_pages": max_pages,
         "include_citation": include_citation,
+        "include_details": include_details,
+        "detail_txt_export": detail_txt_export,
         "keywords": list(keywords),
         "completed": {},
     }
@@ -244,7 +248,8 @@ def describe_task(state: dict[str, Any]) -> str:
     return (
         f"关键词 {keyword_count} 个，已完成 {completed_count} 个{retry_text}，"
         f"每词 {state.get('max_pages')} 页，保存方式 {state.get('save_mode')}，"
-        f"引用格式 {'开启' if state.get('include_citation', False) else '关闭'}"
+        f"引用格式 {'开启' if state.get('include_citation', False) else '关闭'}，"
+        f"关键词和摘要 {'开启' if state.get('include_details', False) else '关闭'}"
     )
 
 
@@ -266,14 +271,19 @@ def _is_valid_task_state(raw: Any) -> bool:
     completed = raw.get("completed")
     if not isinstance(completed, dict):
         return False
-    return version in _LEGACY_TASK_STATE_VERSIONS or isinstance(
-        raw.get("include_citation"), bool
+    if version in _LEGACY_TASK_STATE_VERSIONS:
+        return True
+    return all(
+        isinstance(raw.get(key), bool)
+        for key in ("include_citation", "include_details", "detail_txt_export")
     )
 
 
 def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
     raw["version"] = TASK_STATE_VERSION
-    raw["include_citation"] = False
+    for key in ("include_citation", "include_details", "detail_txt_export"):
+        if not isinstance(raw.get(key), bool):
+            raw[key] = False
     completed = raw.get("completed", {})
     if isinstance(completed, dict):
         for item in completed.values():

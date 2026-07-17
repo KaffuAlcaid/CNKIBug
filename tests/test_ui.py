@@ -51,6 +51,8 @@ def test_estimated_progress_pauses_and_only_completes_on_event():
         page=4,
         page_total=5,
         records=286,
+        detail_index=7,
+        detail_total=20,
     )
 
     clock.advance(20)
@@ -68,6 +70,7 @@ def test_estimated_progress_pauses_and_only_completes_on_event():
     assert display.percentage == 90
     assert "当前关键词：增材制造（3/10）" in display.status_text
     assert "当前页面：第 4/5 页" in display.status_text
+    assert "当前详情：7/20" in display.status_text
     assert "已获取：286 条" in display.status_text
 
     display.saving()

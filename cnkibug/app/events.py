@@ -126,9 +126,13 @@ class ConsoleEventSink(EventSink):
         total = sum(len(records) for records in all_results.values())
         if result.failed:
             self._message(f"[x] 本轮有 {result.failed} 个文件未能成功保存。", "error")
+        if result.keyword_txt_failed:
+            self._message("[x] 关键词 TXT 未能成功保存，详情见日志。", "error")
         if not result.saved_paths:
             if total == 0:
                 self._message("[!] 未抓取到任何数据，不生成文件。", "warning")
+            if result.keyword_txt_path:
+                self._message(f"[*] 关键词 TXT 已保存至：{result.keyword_txt_path}", "success")
             return
 
         _console.print("\n" + "═" * 50)
@@ -151,4 +155,6 @@ class ConsoleEventSink(EventSink):
                 for keyword, records in all_results.items():
                     if records:
                         _console.print(f"  · Sheet [cyan][{keyword}][/cyan]：{len(records)} 条")
+        if result.keyword_txt_path:
+            _console.print(f"[*] 关键词 TXT 已保存至：{result.keyword_txt_path}")
         _console.print("═" * 50 + "\n")

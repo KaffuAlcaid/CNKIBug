@@ -16,10 +16,11 @@ from ..cnki.models import (
     STATUS_STOPPED,
     STATUS_SUCCESS,
     KeywordResult,
+    record_article_details,
 )
 
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 _logger = logging.getLogger("cnkibug.report")
 
@@ -41,6 +42,7 @@ class TaskReport:
     stopped: bool = False
     verify_timeout: bool = False
     include_citation: bool = False
+    include_details: bool = False
 
     def add(self, result: KeywordResult) -> None:
         self.keyword_results.append(result)
@@ -95,6 +97,21 @@ def collect_citation_stats(records: list) -> dict[str, int]:
     }
 
 
+def collect_detail_stats(records: list, include_citation: bool) -> dict[str, int]:
+    keywords_present = 0
+    abstracts_present = 0
+    for record in records:
+        keywords, abstract = record_article_details(record, include_citation)
+        keywords_present += bool(keywords.strip())
+        abstracts_present += bool(abstract.strip())
+    return {
+        "keywords_present": keywords_present,
+        "keywords_missing": len(records) - keywords_present,
+        "abstracts_present": abstracts_present,
+        "abstracts_missing": len(records) - abstracts_present,
+    }
+
+
 def build_task_report(
     report: TaskReport,
     all_results: dict[str, list],
@@ -106,6 +123,10 @@ def build_task_report(
     output_paths: list[str],
     export_failed: bool,
     include_citation: bool = False,
+    include_details: bool = False,
+    detail_txt_export: bool = False,
+    keyword_txt_path: str | None = None,
+    keyword_txt_failed: bool = False,
 ) -> dict:
     results_by_keyword = {item.keyword: item for item in report.keyword_results}
     completed_state = task_state.get("completed", {})
@@ -157,6 +178,8 @@ def build_task_report(
         }
         if include_citation:
             keyword_report["citation"] = collect_citation_stats(records)
+        if include_details:
+            keyword_report["details"] = collect_detail_stats(records, include_citation)
         keyword_reports.append(keyword_report)
 
     total_stats = collect_field_stats(all_results)
@@ -173,6 +196,8 @@ def build_task_report(
             "theoretical_max_pages": len(keywords) * max_pages,
             "save_mode": save_mode,
             "include_citation": include_citation,
+            "include_details": include_details,
+            "detail_txt_export": detail_txt_export,
         },
         "execution": {
             "stopped": report.stopped,
@@ -185,10 +210,25 @@ def build_task_report(
                 if include_citation
                 else {"success": 0, "failed": 0, "empty": 0}
             ),
+            "details": (
+                collect_detail_stats(all_records, include_citation)
+                if include_details
+                else {
+                    "keywords_present": 0,
+                    "keywords_missing": 0,
+                    "abstracts_present": 0,
+                    "abstracts_missing": 0,
+                }
+            ),
         },
         "exports": {
             "failed": export_failed,
             "paths": list(output_paths),
+            "keyword_txt": {
+                "enabled": detail_txt_export,
+                "path": keyword_txt_path,
+                "failed": keyword_txt_failed,
+            },
         },
         "keywords": keyword_reports,
     }

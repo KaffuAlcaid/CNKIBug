@@ -17,6 +17,7 @@ class ScraperSettings:
     log_save_path: bool
     log_keywords: bool
     log_scraped_records: bool
+    detail_txt_export: bool = False
 
 
 def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
@@ -32,4 +33,5 @@ def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
         log_save_path=bool(config["log_save_path"]),
         log_keywords=bool(config["log_keywords"]),
         log_scraped_records=bool(config["log_scraped_records"]),
+        detail_txt_export=bool(config["detail_txt_export"]),
     )

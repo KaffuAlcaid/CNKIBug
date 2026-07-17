@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..fileio.keyword_input import (
     KeywordImportError,
@@ -24,9 +25,15 @@ class TaskRequest:
     max_pages: int
     save_mode: str
     include_citation: bool
+    include_details: bool
+    detail_txt_export: bool
 
 
-def collect_task_request() -> TaskRequest | None:
+def collect_task_request(
+    *,
+    detail_txt_export: bool = False,
+    config_path: Path | None = None,
+) -> TaskRequest | None:
     while True:
         mode = _ask_choice(
             "\n请选择抓取模式：",
@@ -46,23 +53,36 @@ def collect_task_request() -> TaskRequest | None:
 
         max_pages = _ask_page_count(keywords)
         include_citation = _ask_citation()
+        include_details = _ask_details()
+        effective_txt_export = detail_txt_export and include_details
         eta_low, eta_high = estimate_seconds(
             max_pages,
             len(keywords),
             include_citation=include_citation,
+            include_details=include_details,
         )
         preview_action = _preview_task(
             keywords,
             max_pages,
             save_mode,
             include_citation,
+            include_details,
+            detail_txt_export,
+            config_path,
             keyword_source,
             import_result,
             eta_low,
             eta_high,
         )
         if preview_action == "start":
-            return TaskRequest(keywords, max_pages, save_mode, include_citation)
+            return TaskRequest(
+                keywords,
+                max_pages,
+                save_mode,
+                include_citation,
+                include_details,
+                effective_txt_export,
+            )
         if preview_action == "exit":
             _console.print("\n[bold green]任务已取消，程序退出。[/bold green]")
             return None
@@ -186,11 +206,26 @@ def _ask_citation() -> bool:
         print("[!] 无效选项，请输入 y 或 n。")
 
 
+def _ask_details() -> bool:
+    while True:
+        choice = safe_input(
+            "\n是否抓取论文关键词和摘要？这会显著增加耗时 [y/N]: "
+        ).strip().lower()
+        if choice in {"", "n"}:
+            return False
+        if choice == "y":
+            return True
+        print("[!] 无效选项，请输入 y 或 n。")
+
+
 def _preview_task(
     keywords: list[str],
     max_pages: int,
     save_mode: str,
     include_citation: bool,
+    include_details: bool,
+    detail_txt_export: bool,
+    config_path: Path | None,
     keyword_source: str,
     import_result: KeywordImportResult | None,
     eta_low: int,
@@ -222,6 +257,14 @@ def _preview_task(
         _console.print(f"  理论最多：{total_pages} 页")
     _console.print(f"  预计耗时：{format_eta(eta_low, eta_high)}")
     _console.print(f"  GB/T 引用格式：{'开启' if include_citation else '关闭'}")
+    _console.print(f"  论文关键词和摘要：{'开启' if include_details else '关闭'}")
+    if include_details:
+        _console.print(f"  关键词 TXT 导出：{'开启' if detail_txt_export else '关闭'}")
+        if not detail_txt_export and config_path is not None:
+            _console.print(
+                f'  [dim]如需开启，请将“{config_path}”中的 '
+                '"detail_txt_export" 改为 true，保存后重新启动程序。[/dim]'
+            )
     _console.print(f"  保存方式：{save_mode_text}")
     if not is_single:
         _console.print(f"  关键词预览：{preview_keywords}")
