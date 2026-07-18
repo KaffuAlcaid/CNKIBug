@@ -387,7 +387,12 @@ def test_progress_display_receives_page_verify_save_and_complete_events(monkeypa
     assert ("progress_resumed", {}) in progress_events
     assert ("progress_saving", {}) in progress_events
     assert ("progress_completed", {}) in progress_events
-    assert progress_events[-1][0] == "task_report"
+    assert [name for name, _ in progress_events[-3:]] == [
+        "task_report",
+        "task_finished",
+        "progress_closed",
+    ]
+    assert progress_events[-2][1]["elapsed_seconds"] >= 0
     assert ("progress_closed", {}) in progress_events
     assert any(
         event[0] == "progress_updated" and event[1].get("records") == 1

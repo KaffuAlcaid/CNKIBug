@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+from threading import Event
 from typing import Any
 
 from ..browser.session import ScrapeSession
@@ -40,6 +42,7 @@ class TaskContext:
     paths: RuntimePaths
     events: EventSink
     session: ScrapeSession
+    output_dir: Path | None = None
     browser: Any | None = None
     browser_context: Any | None = None
     detail_fetcher: ArticleDetailFetcher | None = None
@@ -60,6 +63,9 @@ def initialize_task(
     settings: ScraperSettings,
     paths: RuntimePaths,
     events: EventSink,
+    *,
+    output_dir: Path | None = None,
+    cancel_event: Event | None = None,
 ) -> TaskContext:
     if resume_state is not None:
         keywords = list(resume_state["keywords"])
@@ -68,6 +74,8 @@ def initialize_task(
         include_citation = bool(resume_state.get("include_citation", False))
         include_details = bool(resume_state.get("include_details", False))
         detail_txt_export = bool(resume_state.get("detail_txt_export", False))
+        stored_output_dir = resume_state.get("output_dir")
+        output_dir = Path(stored_output_dir) if isinstance(stored_output_dir, str) else None
         ts = str(resume_state["ts"])
         state = resume_state
         all_results = stored_results(state)
@@ -106,6 +114,7 @@ def initialize_task(
             include_citation=include_citation,
             include_details=include_details,
             detail_txt_export=detail_txt_export,
+            output_dir=output_dir,
         )
         persist_task_state(state, "创建新任务", paths, events)
 
@@ -144,5 +153,6 @@ def initialize_task(
         settings=settings,
         paths=paths,
         events=events,
-        session=ScrapeSession(events),
+        session=ScrapeSession(events, cancel_event),
+        output_dir=output_dir,
     )

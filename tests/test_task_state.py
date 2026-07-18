@@ -151,6 +151,34 @@ def test_detail_settings_round_trip_and_version_three_defaults_off(tmp_path):
     assert upgraded["detail_txt_export"] is False
 
 
+def test_output_directory_round_trips_and_version_four_defaults_to_none(tmp_path):
+    paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
+    output_dir = tmp_path / "results"
+    state = task_state.make_task_state(
+        ["焊接"],
+        2,
+        "single",
+        "TS",
+        output_dir=output_dir,
+    )
+    task_state.save_last_task(state, paths)
+
+    loaded = task_state.load_last_task(paths)
+    assert loaded is not None
+    assert loaded["output_dir"] == str(output_dir)
+
+    loaded["version"] = 4
+    loaded.pop("output_dir")
+    task_state.get_last_task_path(paths).write_text(
+        json.dumps(loaded, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    upgraded = task_state.load_last_task(paths)
+    assert upgraded is not None
+    assert upgraded["output_dir"] is None
+
+
 def test_keyword_checkpoint_tracks_page_and_survives_failed_status():
     state = task_state.make_task_state(["焊接"], 3, "single", "TS")
     records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]

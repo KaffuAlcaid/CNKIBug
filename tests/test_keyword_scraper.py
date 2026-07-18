@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from cnkibug.browser.session import ScrapeSession
 from cnkibug.cnki import guard, keyword as keyword_scraper, pages, search
-from cnkibug.cnki.guard import VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
+from cnkibug.cnki.guard import VERIFY_CANCELLED, VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
 from cnkibug.cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_SUCCESS
 from cnkibug.cnki.results import PageParseResult
 from cnkibug.cnki.search import SEARCH_RESULTS, SearchResult
@@ -100,6 +100,29 @@ def test_verify_timeout_keeps_progress_paused(monkeypatch):
 
     assert result == VERIFY_TIMEOUT
     assert recorded == ["progress_paused", "verify_required", "verify_timeout"]
+
+
+def test_verify_wait_stops_promptly_when_gui_requests_cancellation(monkeypatch):
+    page = SimpleNamespace(url="https://kns.cnki.net/verify")
+    recorded = []
+
+    class Events(EventSink):
+        def emit(self, name, **payload):
+            recorded.append(name)
+
+        def cancel_requested(self):
+            return True
+
+    monkeypatch.setattr(
+        guard.time,
+        "sleep",
+        lambda seconds: (_ for _ in ()).throw(AssertionError("must not sleep")),
+    )
+
+    result = guard.handle_verify_with_progress(page, _settings(), Events())
+
+    assert result == VERIFY_CANCELLED
+    assert recorded == ["progress_paused", "verify_required", "progress_resumed"]
 
 
 def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):

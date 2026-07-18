@@ -473,3 +473,24 @@ def test_save_all_reports_failed_save(monkeypatch, tmp_path):
     assert result.failed == 1
     assert result.saved_paths == []
     assert list(tmp_path.glob("*.xlsx")) == []
+
+
+def test_save_all_uses_explicit_output_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        exporter,
+        "get_real_desktop_path",
+        lambda: (_ for _ in ()).throw(AssertionError("desktop should not be used")),
+    )
+    output_dir = tmp_path / "chosen"
+
+    result = save_all(
+        "single",
+        ["焊接"],
+        {"焊接": [["标题", "", "", ""]]},
+        "TS",
+        output_dir=output_dir,
+    )
+
+    expected = output_dir / "cnki_titles_焊接_TS.xlsx"
+    assert result.saved_paths == [str(expected.resolve())]
+    assert expected.exists()

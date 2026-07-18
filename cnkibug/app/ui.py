@@ -42,12 +42,15 @@ class EstimatedProgressDisplay:
         *,
         console: Console | None = None,
         clock: Callable[[], float] | None = None,
+        wall_started_at: float | None = None,
     ) -> None:
         estimate_progress(0, low_seconds, high_seconds)
         self._low_seconds = low_seconds
         self._high_seconds = high_seconds
         self._console = console or _console
         self._clock = clock or time.monotonic
+        self._wall_started_at = wall_started_at
+        self._actual_seconds: float | None = None
         self._lock = RLock()
         self._mode = "idle"
         self._elapsed = 0.0
@@ -94,14 +97,18 @@ class EstimatedProgressDisplay:
     def status_text(self) -> str:
         with self._lock:
             _, headline, details = self._snapshot_at(self._clock())
-        return "\n".join((headline, *details))
+            time_text = self._time_text_at(self._clock())
+        return "\n".join((headline, time_text, *details))
 
     def start(self) -> None:
         with self._lock:
             if self._visible:
                 return
             self._mode = "running"
-            self._running_since = self._clock()
+            now = self._clock()
+            self._running_since = now
+            if self._wall_started_at is None:
+                self._wall_started_at = now
             self._visible = True
         self._live.start(refresh=True)
 
@@ -183,6 +190,11 @@ class EstimatedProgressDisplay:
             self._message = message
         self._refresh()
 
+    def finish(self, actual_seconds: float) -> None:
+        with self._lock:
+            self._actual_seconds = max(0.0, actual_seconds)
+        self._refresh()
+
     def close(self) -> None:
         with self._lock:
             if not self._visible:
@@ -220,6 +232,12 @@ class EstimatedProgressDisplay:
             self._high_seconds,
         )
 
+    def _time_text_at(self, now: float) -> str:
+        if self._actual_seconds is not None:
+            return f"实际用时：{_format_duration(self._actual_seconds)}"
+        started_at = self._wall_started_at if self._wall_started_at is not None else now
+        return f"已用时：{_format_duration(max(0.0, now - started_at))}"
+
     def _snapshot_at(self, now: float) -> tuple[int, str, list[str]]:
         elapsed = self._elapsed_at(now)
         percentage = self._percentage_at(now)
@@ -250,7 +268,9 @@ class EstimatedProgressDisplay:
 
     def _render(self) -> Group:
         with self._lock:
-            percentage, headline, details = self._snapshot_at(self._clock())
+            now = self._clock()
+            percentage, headline, details = self._snapshot_at(now)
+            time_text = self._time_text_at(now)
             show_interrupt_hint = self._mode in {"running", "paused"}
         self._bar.update(
             self._task_id,
@@ -259,6 +279,7 @@ class EstimatedProgressDisplay:
         )
         renderables = [
             self._bar.get_renderable(),
+            Text(time_text, style="bold"),
             Text("\n".join(details), style="dim"),
         ]
         if show_interrupt_hint:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -10,7 +11,13 @@ from ..core.events import EventSink
 from .console import safe_input
 from .errors import _popup_error
 from .report_view import print_task_report
-from .ui import EstimatedProgressDisplay, _console, print_browser_banner, print_verify_alert
+from .ui import (
+    EstimatedProgressDisplay,
+    _console,
+    _format_duration,
+    print_browser_banner,
+    print_verify_alert,
+)
 
 
 _MESSAGE_STYLES = {
@@ -24,6 +31,7 @@ _MESSAGE_STYLES = {
 class ConsoleEventSink(EventSink):
     def __init__(self) -> None:
         self._progress: EstimatedProgressDisplay | None = None
+        self._task_started_at: float | None = None
 
     @contextmanager
     def activity(self, message: str) -> Iterator[None]:
@@ -31,7 +39,9 @@ class ConsoleEventSink(EventSink):
             yield
 
     def emit(self, name: str, **payload: Any) -> None:
-        if name == "message":
+        if name == "task_started":
+            self._task_started_at = time.monotonic()
+        elif name == "message":
             self._message(str(payload.get("text", "")), str(payload.get("level", "")))
         elif name == "browser_edge_failed":
             self._message(
@@ -64,6 +74,7 @@ class ConsoleEventSink(EventSink):
             self._progress = EstimatedProgressDisplay(
                 int(payload["low_seconds"]),
                 int(payload["high_seconds"]),
+                wall_started_at=self._task_started_at,
             )
             self._progress.start()
         elif name == "progress_updated" and self._progress is not None:
@@ -78,9 +89,16 @@ class ConsoleEventSink(EventSink):
             self._progress.complete()
         elif name == "progress_stopped" and self._progress is not None:
             self._progress.stop(str(payload["message"]))
+        elif name == "task_finished":
+            actual_seconds = float(payload.get("elapsed_seconds", 0.0))
+            if self._progress is not None:
+                self._progress.finish(actual_seconds)
+            else:
+                self._message(f"实际用时：{_format_duration(actual_seconds)}", "dim")
         elif name == "progress_closed" and self._progress is not None:
             self._progress.close()
             self._progress = None
+            self._task_started_at = None
         elif name == "task_report":
             print_task_report(payload["report"], payload["all_results"])
         elif name == "export_finished":

@@ -57,11 +57,13 @@ def test_estimated_progress_pauses_and_only_completes_on_event():
 
     clock.advance(20)
     assert display.percentage == 45
+    assert "已用时：00:20" in render_text(display)
 
     display.pause()
     clock.advance(180)
     assert display.elapsed_seconds == pytest.approx(20)
     assert display.percentage == 45
+    assert "已用时：03:20" in render_text(display)
     assert "等待手动验证，任务计时已暂停" in display.status_text
 
     display.resume()
@@ -80,6 +82,8 @@ def test_estimated_progress_pauses_and_only_completes_on_event():
     display.complete()
     assert display.percentage == 100
     assert display.status_text.startswith("已完成")
+    display.finish(235)
+    assert "实际用时：03:55" in render_text(display)
     display.close()
 
 

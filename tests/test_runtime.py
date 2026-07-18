@@ -4,6 +4,7 @@ from datetime import datetime
 import pytest
 
 from cnkibug.app import runtime
+from cnkibug.fileio import paths as file_paths
 
 
 def test_init_runtime_creates_dirs_and_default_config(tmp_path):
@@ -117,3 +118,69 @@ def test_build_log_path_uses_log_dir_and_current_day(tmp_path):
     log_path = runtime.build_log_path(paths, datetime(2026, 6, 30, 12, 0, 0))
 
     assert log_path == tmp_path / "CNKIBug" / "log" / "cnkibug_20260630.log"
+
+
+def test_cleanup_runtime_history_deletes_only_known_historical_files(tmp_path):
+    state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
+    active_log = state.paths.log_dir / "cnkibug_20260716.log"
+    state = runtime.RuntimeState(state.paths, state.config, active_log, state.events)
+    files = {
+        "active_log": active_log,
+        "old_log": state.paths.log_dir / "cnkibug_20260715.log",
+        "today_log": state.paths.log_dir / "cnkibug_20260717.log",
+        "old_report": state.paths.status_dir / "cnki_task_report_20260716_120000.json",
+        "today_report": state.paths.status_dir / "cnki_task_report_20260717_120000.json",
+        "unrelated": state.paths.status_dir / "notes.json",
+    }
+    for path in files.values():
+        path.write_text("data", encoding="utf-8")
+
+    result = runtime.cleanup_runtime_history(
+        state,
+        now=datetime(2026, 7, 17, 12, 0, 0),
+    )
+
+    assert result.deleted == 2
+    assert result.failed == 0
+    assert result.preserved == 3
+    assert result.freed_bytes == 8
+    assert not files["old_log"].exists()
+    assert not files["old_report"].exists()
+    assert files["active_log"].exists()
+    assert files["today_log"].exists()
+    assert files["today_report"].exists()
+    assert files["unrelated"].exists()
+
+
+def test_open_directory_uses_platform_file_manager(monkeypatch, tmp_path):
+    launched = []
+    monkeypatch.setattr(file_paths.sys, "platform", "linux")
+    monkeypatch.setattr(file_paths.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        file_paths.subprocess,
+        "Popen",
+        lambda args, **kwargs: launched.append((args, kwargs)),
+    )
+
+    file_paths.open_directory(tmp_path)
+
+    assert launched[0][0] == ["/usr/bin/xdg-open", str(tmp_path)]
+    assert launched[0][1] == {
+        "stdout": file_paths.subprocess.DEVNULL,
+        "stderr": file_paths.subprocess.DEVNULL,
+    }
+
+
+def test_open_directory_uses_startfile_on_windows(monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr(file_paths.sys, "platform", "win32")
+    monkeypatch.setattr(file_paths.os, "startfile", opened.append, raising=False)
+
+    file_paths.open_directory(tmp_path)
+
+    assert opened == [str(tmp_path)]
+
+
+def test_open_directory_rejects_missing_path(tmp_path):
+    with pytest.raises(FileNotFoundError, match="目录不存在"):
+        file_paths.open_directory(tmp_path / "missing")

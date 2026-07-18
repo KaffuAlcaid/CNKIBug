@@ -40,6 +40,14 @@ class RuntimeState:
     events: list[tuple[str, str]]
 
 
+@dataclass(frozen=True)
+class RuntimeCleanupResult:
+    deleted: int
+    failed: int
+    preserved: int
+    freed_bytes: int
+
+
 def get_runtime_paths(program_dir: str | Path) -> RuntimePaths:
     resolved_program_dir = Path(program_dir).resolve()
     data_dir = resolved_program_dir / APP_DATA_DIR_NAME
@@ -82,6 +90,56 @@ def init_runtime(
         logger.info("运行数据目录: %s", paths.data_dir)
 
     return RuntimeState(paths=paths, config=config.copy(), log_path=log_path, events=list(events))
+
+
+def cleanup_runtime_history(
+    state: RuntimeState,
+    now: datetime | None = None,
+) -> RuntimeCleanupResult:
+    current = now or datetime.now()
+    day = current.strftime("%Y%m%d")
+    active_log = state.log_path.resolve()
+    candidates = [
+        *state.paths.log_dir.glob("cnkibug_*.log"),
+        *state.paths.status_dir.glob("cnki_task_report_*.json"),
+    ]
+    deleted = 0
+    failed = 0
+    preserved = 0
+    freed_bytes = 0
+
+    for path in candidates:
+        is_today = (
+            path.name == f"cnkibug_{day}.log"
+            or path.name.startswith(f"cnki_task_report_{day}_")
+        )
+        if path.resolve() == active_log or is_today:
+            preserved += 1
+            continue
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            failed += 1
+            logging.getLogger("cnkibug.runtime").warning(
+                "历史运行文件删除失败: path=%s error=%s",
+                path,
+                error,
+            )
+        else:
+            deleted += 1
+            freed_bytes += size
+
+    logging.getLogger("cnkibug.runtime").info(
+        "历史运行文件清理完成: deleted=%d failed=%d preserved=%d freed_bytes=%d",
+        deleted,
+        failed,
+        preserved,
+        freed_bytes,
+    )
+    return RuntimeCleanupResult(deleted, failed, preserved, freed_bytes)
 
 
 def load_or_create_config(paths: RuntimePaths) -> tuple[dict[str, Any], list[tuple[str, str]]]:

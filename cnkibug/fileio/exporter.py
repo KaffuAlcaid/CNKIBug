@@ -55,11 +55,14 @@ def _sanitize_name(text: str) -> str:
     return cleaned or "untitled"
 
 
-def _get_output_path(filename: str) -> str:
+def _get_output_path(
+    filename: str,
+    output_dir: str | os.PathLike | None = None,
+) -> str:
     try:
-        real_desktop = get_real_desktop_path()
-        os.makedirs(real_desktop, exist_ok=True)
-        return os.path.join(real_desktop, filename)
+        target_dir = os.fspath(output_dir) if output_dir is not None else get_real_desktop_path()
+        os.makedirs(target_dir, exist_ok=True)
+        return os.path.join(target_dir, filename)
     except OSError:
         return os.path.join(os.getcwd(), filename)
 
@@ -187,6 +190,7 @@ def _save_single(
     include_citation: bool = False,
     include_details: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ):
@@ -195,7 +199,7 @@ def _save_single(
         return save_result
 
     clean_keyword = _sanitize_name(keyword)
-    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
+    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx", output_dir)
     wb = _build_single_sheet_workbook(results, include_citation, include_details)
 
     saved_path = _try_save_workbook(
@@ -214,6 +218,7 @@ def _save_multi_split(
     include_citation: bool = False,
     include_details: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ):
@@ -236,7 +241,10 @@ def _save_multi_split(
                 counter - 1,
             )
         used_names.add(clean_keyword.casefold())
-        filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx")
+        filepath = _get_output_path(
+            f"cnki_titles_{clean_keyword}_{ts}.xlsx",
+            output_dir,
+        )
         wb = _build_single_sheet_workbook(results, include_citation, include_details)
         saved_path = _try_save_workbook(
             wb,
@@ -254,6 +262,7 @@ def _save_multi_merge(
     include_citation: bool = False,
     include_details: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ):
@@ -261,7 +270,7 @@ def _save_multi_merge(
     if not any(len(v) > 0 for v in all_results.values()):
         return save_result
 
-    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.xlsx")
+    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.xlsx", output_dir)
     wb = openpyxl.Workbook()
     wb.remove(wb.active) # noqa
 
@@ -357,6 +366,7 @@ def _save_multi_csv(
     include_citation: bool = False,
     include_details: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ) -> SaveResult:
@@ -365,7 +375,7 @@ def _save_multi_csv(
     if total == 0:
         return save_result
 
-    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.csv")
+    filepath = _get_output_path(f"cnki_titles_多词汇总_{ts}.csv", output_dir)
     saved_path = _try_save_csv(
         filepath,
         all_results,
@@ -385,6 +395,7 @@ def _save_single_csv(
     include_citation: bool = False,
     include_details: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ) -> SaveResult:
@@ -393,7 +404,7 @@ def _save_single_csv(
         return save_result
 
     clean_keyword = _sanitize_name(keyword)
-    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.csv")
+    filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.csv", output_dir)
     saved_path = _try_save_csv(
         filepath,
         {keyword: results},
@@ -413,6 +424,7 @@ def _save_keyword_txt(
     include_citation: bool,
     log_save_path: bool,
     save_type: str,
+    output_dir: str | os.PathLike | None = None,
 ) -> None:
     lines = []
     for records in all_results.values():
@@ -422,7 +434,7 @@ def _save_keyword_txt(
     if not lines:
         return
 
-    filepath = _get_output_path(f"cnki_paper_keywords_{ts}.txt")
+    filepath = _get_output_path(f"cnki_paper_keywords_{ts}.txt", output_dir)
     try:
         _write_keyword_txt(filepath, lines)
         result.keyword_txt_path = os.path.abspath(filepath)
@@ -463,6 +475,7 @@ def save_all(
     include_details: bool = False,
     detail_txt_export: bool = False,
     *,
+    output_dir: str | os.PathLike | None = None,
     log_save_path: bool = True,
     save_type: str = "final",
 ) -> SaveResult:
@@ -476,6 +489,7 @@ def save_all(
                 ts,
                 include_citation,
                 include_details,
+                output_dir=output_dir,
                 log_save_path=log_save_path,
                 save_type=save_type,
             )
@@ -487,6 +501,7 @@ def save_all(
                 ts,
                 include_citation,
                 include_details,
+                output_dir=output_dir,
                 log_save_path=log_save_path,
                 save_type=save_type,
             )
@@ -496,6 +511,7 @@ def save_all(
             ts,
             include_citation,
             include_details,
+            output_dir=output_dir,
             log_save_path=log_save_path,
             save_type=save_type,
         )
@@ -505,6 +521,7 @@ def save_all(
             ts,
             include_citation,
             include_details,
+            output_dir=output_dir,
             log_save_path=log_save_path,
             save_type=save_type,
         )
@@ -514,6 +531,7 @@ def save_all(
             ts,
             include_citation,
             include_details,
+            output_dir=output_dir,
             log_save_path=log_save_path,
             save_type=save_type,
         )
@@ -525,5 +543,6 @@ def save_all(
             include_citation,
             log_save_path,
             save_type,
+            output_dir,
         )
     return result

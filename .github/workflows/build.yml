@@ -59,7 +59,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          uv pip install --system -e . -r requirements-dev.txt -r requirements-build.txt
+          uv pip install --system -e ".[gui]" -r requirements-dev.txt -r requirements-build.txt
 
       - name: Install Playwright browsers
         shell: bash
@@ -69,15 +69,15 @@ jobs:
       - name: Smoke test source imports on Windows
         shell: bash
         run: |
-          python -m compileall -q run.py cnkibug
-          python -c "import cnkibug.app.cli, cnkibug.browser.runtime, cnkibug.cnki.keyword, cnkibug.fileio.exporter, cnkibug.workflow.runner; print('import graph OK')"
+          python -m compileall -q run.py run_gui.py cnkibug
+          python -c "import cnkibug.app.cli, cnkibug.gui.app, cnkibug.browser.runtime, cnkibug.cnki.keyword, cnkibug.fileio.exporter, cnkibug.workflow.runner; print('import graph OK')"
 
       - name: Unit tests
         shell: bash
         run: |
           python -m pytest tests
 
-      - name: Build with PyInstaller
+      - name: Build TUI and GUI executables
         shell: bash
         run: |
           python generate_version_info.py version.txt
@@ -87,6 +87,28 @@ jobs:
             --add-data "pyproject.toml:." \
             --name CNKIBug \
             run.py
+          pyinstaller --onefile --windowed --icon="icon.ico" \
+            --version-file="version.txt" \
+            --copy-metadata cnkibug \
+            --copy-metadata ttkbootstrap \
+            --collect-all ttkbootstrap \
+            --add-data "icon.ico:." \
+            --add-data "pyproject.toml:." \
+            --name CNKIBug-GUI \
+            run_gui.py
+
+      - name: Build TUI-only source archive
+        shell: bash
+        run: |
+          VERSION="$(python -c 'from cnkibug.core.version import APP_VERSION; print(APP_VERSION)')"
+          ARCHIVE="dist/CNKIBug-${VERSION}-source-tui.tar.gz"
+          git archive --format=tar --prefix="CNKIBug-${VERSION}/" HEAD -- \
+            LICENSE README.md pyproject.toml run.py cnkibug \
+            ':(exclude)cnkibug/gui' | gzip -9 > "$ARCHIVE"
+          if tar -tzf "$ARCHIVE" | grep -Eq '(^|/)(run_gui.py|cnkibug/gui/)'; then
+            echo "GUI files were included in the TUI source archive" >&2
+            exit 1
+          fi
 
       - name: Smoke test packaged executable
         shell: pwsh
@@ -99,12 +121,19 @@ jobs:
           if (($output -join "`n").Trim() -ne "CNKIBug self-check OK: $expected") {
             throw "Packaged executable version does not match project version"
           }
+          & .\dist\CNKIBug-GUI.exe --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged GUI executable self-check failed"
+          }
 
-      - name: Store release executable
+      - name: Store release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: release-executable
-          path: dist/CNKIBug.exe
+          name: release-assets
+          path: |
+            dist/CNKIBug.exe
+            dist/CNKIBug-GUI.exe
+            dist/*-source-tui.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -115,14 +144,17 @@ jobs:
       contents: write
 
     steps:
-      - name: Download release executable
+      - name: Download release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: release-executable
+          name: release-assets
           path: dist
 
-      - name: Upload executable to release
+      - name: Upload assets to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.build.outputs.tag_name }}
-          files: dist/CNKIBug.exe
+          files: |
+            dist/CNKIBug.exe
+            dist/CNKIBug-GUI.exe
+            dist/*-source-tui.tar.gz

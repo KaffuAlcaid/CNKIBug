@@ -9,7 +9,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
-from .guard import VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify_with_progress
+from .guard import VERIFY_CANCELLED, VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify_with_progress
 
 
 DETAIL_READY_SELECTOR = ".brief h1"
@@ -41,6 +41,8 @@ class ArticleDetailFetcher:
         self._page: Any | None = None
 
     def fetch(self, url: str, *, log_ref: str) -> ArticleDetails:
+        if self._events.cancel_requested():
+            return ArticleDetails([], "", failed=True)
         if not url.strip():
             _logger.warning("论文详情链接为空: %s", log_ref)
             return ArticleDetails([], "", failed=True)
@@ -60,6 +62,8 @@ class ArticleDetailFetcher:
             if verify_status == VERIFY_TIMEOUT:
                 _logger.warning("论文详情页安全验证超时: %s", log_ref)
                 return ArticleDetails([], "", failed=True, verify_timeout=True)
+            if verify_status == VERIFY_CANCELLED:
+                return ArticleDetails([], "", failed=True)
 
             try:
                 page.wait_for_selector(
@@ -74,13 +78,16 @@ class ArticleDetailFetcher:
                     wait_until="domcontentloaded",
                     timeout=self._settings.timeout_goto_ms,
                 )
-                if handle_verify_with_progress(
+                retry_verify_status = handle_verify_with_progress(
                     page,
                     self._settings,
                     self._events,
-                ) == VERIFY_TIMEOUT:
+                )
+                if retry_verify_status == VERIFY_TIMEOUT:
                     _logger.warning("论文详情页重新访问时安全验证超时: %s", log_ref)
                     return ArticleDetails([], "", failed=True, verify_timeout=True)
+                if retry_verify_status == VERIFY_CANCELLED:
+                    return ArticleDetails([], "", failed=True)
                 page.wait_for_selector(
                     DETAIL_READY_SELECTOR,
                     timeout=self._settings.timeout_selector_ms,

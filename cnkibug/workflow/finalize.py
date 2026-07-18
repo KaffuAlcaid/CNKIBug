@@ -67,6 +67,7 @@ def _save_final_results(task: TaskContext) -> tuple[SaveResult, bool]:
             include_citation=task.include_citation,
             include_details=task.include_details,
             detail_txt_export=task.detail_txt_export,
+            output_dir=task.output_dir,
             log_save_path=task.settings.log_save_path,
             save_type="final",
         )
@@ -174,7 +175,6 @@ def _finish_progress(task: TaskContext, final_save_failed: bool) -> None:
         task.events.emit("progress_stopped", message="保存结果或任务报告失败")
     else:
         task.events.emit("progress_stopped", message="任务未完整完成，已保留断点")
-    task.events.emit("progress_closed")
 
 
 def _print_report(task: TaskContext) -> None:

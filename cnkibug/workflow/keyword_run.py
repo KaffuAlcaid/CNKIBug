@@ -336,6 +336,7 @@ def _save_incremental(task: TaskContext, index: int) -> None:
             include_citation=task.include_citation,
             include_details=task.include_details,
             detail_txt_export=task.detail_txt_export,
+            output_dir=task.output_dir,
             log_save_path=task.settings.log_save_path,
             save_type="incremental",
         )

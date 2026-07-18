@@ -13,6 +13,9 @@ class EventSink:
     def confirm(self, prompt: str, *, default: bool = False) -> bool:
         return default
 
+    def cancel_requested(self) -> bool:
+        return False
+
     @contextmanager
     def activity(self, message: str) -> Iterator[None]:
         yield

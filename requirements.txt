@@ -3,3 +3,4 @@ openpyxl==3.1.5
 pywin32==311; sys_platform == "win32"
 rich==15.0.0
 tomli>=2.0; python_version < "3.11"
+ttkbootstrap

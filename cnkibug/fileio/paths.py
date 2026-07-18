@@ -6,6 +6,32 @@ import subprocess
 import sys
 
 
+def open_directory(path: str | os.PathLike) -> None:
+    target = os.path.abspath(os.fspath(path))
+    if not os.path.isdir(target):
+        raise FileNotFoundError(f"目录不存在：{target}")
+
+    if sys.platform == "win32":
+        startfile = getattr(os, "startfile", None)
+        if startfile is None:
+            raise OSError("当前环境无法打开文件夹")
+        startfile(target)
+        return
+
+    command = "open" if sys.platform == "darwin" else "xdg-open"
+    opener = shutil.which(command)
+    if opener is None:
+        raise OSError(f"未找到目录打开程序：{command}")
+    try:
+        subprocess.Popen(
+            [opener, target],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as error:
+        raise OSError(f"无法打开目录：{target}") from error
+
+
 def get_real_desktop_path() -> str:
     if sys.platform == "win32":
         import winreg

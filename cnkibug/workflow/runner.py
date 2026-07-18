@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import random
 import time
+from pathlib import Path
+from threading import Event
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
@@ -33,11 +35,15 @@ def scrape_cnki(
     settings: ScraperSettings,
     paths: RuntimePaths,
     events: EventSink = NULL_EVENTS,
+    output_dir: Path | None = None,
+    cancel_event: Event | None = None,
 ) -> None:
     if not keywords:
         events.emit("message", text="[!] 未提供任何关键词，已跳过抓取。", level="warning")
         return
 
+    started_at = time.monotonic()
+    events.emit("task_started")
     task = initialize_task(
         keywords,
         max_pages,
@@ -49,6 +55,8 @@ def scrape_cnki(
         settings,
         paths,
         events,
+        output_dir=output_dir,
+        cancel_event=cancel_event,
     )
     _logger.info(
         "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s "
@@ -61,34 +69,42 @@ def scrape_cnki(
         task.detail_txt_export,
     )
 
-    with sync_playwright() as playwright:
-        try:
-            _open_browser(task, playwright)
-            _warm_up(task)
-            start_progress(task)
-            run_keywords(task)
-        except KeyboardInterrupt:
-            task.session.request_stop("用户中断")
-            _logger.warning("抓取任务被用户中断")
-            task.events.emit(
-                "message",
-                text="[!] 用户中断，正在保存已抓取的数据...",
-                level="warning",
-            )
-        except BrowserLaunchError as error:
-            task.session.request_stop("浏览器启动失败")
-            _logger.error("浏览器启动失败: %s", error)
-            task.events.emit("browser_launch_failed", error=str(error))
-        except RuntimeError as error:
-            task.session.request_stop("运行时错误")
-            _logger.error("抓取任务运行时错误: %s", error)
-            task.events.emit("message", text=f"[x] 运行时错误: {error}", level="error")
-        except PlaywrightError as error:
-            task.session.request_stop("浏览器运行错误")
-            _logger.error("浏览器运行错误: %s", error)
-            task.events.emit("message", text=f"[x] 浏览器运行错误: {error}", level="error")
-        finally:
-            finalize_task(task)
+    try:
+        with sync_playwright() as playwright:
+            try:
+                _open_browser(task, playwright)
+                if not task.session.stop_requested:
+                    _warm_up(task)
+                start_progress(task)
+                run_keywords(task)
+            except KeyboardInterrupt:
+                task.session.request_stop("用户中断")
+                _logger.warning("抓取任务被用户中断")
+                task.events.emit(
+                    "message",
+                    text="[!] 用户中断，正在保存已抓取的数据...",
+                    level="warning",
+                )
+            except BrowserLaunchError as error:
+                task.session.request_stop("浏览器启动失败")
+                _logger.error("浏览器启动失败: %s", error)
+                task.events.emit("browser_launch_failed", error=str(error))
+            except RuntimeError as error:
+                task.session.request_stop("运行时错误")
+                _logger.error("抓取任务运行时错误: %s", error)
+                task.events.emit("message", text=f"[x] 运行时错误: {error}", level="error")
+            except PlaywrightError as error:
+                task.session.request_stop("浏览器运行错误")
+                _logger.error("浏览器运行错误: %s", error)
+                task.events.emit("message", text=f"[x] 浏览器运行错误: {error}", level="error")
+            finally:
+                finalize_task(task)
+    finally:
+        task.events.emit(
+            "task_finished",
+            elapsed_seconds=max(0.0, time.monotonic() - started_at),
+        )
+        task.events.emit("progress_closed")
 
 
 def _open_browser(task: TaskContext, playwright) -> None:

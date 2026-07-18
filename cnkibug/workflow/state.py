@@ -12,8 +12,8 @@ from ..core.runtime import RuntimePaths
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 4
-_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3}
+TASK_STATE_VERSION = 5
+_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3, 4}
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -51,6 +51,7 @@ def make_task_state(
     include_citation: bool = False,
     include_details: bool = False,
     detail_txt_export: bool = False,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     return {
         "version": TASK_STATE_VERSION,
@@ -61,6 +62,7 @@ def make_task_state(
         "include_citation": include_citation,
         "include_details": include_details,
         "detail_txt_export": detail_txt_export,
+        "output_dir": str(output_dir) if output_dir is not None else None,
         "keywords": list(keywords),
         "completed": {},
     }
@@ -276,7 +278,7 @@ def _is_valid_task_state(raw: Any) -> bool:
     return all(
         isinstance(raw.get(key), bool)
         for key in ("include_citation", "include_details", "detail_txt_export")
-    )
+    ) and (raw.get("output_dir") is None or isinstance(raw.get("output_dir"), str))
 
 
 def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
@@ -284,6 +286,8 @@ def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
     for key in ("include_citation", "include_details", "detail_txt_export"):
         if not isinstance(raw.get(key), bool):
             raw[key] = False
+    if not isinstance(raw.get("output_dir"), str):
+        raw["output_dir"] = None
     completed = raw.get("completed", {})
     if isinstance(completed, dict):
         for item in completed.values():

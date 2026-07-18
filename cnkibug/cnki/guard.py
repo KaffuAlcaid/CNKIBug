@@ -13,6 +13,7 @@ from ..core.settings import ScraperSettings
 VERIFY_NONE = "none"
 VERIFY_PASSED = "passed"
 VERIFY_TIMEOUT = "timeout"
+VERIFY_CANCELLED = "cancelled"
 
 _logger = logging.getLogger("cnkibug.cnki_guard")
 
@@ -33,6 +34,10 @@ def handle_verify(
     interval = 1.0
     next_notice = float(settings.verify_notice_interval_sec)
     while "/verify" in page.url:
+        if events.cancel_requested():
+            _logger.info("安全验证等待被用户停止")
+            events.emit("progress_resumed")
+            return VERIFY_CANCELLED
         if waited >= settings.verify_wait_timeout_sec:
             _logger.warning("安全验证等待超时: waited_sec=%d", int(waited))
             events.emit("verify_timeout")
