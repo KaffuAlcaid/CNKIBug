@@ -43,7 +43,7 @@ def fetch_gbt_citation(
             _logger.warning("引用按钮不存在: %s", log_ref)
             return ""
 
-        quote_button.click(timeout=timeout_ms)
+        quote_button.click(timeout=timeout_ms, no_wait_after=True)
         popup = page.locator(_QUOTE_POPUP_SELECTOR).last
         popup.wait_for(state="visible", timeout=timeout_ms)
 

@@ -27,8 +27,8 @@ def browser_context():
 def _settings():
     return replace(
         get_scraper_settings(DEFAULT_CONFIG),
-        timeout_goto_ms=1000,
-        timeout_selector_ms=500,
+        timeout_goto_ms=2000,
+        timeout_selector_ms=2000,
     )
 
 

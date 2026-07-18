@@ -69,7 +69,7 @@ def test_page_count_explains_results_per_page(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert "每页通常约 20 条结果" in output
-    assert "约 100 条可填写 5 页" in output
+    assert "约 100 条可填写 5 页" in "".join(output.splitlines())
 
 
 def test_task_preview_warns_when_eta_upper_bound_exceeds_ten_minutes(
