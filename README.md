@@ -25,25 +25,36 @@
 
 ##  运行截图 
 
+
 <table style="border: none;">
   <tr>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/1.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
+      <img src="docs/1.png" alt="GUI 任务设置" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
       <br /><sub><b>输入关键词与设置</b></sub>
     </td>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/3.gif" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>抓取过程</b></sub>
+      <img src="docs/2.png" alt="GUI 任务确认" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>确认任务与预计耗时</b></sub>
     </td>
   </tr>
   <tr>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/2.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>抓取完成</b></sub>
+      <img src="docs/3.png" alt="GUI 抓取过程" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>GUI 抓取过程</b></sub>
     </td>
     <td style="text-align: center; vertical-align: top; width: 50%;">
-      <img src="docs/4.png" alt="演示" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;"/>
-      <br /><sub><b>结果展示</b></sub>
+      <img src="docs/4.png" alt="终端抓取过程" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>终端抓取过程</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td style="text-align: center; vertical-align: top; width: 50%;">
+      <img src="docs/5.png" alt="任务完成" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>任务完成</b></sub>
+    </td>
+    <td style="text-align: center; vertical-align: top; width: 50%;">
+      <img src="docs/6.png" alt="结果文件" style="width: 100%; aspect-ratio: 25 / 18; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;"/>
+      <br /><sub><b>结果文件</b></sub>
     </td>
   </tr>
 </table>
@@ -62,15 +73,19 @@
 3. GUI 中可逐项添加、修改或删除检索项，批量任务可直接导入 TXT；终端版继续使用原有单关键词/多关键词菜单
 4. 请注意：**一定要手动通过知网的滑块人机验证**
 
+### 运行数据目录
+
 首次运行后，打包版会在所运行的 `.exe` 同目录创建 `CNKIBug/` 运行数据目录，源码版则固定创建在 `run.py` 或 `run_gui.py` 同目录。目标目录不可写时程序会明确报错，不会改存到其他位置。`config.json` 可调整超时、日志和会话缓存参数；`cache/cookies` 保存浏览器会话状态，默认 12 小时后过期并重建；`log/` 保存运行日志；`status/` 保存 JSON 任务报告
 
 > 如提示未找到 Edge，请访问 https://www.microsoft.com/zh-cn/edge/download 下载安装
 
 ### 批量导入与输出
 
-TXT 导入仅用于多关键词模式，文件必须使用 UTF-8 编码，每个非空行表示一个独立关键词。程序会去除行首、行尾空白，忽略空行，并按首次出现顺序精确去重；关键词内部空格会保留。单个文件不能超过 1 MiB，去重后最多 1000 个关键词
+GUI 可将 TXT 内容追加或替换到任务列表；终端版仅在多关键词模式下提供 TXT 导入。文件必须使用 UTF-8 编码，每个非空行表示一个独立关键词。程序会去除行首、行尾空白，忽略空行，并按首次出现顺序精确去重；关键词内部空格会保留。单个文件不能超过 1 MiB，去重后最多 1000 个关键词
 
-所有任务在启动浏览器前都会显示关键词、页数、保存方式、引文、论文详情和预计耗时，并可返回重新设置。GUI 还会显示保存位置，并把论文关键词 TXT 作为当前任务的勾选项。知网每页通常约 20 条结果，例如抓取约 100 条可填写 5 页；预计耗时上限超过 10 分钟时会显示风险提示。运行中会在进度条下显示“已用时”，结束后冻结为“实际用时”
+所有任务在启动浏览器前都会显示关键词、页数、保存方式、引文、论文详情和预计耗时，并可返回重新设置。GUI 还会显示保存位置，并把论文关键词 TXT 作为当前任务的勾选项。知网每页通常约 20 条结果，例如抓取约 100 条可填写 5 页；预计耗时上限超过 10 分钟时会显示风险提示
+
+运行中会显示预计进度百分比、已用时、预计总耗时和内存参考值；GUI 在窗口底部持续显示内存，任务结束后将“已用时”冻结为“实际用时”；终端版在每轮结束后显示一次任务结束后的内存参考值
 
 单关键词任务可以选择 Excel 或 CSV；多关键词任务支持每个关键词一个 Excel、单个 Excel 多 Sheet 或单个 CSV。开启论文详情后，程序会复用一个详情标签页串行获取关键词和摘要；英文文献没有关键词时正常留空。全部可选字段开启时，Excel 列为“论文标题、作者、来源、发表日期、论文关键词、摘要、引用格式、详情链接”。单条详情或引文获取失败时留空、记录日志并继续
 
@@ -117,7 +132,7 @@ pyinstaller --onefile --windowed --icon=icon.ico --version-file=version.txt --co
 
 ## 配置文件说明
 
-首次运行后，程序会在运行目录旁创建：
+首次运行后，程序会在启动文件所在目录创建：
 
 ```text
 CNKIBug/config.json
@@ -159,7 +174,7 @@ CNKIBug/config.json
 | `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                       |
 | `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |
 | `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
-| `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                |
+| `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                 |
 
 ### 常见调整
 
@@ -173,12 +188,17 @@ CNKIBug/config.json
 
 ## 系统要求
 
+| 平台            | GUI          | 终端版          |
+|---------------|--------------|--------------|
+| Windows 10/11 | `.exe` 或源码运行 | `.exe` 或源码运行 |
+| Linux         | 源码运行         | 源码运行         |
+| macOS         | 不作为正式支持范围    | 源码运行         |
+
 | 项目     | 要求                                                                                      |
 |--------|-----------------------------------------------------------------------------------------|
-| 操作系统   | Windows 10 / 11；或带图形桌面的 Linux / macOS（源码运行）                                             |
 | 浏览器    | Windows：Microsoft Edge（已预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
-| Python | 3.10–3.14（源码运行需要）                                                                       |
-| 图形界面   | 必需 —— 需人工通过知网滑块验证，无法在纯无头服务器运行                                                           |
+| Python | 3.10–3.14（仅源码运行需要）                                                                      |
+| 图形桌面   | 所有抓取方式均需要人工通过知网滑块验证，无法在纯无头服务器运行                                                       |
 
 ---
 
@@ -231,6 +251,7 @@ CNKIBug/
 │   ├── core/               # 界面无关的核心模型与接口
 │   │   ├── estimate.py     # 抓取耗时估算
 │   │   ├── events.py       # 任务事件接口
+│   │   ├── memory.py       # 进程内存采样与展示
 │   │   ├── runtime.py      # 运行路径模型
 │   │   ├── settings.py     # 抓取配置模型
 │   │   └── version.py      # 应用版本读取
@@ -271,12 +292,14 @@ tests/
 ├── test_cnki_records.py       # 结果解析测试
 ├── test_cnki_details.py       # 论文关键词和摘要测试
 ├── test_citation_fetcher.py   # GB/T 引文获取测试
+├── test_cli.py                # 终端任务循环测试
 ├── test_dom_contract.py       # CNKI DOM 结构契约测试
 ├── test_estimate.py           # 耗时估算测试
 ├── test_exporter.py           # 结果导出测试
 ├── test_gui.py                # GUI 入口、选项和线程事件测试
 ├── test_keyword_import.py     # 关键词导入测试
 ├── test_keyword_scraper.py    # 单关键词抓取测试
+├── test_memory.py             # 内存采样与格式化测试
 ├── test_prompts.py            # 参数输入测试
 ├── test_run.py                # 程序入口测试
 ├── test_runtime.py            # 运行目录与配置测试
