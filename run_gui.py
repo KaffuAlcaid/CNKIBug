@@ -12,6 +12,7 @@ def _write_message(message: str) -> None:
 def _run_self_check() -> int:
     try:
         import ttkbootstrap
+        import cnkibug.core.memory
         import cnkibug.gui.app
         import cnkibug.gui.events
         import cnkibug.workflow.runner

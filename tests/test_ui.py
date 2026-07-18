@@ -5,6 +5,7 @@ from rich.console import Console
 
 from cnkibug.app import ui
 from cnkibug.app.ui import EstimatedProgressDisplay
+from cnkibug.core.memory import MemorySample
 
 
 class FakeClock:
@@ -115,6 +116,35 @@ def test_interrupt_hint_only_appears_while_scraping_can_be_stopped():
     assert "按 Ctrl+C 可安全停止，已完成页会保存" not in render_text(display)
     display.complete()
     assert "按 Ctrl+C 可安全停止，已完成页会保存" not in render_text(display)
+    display.close()
+
+
+def test_estimated_progress_renders_memory_after_records_before_interrupt_hint():
+    class StaticMemorySampler:
+        def sample(self):
+            mebibyte = 1024 * 1024
+            return MemorySample(
+                96 * mebibyte,
+                332 * mebibyte,
+                428 * mebibyte,
+                615 * mebibyte,
+            )
+
+    clock = FakeClock()
+    display = EstimatedProgressDisplay(
+        40,
+        72,
+        console=Console(file=StringIO(), force_terminal=False, color_system=None),
+        clock=clock,
+        memory_sampler=StaticMemorySampler(),
+    )
+    display.start()
+    display.update_status(records=80)
+    text = render_text(display)
+
+    assert "内存约 428 MB（程序 96 + 浏览器 332）｜本轮峰值 615 MB" in text
+    assert text.index("已获取：80 条") < text.index("内存约 428 MB")
+    assert text.index("内存约 428 MB") < text.index("按 Ctrl+C 可安全停止")
     display.close()
 
 

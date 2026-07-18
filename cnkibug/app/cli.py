@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ..core.events import EventSink
+from ..core.memory import MemorySampler, format_task_finished_memory
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings, get_scraper_settings
 from ..workflow.runner import scrape_cnki
@@ -35,7 +36,8 @@ _logger = logging.getLogger("cnkibug.app")
 def main(program_dir: Path) -> None:
     runtime_state = _initialize_runtime(program_dir)
     settings = get_scraper_settings(runtime_state.config)
-    events = ConsoleEventSink()
+    memory_sampler = MemorySampler()
+    events = ConsoleEventSink(memory_sampler=memory_sampler)
     try:
         clear_screen()
         _print_banner(runtime_state)
@@ -43,7 +45,12 @@ def main(program_dir: Path) -> None:
 
         while True:
             try:
-                resume_action = _handle_pending_task(runtime_state.paths, settings, events)
+                resume_action = _handle_pending_task(
+                    runtime_state.paths,
+                    settings,
+                    events,
+                    memory_sampler,
+                )
                 if resume_action == "exit":
                     break
                 if resume_action == "again":
@@ -66,10 +73,11 @@ def main(program_dir: Path) -> None:
                     request.include_details,
                     request.detail_txt_export,
                 )
-                scrape_cnki(
+                _run_task(
+                    memory_sampler,
                     request.keywords,
-                    max_pages=request.max_pages,
-                    save_mode=request.save_mode,
+                    request.max_pages,
+                    request.save_mode,
                     include_citation=request.include_citation,
                     include_details=request.include_details,
                     detail_txt_export=request.detail_txt_export,
@@ -146,6 +154,7 @@ def _handle_pending_task(
     paths: RuntimePaths,
     settings: ScraperSettings,
     events: EventSink,
+    memory_sampler: MemorySampler,
 ) -> str:
     resume_state = load_last_task(paths)
     last_task_path = get_last_task_path(paths)
@@ -170,7 +179,8 @@ def _handle_pending_task(
         return "new"
 
     _logger.info("用户选择继续未完成任务")
-    scrape_cnki(
+    _run_task(
+        memory_sampler,
         list(resume_state["keywords"]),
         int(resume_state["max_pages"]),
         str(resume_state["save_mode"]),
@@ -185,6 +195,20 @@ def _handle_pending_task(
         return "again"
     _console.print("\n[bold green]感谢使用 CNKIBug，再见！[/bold green]")
     return "exit"
+
+
+def _run_task(
+    memory_sampler: MemorySampler,
+    keywords: list[str],
+    max_pages: int,
+    save_mode: str,
+    **kwargs,
+) -> None:
+    memory_sampler.reset()
+    try:
+        scrape_cnki(keywords, max_pages, save_mode, **kwargs)
+    finally:
+        _console.print(format_task_finished_memory(memory_sampler.sample(force=True)))
 
 
 def _ask_run_again(prompt: str) -> bool:

@@ -19,6 +19,7 @@ from rich.progress import (
 from rich.text import Text
 
 from ..core.estimate import estimate_progress
+from ..core.memory import MemorySampler, format_memory
 
 _console = Console(highlight=False)
 
@@ -43,6 +44,7 @@ class EstimatedProgressDisplay:
         console: Console | None = None,
         clock: Callable[[], float] | None = None,
         wall_started_at: float | None = None,
+        memory_sampler: MemorySampler | None = None,
     ) -> None:
         estimate_progress(0, low_seconds, high_seconds)
         self._low_seconds = low_seconds
@@ -50,6 +52,7 @@ class EstimatedProgressDisplay:
         self._console = console or _console
         self._clock = clock or time.monotonic
         self._wall_started_at = wall_started_at
+        self._memory_sampler = memory_sampler or MemorySampler()
         self._actual_seconds: float | None = None
         self._lock = RLock()
         self._mode = "idle"
@@ -98,7 +101,7 @@ class EstimatedProgressDisplay:
         with self._lock:
             _, headline, details = self._snapshot_at(self._clock())
             time_text = self._time_text_at(self._clock())
-        return "\n".join((headline, time_text, *details))
+        return "\n".join((headline, time_text, *details, format_memory(self._memory_sampler.sample())))
 
     def start(self) -> None:
         with self._lock:
@@ -272,6 +275,7 @@ class EstimatedProgressDisplay:
             percentage, headline, details = self._snapshot_at(now)
             time_text = self._time_text_at(now)
             show_interrupt_hint = self._mode in {"running", "paused"}
+        memory_text = format_memory(self._memory_sampler.sample())
         self._bar.update(
             self._task_id,
             completed=percentage,
@@ -281,6 +285,7 @@ class EstimatedProgressDisplay:
             self._bar.get_renderable(),
             Text(time_text, style="bold"),
             Text("\n".join(details), style="dim"),
+            Text(memory_text, style="dim"),
         ]
         if show_interrupt_hint:
             renderables.append(

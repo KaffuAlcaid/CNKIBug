@@ -8,6 +8,7 @@ from typing import Any, Iterator
 from rich.text import Text
 
 from ..core.events import EventSink
+from ..core.memory import MemorySampler
 from .console import safe_input
 from .errors import _popup_error
 from .report_view import print_task_report
@@ -29,9 +30,10 @@ _MESSAGE_STYLES = {
 
 
 class ConsoleEventSink(EventSink):
-    def __init__(self) -> None:
+    def __init__(self, memory_sampler: MemorySampler | None = None) -> None:
         self._progress: EstimatedProgressDisplay | None = None
         self._task_started_at: float | None = None
+        self._memory_sampler = memory_sampler or MemorySampler()
 
     @contextmanager
     def activity(self, message: str) -> Iterator[None]:
@@ -75,6 +77,7 @@ class ConsoleEventSink(EventSink):
                 int(payload["low_seconds"]),
                 int(payload["high_seconds"]),
                 wall_started_at=self._task_started_at,
+                memory_sampler=self._memory_sampler,
             )
             self._progress.start()
         elif name == "progress_updated" and self._progress is not None:

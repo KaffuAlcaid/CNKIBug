@@ -9,6 +9,7 @@ import run_gui
 from cnkibug.core.version import APP_VERSION
 from cnkibug.gui.app import (
     CNKIBugApp,
+    GuiTaskRequest,
     _fit_window_geometry,
     _merge_task_keywords,
     _resolve_save_mode,
@@ -147,6 +148,7 @@ def test_gui_clears_keywords_only_after_completed_task():
     app._freeze_active = Mock()
     app._current_percentage = Mock(return_value=42)
     app._progress_var = Mock()
+    app._progress_percent_var = Mock()
     app._status_var = Mock()
     app._set_keywords = Mock()
     app._keyword_var = Mock()
@@ -181,3 +183,94 @@ def test_gui_event_sink_marshals_confirmation_and_cancellation():
     assert sink.cancel_requested() is False
     cancel_event.set()
     assert sink.cancel_requested() is True
+
+
+def test_gui_progress_percent_label_tracks_reset_running_save_stop_and_completion(monkeypatch):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._progress_var = Mock()
+    app._progress_percent_var = Mock()
+    app._time_var = Mock()
+    app._total_eta_var = Mock()
+    app._status_var = Mock()
+    app._detail_var = Mock()
+    app._progress_state = {"keyword": "", "records": 0}
+    app._task_started_at = None
+    app._actual_seconds = None
+    app._active_elapsed = 0.0
+    app._active_started_at = None
+    app._eta_low = 40
+    app._eta_high = 72
+    app._total_eta_low = 0
+    app._total_eta_high = 0
+    app._progress_mode = "idle"
+    app._stopped_progress = 0
+
+    app._reset_progress()
+    app._progress_percent_var.set.assert_any_call("0%")
+
+    app._progress_mode = "running"
+    app._active_started_at = 0.0
+    app.root = Mock()
+    app.root.winfo_exists.return_value = False
+    app._update_memory_status = Mock()
+    monkeypatch.setattr("cnkibug.gui.app.time.monotonic", lambda: 20.0)
+    app._tick()
+    app._progress_percent_var.set.assert_any_call("45%")
+
+    app._freeze_active = Mock()
+    app._current_percentage = Mock(return_value=45)
+    app._set_keywords = Mock()
+    app._keyword_var = Mock()
+    app._handle_event(GuiEvent("progress_saving", {}))
+    app._progress_percent_var.set.assert_called_with("99%")
+
+    app._progress_mode = "running"
+    app._handle_event(GuiEvent("progress_stopped", {"message": "任务已停止"}))
+    app._progress_percent_var.set.assert_called_with("45%")
+
+    app._handle_event(GuiEvent("progress_completed", {}))
+    app._progress_percent_var.set.assert_called_with("100%")
+
+
+def test_gui_total_eta_is_calculated_independently_for_new_and_resumed_tasks():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._total_eta_var = Mock()
+    new_request = GuiTaskRequest(
+        keywords=["焊接"],
+        max_pages=3,
+        save_mode="single",
+        include_citation=False,
+        include_details=False,
+        detail_txt_export=False,
+        output_dir=None,
+    )
+
+    app._set_total_eta(new_request)
+
+    assert (app._total_eta_low, app._total_eta_high) == (42, 61)
+    app._total_eta_var.set.assert_called_with("预计总耗时：00:42～01:01")
+
+    resumed_request = GuiTaskRequest(
+        keywords=["焊接", "铸造"],
+        max_pages=1,
+        save_mode="multi_merge",
+        include_citation=True,
+        include_details=False,
+        detail_txt_export=False,
+        output_dir=None,
+    )
+    app._set_total_eta(resumed_request)
+
+    assert (app._total_eta_low, app._total_eta_high) == (77, 107)
+    app._total_eta_var.set.assert_called_with("预计总耗时：01:17～01:47")
+
+
+def test_gui_memory_status_is_updated_outside_task_status_frame():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._memory_var = Mock()
+    app._memory_sampler = Mock()
+    app._memory_sampler.sample.return_value = None
+
+    app._update_memory_status()
+
+    app._memory_var.set.assert_called_once_with("内存：暂不可用")

@@ -84,5 +84,16 @@ def _fmt(seconds: int) -> str:
     return f"{secs} 秒"
 
 
-def format_eta(low: int, high: int) -> str:
+def format_eta(low: int, high: int, *, compact: bool = False) -> str:
+    if compact:
+        return f"{_format_duration(low)}～{_format_duration(high)}"
     return f"约 {_fmt(low)} ~ {_fmt(high)}"
+
+
+def _format_duration(seconds: int) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"

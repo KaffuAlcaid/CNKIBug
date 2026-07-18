@@ -51,6 +51,10 @@ def test_format_eta_minutes_and_seconds():
     assert format_eta(84, 132) == "约 1 分 24 秒 ~ 2 分 12 秒"
 
 
+def test_format_eta_compact_uses_existing_duration_formatting():
+    assert format_eta(99, 136, compact=True) == "01:39～02:16"
+
+
 def test_estimate_progress():
     assert estimate_progress(0, 40, 72) == 0
     assert estimate_progress(-1, 40, 72) == 0

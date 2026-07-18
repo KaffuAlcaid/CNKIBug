@@ -11,6 +11,7 @@ def _run_self_check() -> int:
         import cnkibug.browser.runtime
         import cnkibug.cnki.details
         import cnkibug.cnki.keyword
+        import cnkibug.core.memory
         import cnkibug.fileio.exporter
         import cnkibug.workflow.runner
         import cnkibug.workflow.state

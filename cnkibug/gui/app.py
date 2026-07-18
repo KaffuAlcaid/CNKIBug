@@ -19,6 +19,7 @@ from PIL import Image
 
 from ..app.runtime import cleanup_runtime_history, init_runtime
 from ..core.estimate import estimate_progress, estimate_seconds, format_eta
+from ..core.memory import MemorySampler, format_memory
 from ..core.settings import ScraperSettings, get_scraper_settings
 from ..core.version import APP_VERSION
 from ..fileio.keyword_input import (
@@ -129,8 +130,11 @@ class CNKIBugApp:
         self._active_started_at: float | None = None
         self._eta_low = 1
         self._eta_high = 2
+        self._total_eta_low = 0
+        self._total_eta_high = 0
         self._progress_mode = "idle"
         self._stopped_progress = 0
+        self._memory_sampler = MemorySampler()
         self._progress_state: dict[str, Any] = {
             "keyword": "",
             "keyword_index": 0,
@@ -144,6 +148,7 @@ class CNKIBugApp:
         self._keywords: list[str] = []
 
         self._build_ui()
+        self._update_memory_status()
         self.root.after(100, self._drain_events)
         self.root.after(250, self._tick)
         self.root.after(200, self._offer_resume)
@@ -285,7 +290,7 @@ class CNKIBugApp:
         self._add_keyword_button.grid(row=0, column=1, padx=(8, 0))
         ttk.Label(
             keyword_frame,
-            text="^^^^输入一个关键词或完整检索句；同一检索项内可用空格组合多个词^^^^",
+            text="输入一个关键词或完整检索句；同一检索项内可用空格组合多个词(请在上方键入并添加)",
             bootstyle="secondary",
         ).pack(anchor=tk.W, pady=(6, 8))
 
@@ -438,15 +443,37 @@ class CNKIBugApp:
         self._status_var = tk.StringVar(value="等待设置任务")
         ttk.Label(progress_frame, textvariable=self._status_var, font=("TkDefaultFont", 11, "bold")).pack(anchor=tk.W)
         self._progress_var = tk.IntVar(value=0)
+        progress_row = ttk.Frame(progress_frame)
+        progress_row.pack(fill=tk.X, pady=(8, 2))
+        progress_row.columnconfigure(0, weight=1)
         self._progress = ttk.Progressbar(
-            progress_frame,
+            progress_row,
             variable=self._progress_var,
             maximum=100,
             bootstyle="info-striped",
         )
-        self._progress.pack(fill=tk.X, pady=(8, 2))
+        self._progress.grid(row=0, column=0, sticky="ew")
+        self._progress_percent_var = tk.StringVar(value="0%")
+        ttk.Label(progress_row, textvariable=self._progress_percent_var, width=4).grid(
+            row=0,
+            column=1,
+            sticky=tk.E,
+            padx=(8, 0),
+        )
+
+        time_row = ttk.Frame(progress_frame)
+        time_row.pack(fill=tk.X)
+        time_row.columnconfigure(0, weight=1)
+        time_row.columnconfigure(1, weight=1)
         self._time_var = tk.StringVar(value="已用时：00:00")
-        ttk.Label(progress_frame, textvariable=self._time_var).pack(anchor=tk.W)
+        ttk.Label(time_row, textvariable=self._time_var).grid(row=0, column=0, sticky=tk.W)
+        self._total_eta_var = tk.StringVar(value="预计总耗时：--")
+        ttk.Label(
+            time_row,
+            textvariable=self._total_eta_var,
+            justify=tk.RIGHT,
+            wraplength=340,
+        ).grid(row=0, column=1, sticky=tk.E)
         self._detail_var = tk.StringVar(value="尚未开始")
         ttk.Label(progress_frame, textvariable=self._detail_var, bootstyle="secondary").pack(anchor=tk.W, pady=(2, 6))
 
@@ -474,6 +501,11 @@ class CNKIBugApp:
             bootstyle="danger-outline",
         )
         self._stop_button.pack(side=tk.RIGHT)
+
+        footer = ttk.Frame(container)
+        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        self._memory_var = tk.StringVar(value="内存：正在读取")
+        ttk.Label(footer, textvariable=self._memory_var, bootstyle="secondary").pack(side=tk.RIGHT)
 
         self._form_controls = [
             self._keyword_entry,
@@ -790,14 +822,6 @@ class CNKIBugApp:
     ) -> None:
         if self._running:
             return
-        self._cancel_event.clear()
-        self._set_running(True)
-        self._reset_progress()
-        self._clear_log()
-        self._form.pack_forget()
-        self._progress_frame.pack(fill=tk.BOTH, expand=True)
-        self._new_task_button.configure(state=tk.DISABLED)
-
         if resume_state is not None:
             stored_output_dir = resume_state.get("output_dir")
             request = GuiTaskRequest(
@@ -810,6 +834,17 @@ class CNKIBugApp:
                 output_dir=Path(stored_output_dir) if isinstance(stored_output_dir, str) else None,
             )
         assert request is not None
+
+        self._cancel_event.clear()
+        self._set_running(True)
+        self._reset_progress()
+        self._set_total_eta(request)
+        self._memory_sampler.reset()
+        self._update_memory_status()
+        self._clear_log()
+        self._form.pack_forget()
+        self._progress_frame.pack(fill=tk.BOTH, expand=True)
+        self._new_task_button.configure(state=tk.DISABLED)
 
         # 抓取在线程中运行；工作线程只投递事件，所有 Tk 控件仍由主线程更新。
         def worker() -> None:
@@ -859,7 +894,11 @@ class CNKIBugApp:
         self._progress_mode = "idle"
         self._stopped_progress = 0
         self._progress_var.set(0)
+        self._progress_percent_var.set("0%")
         self._time_var.set("已用时：00:00")
+        self._total_eta_low = 0
+        self._total_eta_high = 0
+        self._total_eta_var.set("预计总耗时：--")
         self._status_var.set("正在准备任务")
         self._detail_var.set("等待启动浏览器")
         for key in self._progress_state:
@@ -937,11 +976,13 @@ class CNKIBugApp:
             self._freeze_active()
             self._progress_mode = "saving"
             self._progress_var.set(99)
+            self._progress_percent_var.set("99%")
             self._status_var.set("正在保存结果")
         elif name == "progress_completed":
             self._freeze_active()
             self._progress_mode = "completed"
             self._progress_var.set(100)
+            self._progress_percent_var.set("100%")
             self._status_var.set("任务已完成")
             self._set_keywords([])
             self._reset_keyword_editor()
@@ -950,6 +991,7 @@ class CNKIBugApp:
             self._freeze_active()
             self._progress_mode = "stopped"
             self._progress_var.set(self._stopped_progress)
+            self._progress_percent_var.set(f"{self._stopped_progress}%")
             self._status_var.set(str(payload.get("message", "任务已停止")))
         elif name == "task_finished":
             self._actual_seconds = max(0.0, float(payload.get("elapsed_seconds", 0.0)))
@@ -999,7 +1041,10 @@ class CNKIBugApp:
         if self._task_started_at is not None and self._actual_seconds is None:
             self._time_var.set(f"已用时：{_format_duration(now - self._task_started_at)}")
         if self._progress_mode in {"running", "paused"}:
-            self._progress_var.set(self._current_percentage(now))
+            percentage = self._current_percentage(now)
+            self._progress_var.set(percentage)
+            self._progress_percent_var.set(f"{percentage}%")
+        self._update_memory_status()
         try:
             if self.root.winfo_exists():
                 self.root.after(250, self._tick)
@@ -1030,6 +1075,20 @@ class CNKIBugApp:
             self._eta_low,
             self._eta_high,
         )
+
+    def _set_total_eta(self, request: GuiTaskRequest) -> None:
+        self._total_eta_low, self._total_eta_high = estimate_seconds(
+            request.max_pages,
+            len(request.keywords),
+            include_citation=request.include_citation,
+            include_details=request.include_details,
+        )
+        self._total_eta_var.set(
+            f"预计总耗时：{format_eta(self._total_eta_low, self._total_eta_high, compact=True)}"
+        )
+
+    def _update_memory_status(self) -> None:
+        self._memory_var.set(format_memory(self._memory_sampler.sample()))
 
     def _update_detail_text(self) -> None:
         parts = []
