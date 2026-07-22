@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Private local AI project instructions
+/AGENTS.md
+/PROJECT.md
