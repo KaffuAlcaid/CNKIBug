@@ -1,6 +1,7 @@
 #保存单轮抓取状态
 from __future__ import annotations
 
+import time
 from threading import Event
 from typing import Any
 
@@ -32,6 +33,16 @@ class ScrapeSession:
             self.stop_reason = reason
         if verify_timeout:
             self.verify_timeout = True
+
+    def wait_interruptibly(self, seconds: float) -> bool:
+        """等待指定时间；任务停止时返回 False。"""
+        if self.stop_requested:
+            return False
+        if self._cancel_event is None:
+            time.sleep(seconds)
+        else:
+            self._cancel_event.wait(seconds)
+        return not self.stop_requested
 
 
 def require_page(session: ScrapeSession) -> Any:

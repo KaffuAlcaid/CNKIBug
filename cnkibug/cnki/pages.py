@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -82,6 +81,8 @@ def scrape_result_pages(
     abstracts_present = 0
 
     for current_page in range(start_page, max_pages + 1):
+        if session.stop_requested:
+            break
         try:
             events.emit("progress_updated", page=current_page)
             step = process_result_page(
@@ -96,6 +97,8 @@ def scrape_result_pages(
             )
             if step.parsed is None:
                 incomplete_reason = step.failure_reason
+                break
+            if session.stop_requested:
                 break
 
             page_parse = step.parsed
@@ -120,6 +123,8 @@ def scrape_result_pages(
                 on_page_complete(current_page, list(results))
 
             if current_page < max_pages:
+                if session.stop_requested:
+                    break
                 advance = advance_result_page(
                     session,
                     settings,
@@ -194,10 +199,16 @@ def process_result_page(
 ) -> PageStepResult:
     page = require_page(session)
     events = session.events
+    if session.stop_requested:
+        return PageStepResult()
     try:
         page.wait_for_selector(SELECTOR_RESULT_ROWS, timeout=settings.timeout_selector_ms)
     except PlaywrightTimeoutError:
+        if session.stop_requested:
+            return PageStepResult()
         verify_status = handle_verify_with_progress(page, settings, events)
+        if session.stop_requested:
+            return PageStepResult()
         if verify_status == VERIFY_PASSED:
             try:
                 page.wait_for_selector(
@@ -240,7 +251,8 @@ def process_result_page(
             print_page_debug(page, f"第 {current_page} 页结果表格等待超时", events)
             return PageStepResult(failure_reason=reason)
 
-    time.sleep(random.uniform(2, 5))
+    if not session.wait_interruptibly(random.uniform(2, 5)):
+        return PageStepResult()
     if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning(
@@ -248,6 +260,8 @@ def process_result_page(
             keyword_ref,
             current_page,
         )
+        return PageStepResult()
+    if session.stop_requested:
         return PageStepResult()
 
     actual_page, _ = get_result_page_numbers(page)
@@ -276,8 +290,11 @@ def process_result_page(
             "include_citation": True,
             "citation_log_ref": f"{keyword_ref} page={current_page}",
             "log_titles": settings.log_scraped_records,
+            "cancel_requested": lambda: session.stop_requested,
         }
     page_parse = parse_result_rows(page, seen, stats, **citation_options)
+    if page_parse.cancelled or session.stop_requested:
+        return PageStepResult()
     if detail_fetcher is not None and not _append_page_details(
         session,
         page_parse,
@@ -334,33 +351,37 @@ def _append_page_details(
     log_titles: bool,
 ) -> bool:
     total = len(page_parse.records)
-    for row_index, record in enumerate(page_parse.records, start=1):
-        session.events.emit(
-            "progress_updated",
-            detail_index=row_index,
-            detail_total=total,
-        )
-        log_ref = f"{keyword_ref} page={current_page} row={row_index}"
-        if log_titles and record:
-            log_ref = f"{log_ref} title={record[0]!r}"
-        detail_url = str(record[4]).strip() if len(record) > 4 else ""
-        details = detail_fetcher.fetch(detail_url, log_ref=log_ref)
-        if details.verify_timeout:
-            session.request_stop("安全验证等待超时", verify_timeout=True)
-            session.events.emit("progress_updated", detail_index=0, detail_total=0)
-            return False
-        append_article_details(record, details.keywords, details.abstract)
-        if details.failed:
-            page_parse.detail_failed += 1
-        else:
-            page_parse.detail_success += 1
-        if details.keywords:
-            page_parse.keywords_present += 1
-        if details.abstract:
-            page_parse.abstracts_present += 1
-
-    session.events.emit("progress_updated", detail_index=0, detail_total=0)
-    return True
+    try:
+        for row_index, record in enumerate(page_parse.records, start=1):
+            if session.stop_requested:
+                return False
+            session.events.emit(
+                "progress_updated",
+                detail_index=row_index,
+                detail_total=total,
+            )
+            log_ref = f"{keyword_ref} page={current_page} row={row_index}"
+            if log_titles and record:
+                log_ref = f"{log_ref} title={record[0]!r}"
+            detail_url = str(record[4]).strip() if len(record) > 4 else ""
+            details = detail_fetcher.fetch(detail_url, log_ref=log_ref)
+            if details.verify_timeout:
+                session.request_stop("安全验证等待超时", verify_timeout=True)
+                return False
+            if session.stop_requested:
+                return False
+            append_article_details(record, details.keywords, details.abstract)
+            if details.failed:
+                page_parse.detail_failed += 1
+            else:
+                page_parse.detail_success += 1
+            if details.keywords:
+                page_parse.keywords_present += 1
+            if details.abstract:
+                page_parse.abstracts_present += 1
+        return True
+    finally:
+        session.events.emit("progress_updated", detail_index=0, detail_total=0)
 
 
 def advance_result_page(
@@ -374,6 +395,8 @@ def advance_result_page(
 ) -> PageAdvanceResult:
     page = require_page(session)
     events = session.events
+    if session.stop_requested:
+        return PageAdvanceResult(STOPPED)
     next_btn = query_first(page, "next_page")
     if not next_btn:
         actual_page, total_pages = get_result_page_numbers(page)
@@ -413,6 +436,8 @@ def advance_result_page(
     old_next_page = next_btn.get_attribute("data-curpage") or ""
     old_current_page, _ = get_result_page_numbers(page)
     next_btn.click(timeout=settings.timeout_selector_ms)
+    if session.stop_requested:
+        return PageAdvanceResult(STOPPED)
     page_advanced = False
     for confirm_attempt in range(1, settings.max_advance_fail + 1):
         if wait_result_page_advanced(
@@ -421,10 +446,13 @@ def advance_result_page(
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
+            stop_requested=lambda: session.stop_requested,
         ):
             page_advanced = True
             break
 
+        if session.stop_requested:
+            return PageAdvanceResult(STOPPED)
         verify_status = handle_verify_with_progress(page, settings, events)
         if verify_status == VERIFY_TIMEOUT:
             session.request_stop("安全验证等待超时", verify_timeout=True)
@@ -434,15 +462,20 @@ def advance_result_page(
                 current_page,
             )
             return PageAdvanceResult(STOPPED)
+        if session.stop_requested:
+            return PageAdvanceResult(STOPPED)
         if verify_status == VERIFY_PASSED and wait_result_page_advanced(
             page,
             old_href=old_first_href,
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
+            stop_requested=lambda: session.stop_requested,
         ):
             page_advanced = True
             break
+        if session.stop_requested:
+            return PageAdvanceResult(STOPPED)
 
         _logger.warning(
             "翻页后未确认到结果变化: %s page=%d confirm_attempt=%d max_attempts=%d",
@@ -474,10 +507,13 @@ def advance_result_page(
         print_page_debug(page, f"第 {current_page} 页翻页结果无法确认", events)
         return PageAdvanceResult(FAILED, reason)
 
-    time.sleep(random.uniform(1, 2))
+    if not session.wait_interruptibly(random.uniform(1, 2)):
+        return PageAdvanceResult(STOPPED)
     if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("翻页后安全验证超时: %s page=%d", keyword_ref, current_page)
+        return PageAdvanceResult(STOPPED)
+    if session.stop_requested:
         return PageAdvanceResult(STOPPED)
     return PageAdvanceResult(ADVANCED)
 

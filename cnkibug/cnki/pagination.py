@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
@@ -76,9 +77,12 @@ def wait_result_page_advanced(
     old_next_page: str,
     old_current_page: int | None = None,
     timeout: int = 15000,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> bool:
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
+        if stop_requested is not None and stop_requested():
+            return False
         new_href = get_first_result_href(page)
         if old_href and new_href and new_href != old_href:
             return True
@@ -92,6 +96,8 @@ def wait_result_page_advanced(
             if new_current_page is not None and new_current_page > old_current_page:
                 return True
 
+        if stop_requested is not None and stop_requested():
+            return False
         time.sleep(0.25)
     return False
 

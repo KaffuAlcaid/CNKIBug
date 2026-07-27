@@ -64,3 +64,17 @@ def test_wait_result_page_advanced_accepts_changed_next_marker():
     page = FakeElement(single={SELECTOR_NEXT_PAGE: next_btn})
 
     assert wait_result_page_advanced(page, old_href="", old_next_page="2", timeout=10) is True
+
+
+def test_wait_result_page_advanced_stops_before_polling():
+    class Page:
+        def query_selector(self, selector):
+            raise AssertionError("cancelled pagination must not inspect the page")
+
+    assert wait_result_page_advanced(
+        Page(),
+        old_href="",
+        old_next_page="2",
+        timeout=10,
+        stop_requested=lambda: True,
+    ) is False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,9 +44,13 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
     page = require_page(session)
     events = session.events
     _logger.info("预热开始")
+    if session.stop_requested:
+        return False
     try:
         with events.activity("少女祈祷中..."):
             page.goto(CNKI_HOME_URL, timeout=settings.timeout_goto_ms)
+            if session.stop_requested:
+                return False
             page.wait_for_load_state("domcontentloaded", timeout=settings.timeout_load_ms)
         _logger.info("预热首页加载完成")
         if handle_verify(page, settings, events) == VERIFY_TIMEOUT:
@@ -54,14 +59,21 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
         if not session.stop_requested:
             with events.activity("少女祈祷中..."):
                 page.goto(CNKI_SEARCH_URL, timeout=settings.timeout_goto_ms)
+                if session.stop_requested:
+                    return False
                 page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+                if session.stop_requested:
+                    return False
                 page.fill(
                     SELECTOR_SEARCH_INPUT,
                     WARMUP_KEYWORD,
                     timeout=settings.timeout_selector_ms,
                 )
-                time.sleep(random.uniform(0.5, 1.5))
+                if not session.wait_interruptibly(random.uniform(0.5, 1.5)):
+                    return False
                 page.click(SELECTOR_SEARCH_BUTTON, timeout=settings.timeout_selector_ms)
+                if session.stop_requested:
+                    return False
                 page.wait_for_selector(
                     SELECTOR_RESULT_ROWS,
                     timeout=settings.timeout_selector_ms,
@@ -111,12 +123,22 @@ def submit_search(
     keyword: str,
     settings: ScraperSettings,
     events: EventSink = NULL_EVENTS,
-) -> None:
+    wait_interruptibly: Callable[[float], bool] | None = None,
+) -> bool:
     with events.activity("少女祈祷中..."):
         page.fill(SELECTOR_SEARCH_INPUT, keyword, timeout=settings.timeout_selector_ms)
-        time.sleep(random.uniform(0.5, 1.5))
+        wait_seconds = random.uniform(0.5, 1.5)
+        if wait_interruptibly is None:
+            time.sleep(wait_seconds)
+        elif not wait_interruptibly(wait_seconds):
+            return False
         page.click(SELECTOR_SEARCH_BUTTON, timeout=settings.timeout_selector_ms)
-        time.sleep(random.uniform(1, 2))
+        wait_seconds = random.uniform(1, 2)
+        if wait_interruptibly is None:
+            time.sleep(wait_seconds)
+        elif not wait_interruptibly(wait_seconds):
+            return False
+    return True
 
 
 def wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
@@ -143,6 +165,8 @@ def run_keyword_search(
 ) -> SearchResult:
     page = require_page(session)
     events = session.events
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
     try:
         open_home_page(page, settings, events)
     except PlaywrightTimeoutError:
@@ -153,10 +177,14 @@ def run_keyword_search(
         _logger.warning("关键词首页预热失败，跳过: %s error=%s", keyword_ref, exc)
         events.emit("message", text=f"[!] 预热请求失败: {exc}，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "首页预热失败")
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
     if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词因首页安全验证超时停止: %s", keyword_ref)
         return SearchResult(SEARCH_STOPPED, "安全验证等待超时")
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
 
     try:
         open_search_page(page, settings, events)
@@ -168,22 +196,40 @@ def run_keyword_search(
         _logger.warning("检索页加载失败，跳过关键词: %s error=%s", keyword_ref, exc)
         events.emit("message", text=f"[!] 检索页加载失败: {exc}，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "检索页加载失败")
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
     if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词因检索页安全验证超时停止: %s", keyword_ref)
         return SearchResult(SEARCH_STOPPED, "安全验证等待超时")
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
 
-    submit_search(page, keyword, settings, events)
+    submitted = submit_search(
+        page,
+        keyword,
+        settings,
+        events,
+        session.wait_interruptibly,
+    )
+    if submitted is False or session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
     _logger.info("关键词检索已提交: %s", keyword_ref)
     if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("关键词提交后因安全验证超时停止: %s", keyword_ref)
         return SearchResult(SEARCH_STOPPED, "安全验证等待超时")
+    if session.stop_requested:
+        return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
 
     while True:
+        if session.stop_requested:
+            return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
         try:
             outcome = wait_search_outcome(page, settings)
         except PlaywrightTimeoutError:
+            if session.stop_requested:
+                return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
             _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
             print_page_debug(page, f"关键词「{keyword}」结果加载超时", events)
             events.emit(
@@ -193,6 +239,8 @@ def run_keyword_search(
             )
             return SearchResult(SEARCH_FAILED, "结果加载超时")
 
+        if session.stop_requested:
+            return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")
         if outcome != "verify":
             return SearchResult(outcome)
 
@@ -200,3 +248,5 @@ def run_keyword_search(
         if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
             session.request_stop("安全验证等待超时", verify_timeout=True)
             return SearchResult(SEARCH_STOPPED, "安全验证等待超时")
+        if session.stop_requested:
+            return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户停止")

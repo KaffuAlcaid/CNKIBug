@@ -164,3 +164,36 @@ def test_page_enrichment_stops_without_checkpoint_data_on_verify_timeout():
     assert session.stop_requested is True
     assert session.verify_timeout is True
     assert parsed.records == [["论文", "", "", "", "url"]]
+
+
+def test_page_enrichment_stops_after_fetch_when_cancelled():
+    events = _RecordingEvents()
+    session = ScrapeSession(events)
+    parsed = PageParseResult(records=[
+        ["论文一", "", "", "", "url1"],
+        ["论文二", "", "", "", "url2"],
+    ])
+
+    class CancellingFetcher:
+        def fetch(self, url, *, log_ref):
+            session.request_stop("用户停止")
+            return ArticleDetails(["关键词"], "摘要")
+
+    completed = _append_page_details(
+        session,
+        parsed,
+        CancellingFetcher(),
+        keyword_ref="keyword_index=1/1",
+        current_page=1,
+        log_titles=False,
+    )
+
+    assert completed is False
+    assert parsed.records == [
+        ["论文一", "", "", "", "url1"],
+        ["论文二", "", "", "", "url2"],
+    ]
+    assert events.items[-1] == (
+        "progress_updated",
+        {"detail_index": 0, "detail_total": 0},
+    )

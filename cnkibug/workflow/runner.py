@@ -143,4 +143,4 @@ def _warm_up(task: TaskContext) -> None:
             _logger.warning("用户选择在预热失败后停止抓取")
         else:
             _logger.info("用户选择在预热失败后继续抓取")
-    time.sleep(random.uniform(2, 4))
+    task.session.wait_interruptibly(random.uniform(2, 4))

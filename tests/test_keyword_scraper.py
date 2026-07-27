@@ -1,11 +1,13 @@
+from threading import Event
 from types import SimpleNamespace
 
 from cnkibug.browser.session import ScrapeSession
 from cnkibug.cnki import guard, keyword as keyword_scraper, pages, search
+from cnkibug.cnki.details import ArticleDetails
 from cnkibug.cnki.guard import VERIFY_CANCELLED, VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
-from cnkibug.cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_SUCCESS
+from cnkibug.cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_STOPPED, STATUS_SUCCESS
 from cnkibug.cnki.results import PageParseResult
-from cnkibug.cnki.search import SEARCH_RESULTS, SearchResult
+from cnkibug.cnki.search import SEARCH_RESULTS, SEARCH_STOPPED, SearchResult
 from cnkibug.core.events import EventSink
 from cnkibug.core.settings import ScraperSettings
 
@@ -32,7 +34,43 @@ def _patch_search_setup(monkeypatch):
         "run_keyword_search",
         lambda *args, **kwargs: SearchResult(SEARCH_RESULTS),
     )
-    monkeypatch.setattr(pages.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        ScrapeSession,
+        "wait_interruptibly",
+        lambda self, seconds: not self.stop_requested,
+    )
+
+
+def test_session_wait_returns_immediately_when_cancelled():
+    cancel_event = Event()
+    cancel_event.set()
+    session = ScrapeSession(cancel_event=cancel_event)
+
+    assert session.wait_interruptibly(60) is False
+
+
+def test_keyword_search_stops_after_verify_is_cancelled(monkeypatch):
+    cancel_event = Event()
+    session = ScrapeSession(cancel_event=cancel_event)
+    session.page = object()
+
+    monkeypatch.setattr(search, "open_home_page", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        search,
+        "handle_verify_with_progress",
+        lambda *args, **kwargs: cancel_event.set() or VERIFY_CANCELLED,
+    )
+    monkeypatch.setattr(
+        search,
+        "open_search_page",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("cancelled search must not open the search page")
+        ),
+    )
+
+    result = search.run_keyword_search(session, "焊接", _settings(), "keyword=<hidden>")
+
+    assert result.status == SEARCH_STOPPED
 
 
 def test_wait_search_outcome_detects_verify_url():
@@ -136,7 +174,11 @@ def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
 
     monkeypatch.setattr(search, "open_home_page", lambda page, settings, events=None: None)
     monkeypatch.setattr(search, "open_search_page", lambda page, settings, events=None: None)
-    monkeypatch.setattr(search, "submit_search", lambda page, keyword, settings, events=None: None)
+    monkeypatch.setattr(
+        search,
+        "submit_search",
+        lambda page, keyword, settings, events=None, wait_interruptibly=None: None,
+    )
     monkeypatch.setattr(search, "wait_search_outcome", lambda page, settings: next(outcomes))
     monkeypatch.setattr(guard, "handle_verify", handle_verify)
     session = ScrapeSession()
@@ -420,3 +462,52 @@ def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_changes(monkeyp
     assert checkpoints[0][0] == 0
     assert checkpoints[1] == (1, result.records)
     assert "页级恢复首页锚点变化" in caplog.text
+
+
+def test_detail_cancellation_discards_current_page_and_checkpoint(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
+    monkeypatch.setattr(
+        pages,
+        "parse_result_rows",
+        lambda page, seen, stats: PageParseResult(
+            records=[
+                ["论文一", "", "", "", "https://example.test/1"],
+                ["论文二", "", "", "", "https://example.test/2"],
+            ],
+            rows_seen=2,
+        ),
+    )
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+    session = ScrapeSession()
+    session.page = Page()
+
+    class DetailFetcher:
+        calls = 0
+
+        def fetch(self, url, *, log_ref):
+            self.calls += 1
+            if self.calls == 2:
+                session.request_stop("用户停止")
+            return ArticleDetails(["关键词"], "摘要")
+
+    checkpoints = []
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        1,
+        _settings(),
+        detail_fetcher=DetailFetcher(),
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
+
+    assert result.status == STATUS_STOPPED
+    assert result.records == []
+    assert checkpoints == []

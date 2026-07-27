@@ -147,3 +147,32 @@ def test_parse_result_rows_fetches_citation_after_deduplication(monkeypatch):
         first,
         "keyword_index=1/1 page=1 row=1 title='标题'",
     )]
+
+
+def test_parse_result_rows_marks_citation_cancellation(monkeypatch):
+    cancelled = False
+    calls = []
+
+    def fetch_gbt_citation(page, row, *, log_ref):
+        nonlocal cancelled
+        calls.append(row)
+        cancelled = True
+        return "[1] 不应提交的引文"
+
+    monkeypatch.setattr(cnki_results, "fetch_gbt_citation", fetch_gbt_citation)
+    page = _page([
+        _row("标题一", "/detail/1", ["作者"]),
+        _row("标题二", "/detail/2", ["作者"]),
+    ])
+
+    result = parse_result_rows(
+        page,
+        set(),
+        new_scrape_stats(),
+        include_citation=True,
+        cancel_requested=lambda: cancelled,
+    )
+
+    assert result.cancelled is True
+    assert result.records == []
+    assert len(calls) == 1

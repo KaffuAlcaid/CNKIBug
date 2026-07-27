@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin
@@ -32,6 +33,7 @@ class PageParseResult:
     detail_failed: int = 0
     keywords_present: int = 0
     abstracts_present: int = 0
+    cancelled: bool = False
 
     @property
     def records_added(self) -> int:
@@ -46,6 +48,7 @@ def parse_result_rows(
     include_citation: bool = False,
     citation_log_ref: str = "",
     log_titles: bool = False,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> PageParseResult:
     result = PageParseResult()
     none_text_fields: set[str] = set()
@@ -54,6 +57,9 @@ def parse_result_rows(
     stats["rows_seen"] += result.rows_seen
 
     for row_index, row in enumerate(rows, start=1):
+        if cancel_requested is not None and cancel_requested():
+            result.cancelled = True
+            break
         try:
             title_el = query_first(row, "title")
             if not title_el:
@@ -101,6 +107,9 @@ def parse_result_rows(
                 if log_titles:
                     log_ref = f"{log_ref} title={title!r}"
                 citation = fetch_gbt_citation(page, row, log_ref=log_ref)
+                if cancel_requested is not None and cancel_requested():
+                    result.cancelled = True
+                    break
                 record.append(citation)
                 if citation:
                     result.citation_success += 1

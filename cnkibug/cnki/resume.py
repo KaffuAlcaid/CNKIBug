@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 
 from playwright.sync_api import Error as PlaywrightError
 
@@ -29,6 +28,8 @@ def position_after_checkpoint(
     page = require_page(session)
     events = session.events
     for page_number in range(1, completed_page + 1):
+        if session.stop_requested:
+            return False
         try:
             next_btn = query_first(page, "next_page")
             if not next_btn:
@@ -43,14 +44,19 @@ def position_after_checkpoint(
             old_next_page = next_btn.get_attribute("data-curpage") or ""
             old_current_page, _ = get_result_page_numbers(page)
             next_btn.click(timeout=settings.timeout_selector_ms)
+            if session.stop_requested:
+                return False
             advanced = wait_result_page_advanced(
                 page,
                 old_href=old_first_href,
                 old_next_page=old_next_page,
                 old_current_page=old_current_page,
                 timeout=settings.timeout_selector_ms,
+                stop_requested=lambda: session.stop_requested,
             )
             if not advanced:
+                if session.stop_requested:
+                    return False
                 verify_status = handle_verify_with_progress(
                     page,
                     settings,
@@ -72,14 +78,19 @@ def position_after_checkpoint(
                         old_next_page=old_next_page,
                         old_current_page=old_current_page,
                         timeout=settings.timeout_selector_ms,
+                        stop_requested=lambda: session.stop_requested,
                     )
             if not advanced:
+                if session.stop_requested:
+                    return False
                 _logger.warning(
                     "页级恢复定位失败，翻页变化未确认: %s current_page=%d target_page=%d",
                     keyword_ref,
                     page_number,
                     completed_page + 1,
                 )
+                return False
+            if session.stop_requested:
                 return False
             if handle_verify_with_progress(
                 page,
@@ -94,7 +105,8 @@ def position_after_checkpoint(
                     completed_page + 1,
                 )
                 return False
-            time.sleep(random.uniform(1, 2))
+            if not session.wait_interruptibly(random.uniform(1, 2)):
+                return False
             _logger.info(
                 "页级恢复已跳过完成页: %s page=%d target_page=%d",
                 keyword_ref,

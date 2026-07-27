@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 from collections.abc import Callable
 
 from playwright.sync_api import Error as PlaywrightError
@@ -79,7 +78,8 @@ def _run_keyword(
         keyword_ref,
     )
     _update_keyword_progress(task, keyword, index, completed_page)
-    _wait_between_keywords(task, index, len(task.keywords))
+    if not _wait_between_keywords(task, index, len(task.keywords)):
+        return
     historical_records = list(task.all_results.get(keyword, []))
     on_page_complete = _checkpoint_callback(
         task,
@@ -164,9 +164,9 @@ def _update_keyword_progress(
     )
 
 
-def _wait_between_keywords(task: TaskContext, index: int, total: int) -> None:
+def _wait_between_keywords(task: TaskContext, index: int, total: int) -> bool:
     if index <= 1:
-        return
+        return not task.session.stop_requested
     wait_sec = random.uniform(5, 8)
     _logger.info(
         "关键词间隔等待: next_keyword_index=%d/%d wait_sec=%.1f",
@@ -175,7 +175,7 @@ def _wait_between_keywords(task: TaskContext, index: int, total: int) -> None:
         wait_sec,
     )
     with task.events.activity(f"少女祈祷中... 等待 {wait_sec:.1f} 秒"):
-        time.sleep(wait_sec)
+        return task.session.wait_interruptibly(wait_sec)
 
 
 def _checkpoint_callback(
