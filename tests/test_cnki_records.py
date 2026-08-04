@@ -170,7 +170,7 @@ def test_parse_result_rows_marks_citation_cancellation(monkeypatch):
         set(),
         new_scrape_stats(),
         include_citation=True,
-        cancel_requested=lambda: cancelled,
+        stop_requested=lambda: cancelled,
     )
 
     assert result.cancelled is True

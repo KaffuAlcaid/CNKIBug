@@ -196,7 +196,10 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(records=[["标题", "", "", ""]], rows_seen=1),
+        lambda page, seen, stats, **kwargs: PageParseResult(
+            records=[["标题", "", "", ""]],
+            rows_seen=1,
+        ),
     )
     monkeypatch.setattr(pages, "get_first_result_href", lambda page: "/detail/1")
     monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 2))
@@ -260,7 +263,7 @@ def test_scrape_keyword_accepts_missing_next_button_on_confirmed_last_page(monke
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(
+        lambda page, seen, stats, **kwargs: PageParseResult(
             records=[["标题", "", "", "", "https://example.test/1"]],
             rows_seen=1,
         ),
@@ -289,7 +292,7 @@ def test_scrape_keyword_rejects_missing_next_button_without_last_page_proof(monk
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(
+        lambda page, seen, stats, **kwargs: PageParseResult(
             records=[["标题", "", "", "", "https://example.test/1"]],
             rows_seen=1,
         ),
@@ -328,7 +331,10 @@ def test_scrape_keyword_rejects_page_when_all_titles_are_unreadable(monkeypatch)
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(rows_seen=2, skipped_no_title=2),
+        lambda page, seen, stats, **kwargs: PageParseResult(
+            rows_seen=2,
+            skipped_no_title=2,
+        ),
     )
 
     class Page:
@@ -368,7 +374,7 @@ def test_scrape_keyword_resumes_after_completed_page(monkeypatch):
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(
+        lambda page, seen, stats, **kwargs: PageParseResult(
             records=[["新标题", "", "", "", "https://example.test/new"]],
             rows_seen=1,
         ),
@@ -431,7 +437,7 @@ def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_changes(monkeyp
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(
+        lambda page, seen, stats, **kwargs: PageParseResult(
             records=[["新首页标题", "", "", "", "https://example.test/fresh"]],
             rows_seen=1,
         ),
@@ -471,7 +477,7 @@ def test_detail_cancellation_discards_current_page_and_checkpoint(monkeypatch):
     monkeypatch.setattr(
         pages,
         "parse_result_rows",
-        lambda page, seen, stats: PageParseResult(
+        lambda page, seen, stats, **kwargs: PageParseResult(
             records=[
                 ["论文一", "", "", "", "https://example.test/1"],
                 ["论文二", "", "", "", "https://example.test/2"],
