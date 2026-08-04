@@ -48,23 +48,29 @@ def parse_result_rows(
     include_citation: bool = False,
     citation_log_ref: str = "",
     log_titles: bool = False,
-    cancel_requested: Callable[[], bool] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> PageParseResult:
     result = PageParseResult()
     none_text_fields: set[str] = set()
+    if _stop_requested(stop_requested):
+        result.cancelled = True
+        return result
+
     rows = query_all(page, "result_rows")
     result.rows_seen = len(rows)
-    stats["rows_seen"] += result.rows_seen
+    pending_seen = set(seen)
+    pending_stats = {key: 0 for key in stats}
+    pending_stats["rows_seen"] = result.rows_seen
 
     for row_index, row in enumerate(rows, start=1):
-        if cancel_requested is not None and cancel_requested():
+        if _stop_requested(stop_requested):
             result.cancelled = True
-            break
+            return result
         try:
             title_el = query_first(row, "title")
             if not title_el:
                 result.skipped_no_title += 1
-                stats["skipped_no_title"] += 1
+                pending_stats["skipped_no_title"] += 1
                 continue
             title = title_el.inner_text().strip()
 
@@ -93,33 +99,52 @@ def parse_result_rows(
                 none_text_fields.add("date")
             date = (date_text or "").strip()
 
+            if _stop_requested(stop_requested):
+                result.cancelled = True
+                return result
+
             dedup_key = detail_url if detail_url else (title, source, date)
-            if dedup_key in seen:
+            if dedup_key in pending_seen:
                 result.duplicates += 1
-                stats["duplicates"] += 1
+                pending_stats["duplicates"] += 1
                 continue
-            seen.add(dedup_key)
 
             record = [title, authors, source, date, detail_url]
-            count_missing_fields(record, stats)
             if include_citation:
                 log_ref = f"{citation_log_ref} row={row_index}".strip()
                 if log_titles:
                     log_ref = f"{log_ref} title={title!r}"
                 citation = fetch_gbt_citation(page, row, log_ref=log_ref)
-                if cancel_requested is not None and cancel_requested():
+                if _stop_requested(stop_requested):
                     result.cancelled = True
-                    break
+                    return result
                 record.append(citation)
                 if citation:
                     result.citation_success += 1
                 else:
                     result.citation_failed += 1
+
+            if _stop_requested(stop_requested):
+                result.cancelled = True
+                return result
+            pending_seen.add(dedup_key)
+            count_missing_fields(record, pending_stats)
             result.records.append(record)
         except PlaywrightError:
+            if _stop_requested(stop_requested):
+                result.cancelled = True
+                return result
             result.parse_errors += 1
-            stats["row_parse_errors"] += 1
+            pending_stats["row_parse_errors"] += 1
             continue
+
+    if _stop_requested(stop_requested):
+        result.cancelled = True
+        return result
+
+    seen.update(pending_seen)
+    for key, value in pending_stats.items():
+        stats[key] += value
 
     if none_text_fields:
         _logger.warning(
@@ -128,6 +153,10 @@ def parse_result_rows(
             result.rows_seen,
         )
     return result
+
+
+def _stop_requested(callback: Callable[[], bool] | None) -> bool:
+    return bool(callback is not None and callback())
 
 
 def record_dedup_key(record: list) -> Any:

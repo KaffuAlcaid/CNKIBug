@@ -29,6 +29,10 @@ class SaveResult:
     keyword_txt_path: str | None = None
     keyword_txt_failed: bool = False
 
+    @property
+    def has_failures(self) -> bool:
+        return bool(self.failed or self.keyword_txt_failed)
+
     def record(
         self,
         saved_path: str | None,

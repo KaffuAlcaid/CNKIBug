@@ -52,7 +52,7 @@ def start_progress(task: TaskContext) -> None:
 
 def run_keywords(task: TaskContext) -> None:
     for index, keyword in enumerate(task.keywords, start=1):
-        if task.session.stop_requested:
+        if task.session.acknowledge_stop_request(reason="用户请求停止"):
             break
         _run_keyword(task, keyword, index)
 
@@ -62,6 +62,9 @@ def _run_keyword(
     keyword: str,
     index: int,
 ) -> None:
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
+        return
+
     keyword_ref = keyword_log_ref(
         keyword,
         index,
@@ -79,6 +82,8 @@ def _run_keyword(
     )
     _update_keyword_progress(task, keyword, index, completed_page)
     if not _wait_between_keywords(task, index, len(task.keywords)):
+        return
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
         return
     historical_records = list(task.all_results.get(keyword, []))
     on_page_complete = _checkpoint_callback(
@@ -98,6 +103,8 @@ def _run_keyword(
     )
     _merge_historical_records(result, historical_records, keyword_ref)
     _record_keyword_result(task, result, keyword_ref)
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
+        return
     _save_incremental(task, index)
 
 
@@ -166,7 +173,7 @@ def _update_keyword_progress(
 
 def _wait_between_keywords(task: TaskContext, index: int, total: int) -> bool:
     if index <= 1:
-        return not task.session.stop_requested
+        return not task.session.acknowledge_stop_request(reason="用户请求停止")
     wait_sec = random.uniform(5, 8)
     _logger.info(
         "关键词间隔等待: next_keyword_index=%d/%d wait_sec=%.1f",
@@ -175,7 +182,14 @@ def _wait_between_keywords(task: TaskContext, index: int, total: int) -> bool:
         wait_sec,
     )
     with task.events.activity(f"少女祈祷中... 等待 {wait_sec:.1f} 秒"):
-        return task.session.wait_interruptibly(wait_sec)
+        completed = task.session.wait_interruptibly(wait_sec)
+    if not completed:
+        _logger.info(
+            "关键词间隔等待被用户停止: next_keyword_index=%d/%d",
+            index,
+            total,
+        )
+    return completed
 
 
 def _checkpoint_callback(

@@ -100,6 +100,16 @@ def _scrape_keyword_attempt(
         len(results),
     )
 
+    if session.acknowledge_stop_request():
+        return _result(
+            keyword,
+            keyword_index,
+            keyword_total,
+            results,
+            STATUS_STOPPED,
+            session.stop_reason or "用户请求停止",
+        )
+
     if start_page > max_pages:
         status = STATUS_SUCCESS if results else STATUS_FAILED
         reason = "" if results else "页级断点没有有效记录"
@@ -120,6 +130,15 @@ def _scrape_keyword_attempt(
         settings,
         keyword_ref,
     )
+    if session.acknowledge_stop_request():
+        return _result(
+            keyword,
+            keyword_index,
+            keyword_total,
+            results,
+            STATUS_STOPPED,
+            session.stop_reason or search.reason or "用户请求停止",
+        )
     if search.status == SEARCH_STOPPED:
         return _result(
             keyword,

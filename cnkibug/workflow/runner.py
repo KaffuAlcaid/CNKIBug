@@ -72,8 +72,9 @@ def scrape_cnki(
     try:
         with sync_playwright() as playwright:
             try:
-                _open_browser(task, playwright)
-                if not task.session.stop_requested:
+                if not task.session.acknowledge_stop_request(reason="用户请求停止"):
+                    _open_browser(task, playwright)
+                if not task.session.acknowledge_stop_request(reason="用户请求停止"):
                     _warm_up(task)
                 start_progress(task)
                 run_keywords(task)
@@ -126,12 +127,17 @@ def _open_browser(task: TaskContext, playwright) -> None:
 
 
 def _warm_up(task: TaskContext) -> None:
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
+        return
+
     warmup_ok = warmup(task.session, task.settings)
     _logger.info(
         "预热结果: ok=%s stop_requested=%s",
         warmup_ok,
         task.session.stop_requested,
     )
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
+        return
     if not warmup_ok and not task.session.stop_requested:
         task.events.emit(
             "message",
@@ -143,4 +149,6 @@ def _warm_up(task: TaskContext) -> None:
             _logger.warning("用户选择在预热失败后停止抓取")
         else:
             _logger.info("用户选择在预热失败后继续抓取")
+    if task.session.acknowledge_stop_request(reason="用户请求停止"):
+        return
     task.session.wait_interruptibly(random.uniform(2, 4))

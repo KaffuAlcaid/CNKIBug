@@ -11,7 +11,9 @@ from typing import Any
 from ..core.runtime import RuntimePaths
 
 
-APP_DATA_DIR_NAME = "CNKIBug"
+APP_DATA_DIR_NAME = "CNKIBug-data"
+LEGACY_APP_DATA_DIR_NAME = "CNKIBug"
+LEGACY_RUNTIME_ENTRIES = ("config.json", "cache", "log", "status")
 CONFIG_VERSION = 2
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -72,7 +74,9 @@ def init_runtime(
     configure_logging: bool = True,
 ) -> RuntimeState:
     paths = get_runtime_paths(program_dir)
-    config, events = load_or_create_config(paths)
+    migration_events = _migrate_legacy_runtime_data(paths)
+    config, config_events = load_or_create_config(paths)
+    events = [*migration_events, *config_events]
     log_path = build_log_path(paths)
 
     if configure_logging:
@@ -90,6 +94,38 @@ def init_runtime(
         logger.info("运行数据目录: %s", paths.data_dir)
 
     return RuntimeState(paths=paths, config=config.copy(), log_path=log_path, events=list(events))
+
+
+def _migrate_legacy_runtime_data(paths: RuntimePaths) -> list[tuple[str, str]]:
+    legacy_dir = paths.program_dir / LEGACY_APP_DATA_DIR_NAME
+    if not legacy_dir.is_dir():
+        return []
+
+    events: list[tuple[str, str]] = []
+    for name in LEGACY_RUNTIME_ENTRIES:
+        source = legacy_dir / name
+        if not source.exists():
+            continue
+
+        destination = paths.data_dir / name
+        if destination.exists():
+            events.append((
+                "WARNING",
+                f"旧运行数据未迁移，目标已存在: {source} -> {destination}",
+            ))
+            continue
+
+        try:
+            paths.data_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+        except OSError as error:
+            events.append((
+                "WARNING",
+                f"旧运行数据迁移失败: {source} -> {destination} ({error})",
+            ))
+        else:
+            events.append(("INFO", f"已迁移旧运行数据: {source} -> {destination}"))
+    return events
 
 
 def cleanup_runtime_history(

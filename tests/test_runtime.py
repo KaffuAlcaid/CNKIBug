@@ -10,12 +10,61 @@ from cnkibug.fileio import paths as file_paths
 def test_init_runtime_creates_dirs_and_default_config(tmp_path):
     state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
 
-    assert state.paths.data_dir == tmp_path / "CNKIBug"
+    assert state.paths.data_dir == tmp_path / "CNKIBug-data"
     assert state.paths.cache_dir.is_dir()
     assert state.paths.log_dir.is_dir()
     assert state.paths.status_dir.is_dir()
     assert state.paths.config_path.is_file()
     assert json.loads(state.paths.config_path.read_text(encoding="utf-8")) == runtime.DEFAULT_CONFIG
+
+
+def test_runtime_data_dir_name_does_not_collide_with_source_package():
+    assert runtime.APP_DATA_DIR_NAME.casefold() != "cnkibug".casefold()
+
+
+def test_init_runtime_migrates_known_legacy_data_without_moving_other_files(tmp_path):
+    legacy_dir = tmp_path / runtime.LEGACY_APP_DATA_DIR_NAME
+    legacy_config = runtime.DEFAULT_CONFIG.copy()
+    legacy_config["log_level"] = "WARNING"
+    files = {
+        "config.json": json.dumps(legacy_config),
+        "cache/cookies": "{}",
+        "log/old.log": "old log",
+        "status/old.json": "{}",
+    }
+    for relative_path, content in files.items():
+        path = legacy_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    source_marker = legacy_dir / "__init__.py"
+    source_marker.write_text("source package marker", encoding="utf-8")
+
+    state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
+
+    assert state.config["log_level"] == "WARNING"
+    for relative_path in files:
+        assert not (legacy_dir / relative_path).exists()
+        assert (state.paths.data_dir / relative_path).exists()
+    assert source_marker.read_text(encoding="utf-8") == "source package marker"
+    assert any("已迁移旧运行数据" in message for _, message in state.events)
+
+
+def test_init_runtime_does_not_overwrite_existing_data_during_migration(tmp_path):
+    legacy_dir = tmp_path / runtime.LEGACY_APP_DATA_DIR_NAME
+    legacy_dir.mkdir()
+    legacy_config = runtime.DEFAULT_CONFIG.copy()
+    legacy_config["log_level"] = "WARNING"
+    (legacy_dir / "config.json").write_text(json.dumps(legacy_config), encoding="utf-8")
+
+    paths = runtime.get_runtime_paths(tmp_path)
+    paths.data_dir.mkdir()
+    paths.config_path.write_text(json.dumps(runtime.DEFAULT_CONFIG), encoding="utf-8")
+
+    state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
+
+    assert state.config["log_level"] == "INFO"
+    assert (legacy_dir / "config.json").exists()
+    assert any("目标已存在" in message for _, message in state.events)
 
 
 def test_init_runtime_does_not_fallback_when_program_dir_is_unwritable(monkeypatch, tmp_path):
@@ -31,7 +80,7 @@ def test_init_runtime_does_not_fallback_when_program_dir_is_unwritable(monkeypat
         runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
 
     assert len(captured_paths) == 1
-    assert captured_paths[0].data_dir == tmp_path / "CNKIBug"
+    assert captured_paths[0].data_dir == tmp_path / "CNKIBug-data"
 
 
 def test_init_runtime_exposes_config_repair_events(tmp_path):
@@ -117,7 +166,7 @@ def test_build_log_path_uses_log_dir_and_current_day(tmp_path):
     paths = runtime.get_runtime_paths(tmp_path)
     log_path = runtime.build_log_path(paths, datetime(2026, 6, 30, 12, 0, 0))
 
-    assert log_path == tmp_path / "CNKIBug" / "log" / "cnkibug_20260630.log"
+    assert log_path == tmp_path / "CNKIBug-data" / "log" / "cnkibug_20260630.log"
 
 
 def test_cleanup_runtime_history_deletes_only_known_historical_files(tmp_path):

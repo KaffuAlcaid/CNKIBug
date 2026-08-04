@@ -998,6 +998,13 @@ class CNKIBugApp:
             self._time_var.set(f"实际用时：{_format_duration(self._actual_seconds)}")
         elif name == "export_finished":
             result = payload["result"]
+            if result.failed:
+                self._append_log(
+                    f"本轮有 {result.failed} 个结果文件未能成功保存。",
+                    "error",
+                )
+            if result.keyword_txt_failed:
+                self._append_log("关键词 TXT 未能成功保存，详情见日志。", "error")
             for path in result.saved_paths:
                 self._append_log(f"已保存：{path}", "success")
             if result.keyword_txt_path:

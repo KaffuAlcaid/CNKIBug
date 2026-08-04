@@ -10,7 +10,7 @@ from cnkibug.browser import cache as session_cache
 
 def test_prepare_cookie_state_uses_fresh_cache(tmp_path):
     paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
-    path = tmp_path / "CNKIBug" / "cache" / "cookies"
+    path = tmp_path / "CNKIBug-data" / "cache" / "cookies"
     path.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
     os.utime(path, (1000, 1000))
 
@@ -20,7 +20,7 @@ def test_prepare_cookie_state_uses_fresh_cache(tmp_path):
 
 def test_prepare_cookie_state_deletes_expired_cache(tmp_path):
     paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
-    path = tmp_path / "CNKIBug" / "cache" / "cookies"
+    path = tmp_path / "CNKIBug-data" / "cache" / "cookies"
     path.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
     os.utime(path, (1000, 1000))
 
@@ -35,7 +35,7 @@ def test_prepare_cookie_state_deletes_expired_cache(tmp_path):
 
 def test_prepare_cookie_state_deletes_invalid_cache(tmp_path):
     paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
-    path = tmp_path / "CNKIBug" / "cache" / "cookies"
+    path = tmp_path / "CNKIBug-data" / "cache" / "cookies"
     path.write_text("not-json", encoding="utf-8")
 
     assert session_cache.prepare_cookie_state(True, ttl_hours=12, paths=paths) is None
@@ -51,7 +51,7 @@ def test_prepare_cookie_state_disabled(tmp_path):
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission behavior")
 def test_prepare_cookie_state_tightens_permissions(tmp_path, caplog):
     paths = runtime.init_runtime(program_dir=tmp_path, configure_logging=False).paths
-    path = tmp_path / "CNKIBug" / "cache" / "cookies"
+    path = tmp_path / "CNKIBug-data" / "cache" / "cookies"
     path.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
     path.parent.chmod(0o755)
     path.chmod(0o644)

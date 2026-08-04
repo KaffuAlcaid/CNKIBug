@@ -59,4 +59,4 @@ TXT 必须是 UTF-8 编码，每个非空行是一项。程序会去掉行首和
 
 终端版将 `detail_txt_export` 设为 `true` 后，开启论文详情的任务会额外生成 `cnki_paper_keywords_时间戳.txt`；GUI 可在任务开始前直接勾选。该文件为 UTF-8 BOM、一行一个关键词，保留原始顺序和重复项，可直接重新导入软件。
 
-每轮任务会在 `CNKIBug/status/` 生成 `cnki_task_report_时间戳.json`，其中包含关键词状态、失败原因、记录数、字段缺失、引文和论文详情统计。报告不包含完整论文记录；中止时未执行的关键词标记为 `not_started`。
+每轮任务会在 `CNKIBug-data/status/` 生成 `cnki_task_report_时间戳.json`，其中包含关键词状态、失败原因、记录数、字段缺失、引文和论文详情统计。报告不包含完整论文记录；中止时未执行的关键词标记为 `not_started`。

@@ -12,7 +12,13 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
 from .details import ArticleDetailFetcher
-from .guard import VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify_with_progress, print_page_debug
+from .guard import (
+    VERIFY_CANCELLED,
+    VERIFY_PASSED,
+    VERIFY_TIMEOUT,
+    handle_verify_with_progress,
+    print_page_debug,
+)
 from .metrics import missing_field_text
 from .pagination import (
     get_first_result_href,
@@ -81,8 +87,11 @@ def scrape_result_pages(
     abstracts_present = 0
 
     for current_page in range(start_page, max_pages + 1):
-        if session.stop_requested:
+        if session.acknowledge_stop_request(reason="用户请求停止"):
             break
+
+        page_seen = set(seen)
+        page_stats = dict(stats)
         try:
             events.emit("progress_updated", page=current_page)
             step = process_result_page(
@@ -90,18 +99,24 @@ def scrape_result_pages(
                 settings,
                 keyword_ref=keyword_ref,
                 current_page=current_page,
-                seen=seen,
-                stats=stats,
+                seen=page_seen,
+                stats=page_stats,
                 include_citation=include_citation,
                 detail_fetcher=detail_fetcher,
             )
             if step.parsed is None:
+                if session.acknowledge_stop_request(reason="用户请求停止"):
+                    break
                 incomplete_reason = step.failure_reason
                 break
-            if session.stop_requested:
+            if session.acknowledge_stop_request(reason="用户请求停止"):
                 break
 
             page_parse = step.parsed
+            seen.clear()
+            seen.update(page_seen)
+            stats.clear()
+            stats.update(page_stats)
             citation_success += page_parse.citation_success
             citation_failed += page_parse.citation_failed
             detail_success += page_parse.detail_success
@@ -122,9 +137,10 @@ def scrape_result_pages(
             if on_page_complete is not None:
                 on_page_complete(current_page, list(results))
 
+            if session.acknowledge_stop_request(reason="用户请求停止"):
+                break
+
             if current_page < max_pages:
-                if session.stop_requested:
-                    break
                 advance = advance_result_page(
                     session,
                     settings,
@@ -140,6 +156,8 @@ def scrape_result_pages(
                 break
 
         except PlaywrightError:
+            if session.acknowledge_stop_request(reason="用户请求停止"):
+                break
             if page.is_closed():
                 session.request_stop("浏览器页面已关闭")
                 _logger.warning(
@@ -199,16 +217,15 @@ def process_result_page(
 ) -> PageStepResult:
     page = require_page(session)
     events = session.events
-    if session.stop_requested:
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageStepResult()
+
     try:
         page.wait_for_selector(SELECTOR_RESULT_ROWS, timeout=settings.timeout_selector_ms)
     except PlaywrightTimeoutError:
-        if session.stop_requested:
+        if session.acknowledge_stop_request(reason="用户请求停止"):
             return PageStepResult()
         verify_status = handle_verify_with_progress(page, settings, events)
-        if session.stop_requested:
-            return PageStepResult()
         if verify_status == VERIFY_PASSED:
             try:
                 page.wait_for_selector(
@@ -216,6 +233,8 @@ def process_result_page(
                     timeout=settings.timeout_selector_ms,
                 )
             except PlaywrightTimeoutError:
+                if session.acknowledge_stop_request(reason="用户请求停止"):
+                    return PageStepResult()
                 reason = f"第 {current_page} 页验证通过后仍加载超时"
                 _logger.warning(
                     "验证通过后结果页表格仍等待超时，提前结束关键词: %s page=%d",
@@ -228,6 +247,9 @@ def process_result_page(
                     level="warning",
                 )
                 return PageStepResult(failure_reason=reason)
+        elif verify_status == VERIFY_CANCELLED:
+            session.request_stop("用户请求停止")
+            return PageStepResult()
         elif verify_status == VERIFY_TIMEOUT:
             session.request_stop("安全验证等待超时", verify_timeout=True)
             _logger.warning(
@@ -251,9 +273,16 @@ def process_result_page(
             print_page_debug(page, f"第 {current_page} 页结果表格等待超时", events)
             return PageStepResult(failure_reason=reason)
 
+    if session.acknowledge_stop_request(reason="用户请求停止"):
+        return PageStepResult()
     if not session.wait_interruptibly(random.uniform(2, 5)):
         return PageStepResult()
-    if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
+
+    verify_status = handle_verify_with_progress(page, settings, events)
+    if verify_status == VERIFY_CANCELLED:
+        session.request_stop("用户请求停止")
+        return PageStepResult()
+    if verify_status == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning(
             "结果页解析前安全验证超时: %s page=%d",
@@ -261,10 +290,12 @@ def process_result_page(
             current_page,
         )
         return PageStepResult()
-    if session.stop_requested:
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageStepResult()
 
     actual_page, _ = get_result_page_numbers(page)
+    if session.acknowledge_stop_request(reason="用户请求停止"):
+        return PageStepResult()
     if actual_page is not None and actual_page != current_page:
         reason = f"页面实际为第 {actual_page} 页，与预期第 {current_page} 页不一致"
         _logger.warning(
@@ -290,10 +321,17 @@ def process_result_page(
             "include_citation": True,
             "citation_log_ref": f"{keyword_ref} page={current_page}",
             "log_titles": settings.log_scraped_records,
-            "cancel_requested": lambda: session.stop_requested,
         }
-    page_parse = parse_result_rows(page, seen, stats, **citation_options)
-    if page_parse.cancelled or session.stop_requested:
+    page_parse = parse_result_rows(
+        page,
+        seen,
+        stats,
+        stop_requested=session.acknowledge_stop_request,
+        **citation_options,
+    )
+    if page_parse.cancelled or session.acknowledge_stop_request(
+        reason="用户请求停止"
+    ):
         return PageStepResult()
     if detail_fetcher is not None and not _append_page_details(
         session,
@@ -303,6 +341,8 @@ def process_result_page(
         current_page=current_page,
         log_titles=settings.log_scraped_records,
     ):
+        return PageStepResult()
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageStepResult()
     unreadable_rows = page_parse.skipped_no_title + page_parse.parse_errors
     if page_parse.rows_seen == 0:
@@ -353,7 +393,7 @@ def _append_page_details(
     total = len(page_parse.records)
     try:
         for row_index, record in enumerate(page_parse.records, start=1):
-            if session.stop_requested:
+            if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
             session.events.emit(
                 "progress_updated",
@@ -368,8 +408,9 @@ def _append_page_details(
             if details.verify_timeout:
                 session.request_stop("安全验证等待超时", verify_timeout=True)
                 return False
-            if session.stop_requested:
+            if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
+
             append_article_details(record, details.keywords, details.abstract)
             if details.failed:
                 page_parse.detail_failed += 1
@@ -379,7 +420,10 @@ def _append_page_details(
                 page_parse.keywords_present += 1
             if details.abstract:
                 page_parse.abstracts_present += 1
-        return True
+            if session.acknowledge_stop_request(reason="用户请求停止"):
+                return False
+
+        return not session.acknowledge_stop_request(reason="用户请求停止")
     finally:
         session.events.emit("progress_updated", detail_index=0, detail_total=0)
 
@@ -395,11 +439,16 @@ def advance_result_page(
 ) -> PageAdvanceResult:
     page = require_page(session)
     events = session.events
-    if session.stop_requested:
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageAdvanceResult(STOPPED)
+
     next_btn = query_first(page, "next_page")
+    if session.acknowledge_stop_request(reason="用户请求停止"):
+        return PageAdvanceResult(STOPPED)
     if not next_btn:
         actual_page, total_pages = get_result_page_numbers(page)
+        if session.acknowledge_stop_request(reason="用户请求停止"):
+            return PageAdvanceResult(STOPPED)
         if actual_page is not None and total_pages is not None and actual_page >= total_pages:
             _logger.info(
                 "已确认到达结果末页: %s page=%d actual_page=%d total_pages=%d",
@@ -435,25 +484,34 @@ def advance_result_page(
     old_first_href = get_first_result_href(page)
     old_next_page = next_btn.get_attribute("data-curpage") or ""
     old_current_page, _ = get_result_page_numbers(page)
+    if session.acknowledge_stop_request(reason="用户请求停止"):
+        return PageAdvanceResult(STOPPED)
     next_btn.click(timeout=settings.timeout_selector_ms)
-    if session.stop_requested:
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageAdvanceResult(STOPPED)
     page_advanced = False
     for confirm_attempt in range(1, settings.max_advance_fail + 1):
+        if session.acknowledge_stop_request(reason="用户请求停止"):
+            return PageAdvanceResult(STOPPED)
         if wait_result_page_advanced(
             page,
             old_href=old_first_href,
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
-            stop_requested=lambda: session.stop_requested,
+            stop_requested=session.acknowledge_stop_request,
         ):
+            if session.acknowledge_stop_request(reason="用户请求停止"):
+                return PageAdvanceResult(STOPPED)
             page_advanced = True
             break
-
-        if session.stop_requested:
+        if session.acknowledge_stop_request(reason="用户请求停止"):
             return PageAdvanceResult(STOPPED)
+
         verify_status = handle_verify_with_progress(page, settings, events)
+        if verify_status == VERIFY_CANCELLED:
+            session.request_stop("用户请求停止")
+            return PageAdvanceResult(STOPPED)
         if verify_status == VERIFY_TIMEOUT:
             session.request_stop("安全验证等待超时", verify_timeout=True)
             _logger.warning(
@@ -462,19 +520,19 @@ def advance_result_page(
                 current_page,
             )
             return PageAdvanceResult(STOPPED)
-        if session.stop_requested:
-            return PageAdvanceResult(STOPPED)
         if verify_status == VERIFY_PASSED and wait_result_page_advanced(
             page,
             old_href=old_first_href,
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
-            stop_requested=lambda: session.stop_requested,
+            stop_requested=session.acknowledge_stop_request,
         ):
+            if session.acknowledge_stop_request(reason="用户请求停止"):
+                return PageAdvanceResult(STOPPED)
             page_advanced = True
             break
-        if session.stop_requested:
+        if session.acknowledge_stop_request(reason="用户请求停止"):
             return PageAdvanceResult(STOPPED)
 
         _logger.warning(
@@ -490,6 +548,8 @@ def advance_result_page(
             level="warning",
         )
 
+    if session.acknowledge_stop_request(reason="用户请求停止"):
+        return PageAdvanceResult(STOPPED)
     if not page_advanced:
         reason = f"第 {current_page} 页后翻页结果未确认"
         _logger.warning(
@@ -509,11 +569,15 @@ def advance_result_page(
 
     if not session.wait_interruptibly(random.uniform(1, 2)):
         return PageAdvanceResult(STOPPED)
-    if handle_verify_with_progress(page, settings, events) == VERIFY_TIMEOUT:
+    verify_status = handle_verify_with_progress(page, settings, events)
+    if verify_status == VERIFY_CANCELLED:
+        session.request_stop("用户请求停止")
+        return PageAdvanceResult(STOPPED)
+    if verify_status == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         _logger.warning("翻页后安全验证超时: %s page=%d", keyword_ref, current_page)
         return PageAdvanceResult(STOPPED)
-    if session.stop_requested:
+    if session.acknowledge_stop_request(reason="用户请求停止"):
         return PageAdvanceResult(STOPPED)
     return PageAdvanceResult(ADVANCED)
 

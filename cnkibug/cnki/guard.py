@@ -36,7 +36,6 @@ def handle_verify(
     while "/verify" in page.url:
         if events.cancel_requested():
             _logger.info("安全验证等待被用户停止")
-            events.emit("progress_resumed")
             return VERIFY_CANCELLED
         if waited >= settings.verify_wait_timeout_sec:
             _logger.warning("安全验证等待超时: waited_sec=%d", int(waited))

@@ -118,7 +118,7 @@ def test_task_preview_does_not_warn_at_ten_minutes(monkeypatch, capsys):
 
 def test_detail_preview_shows_txt_config_path(monkeypatch, capsys):
     _patch_inputs(monkeypatch, ["1"])
-    config_path = Path("C:/CNKIBug/config.json")
+    config_path = Path("C:/CNKIBug-data/config.json")
 
     prompts._preview_task(
         ["焊接"],

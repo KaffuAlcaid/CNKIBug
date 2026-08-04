@@ -23,9 +23,28 @@ class ScrapeSession:
 
     @property
     def stop_requested(self) -> bool:
-        return self._stop_requested or bool(
-            self._cancel_event is not None and self._cancel_event.is_set()
-        )
+        return self.acknowledge_stop_request()
+
+    def acknowledge_stop_request(self, reason: str = "用户请求停止") -> bool:
+        if self._stop_requested:
+            return True
+        if not (
+            (self._cancel_event is not None and self._cancel_event.is_set())
+            or self.events.cancel_requested()
+        ):
+            return False
+        self.request_stop(reason)
+        return True
+
+    def wait_interruptibly(self, seconds: float) -> bool:
+        if self.acknowledge_stop_request():
+            return False
+        wait_seconds = max(0.0, seconds)
+        if self._cancel_event is not None:
+            self._cancel_event.wait(wait_seconds)
+        else:
+            time.sleep(wait_seconds)
+        return not self.acknowledge_stop_request()
 
     def request_stop(self, reason: str = "", verify_timeout: bool = False) -> None:
         self._stop_requested = True
@@ -33,16 +52,6 @@ class ScrapeSession:
             self.stop_reason = reason
         if verify_timeout:
             self.verify_timeout = True
-
-    def wait_interruptibly(self, seconds: float) -> bool:
-        """等待指定时间；任务停止时返回 False。"""
-        if self.stop_requested:
-            return False
-        if self._cancel_event is None:
-            time.sleep(seconds)
-        else:
-            self._cancel_event.wait(seconds)
-        return not self.stop_requested
 
 
 def require_page(session: ScrapeSession) -> Any:

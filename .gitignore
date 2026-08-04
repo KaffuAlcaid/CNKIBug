@@ -33,7 +33,13 @@ MANIFEST
 *.spec
 
 # CNKIBug runtime data (config/cache/log created next to run.py or exe)
-/CNKIBug/
+/CNKIBug-data/
+# Known entries from the legacy name; keep user data out of Git during migration.
+/CNKIBug/config.json
+/CNKIBug/config.broken_*.json
+/CNKIBug/cache/
+/CNKIBug/log/
+/CNKIBug/status/
 /.grill/
 
 # Installer logs

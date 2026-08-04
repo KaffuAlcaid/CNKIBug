@@ -83,22 +83,29 @@ def wait_result_page_advanced(
     while time.monotonic() < deadline:
         if stop_requested is not None and stop_requested():
             return False
+
         new_href = get_first_result_href(page)
         if old_href and new_href and new_href != old_href:
             return True
 
+        if stop_requested is not None and stop_requested():
+            return False
+
         new_next_page = get_next_page_marker(page)
         if old_next_page and new_next_page and new_next_page != old_next_page:
             return True
+
+        if stop_requested is not None and stop_requested():
+            return False
 
         if old_current_page is not None:
             new_current_page, _ = get_result_page_numbers(page)
             if new_current_page is not None and new_current_page > old_current_page:
                 return True
 
-        if stop_requested is not None and stop_requested():
-            return False
-        time.sleep(0.25)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.1, remaining))
     return False
 
 

@@ -127,7 +127,7 @@ def test_build_and_save_machine_report_covers_unfinished_keywords(tmp_path):
 
     saved_path = save_task_report(payload, "TS", paths)
 
-    report_path = tmp_path / "CNKIBug" / "status" / "cnki_task_report_TS.json"
+    report_path = tmp_path / "CNKIBug-data" / "status" / "cnki_task_report_TS.json"
     assert saved_path == str(report_path.resolve())
     written = json.loads(report_path.read_text(encoding="utf-8"))
     assert written["schema_version"] == 3

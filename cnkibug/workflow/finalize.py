@@ -71,7 +71,7 @@ def _save_final_results(task: TaskContext) -> tuple[SaveResult, bool]:
             log_save_path=task.settings.log_save_path,
             save_type="final",
         )
-        failed = bool(result.failed)
+        failed = result.has_failures
         task.events.emit(
             "export_finished",
             result=result,
@@ -82,13 +82,15 @@ def _save_final_results(task: TaskContext) -> tuple[SaveResult, bool]:
             _logger.info("最终保存成功: saved_files=%d", len(result.saved_paths))
         _logger.info(
             "抓取任务结束: completed_keywords=%d/%d total_records=%d "
-            "stop_requested=%s save_attempted=%d save_failed=%d",
+            "stop_requested=%s save_attempted=%d save_failed=%d "
+            "keyword_txt_failed=%s",
             len(task.all_results),
             len(task.keywords),
             task.total_records,
             task.session.stop_requested,
             result.attempted,
             result.failed,
+            result.keyword_txt_failed,
         )
         return result, failed
     except KeyboardInterrupt:

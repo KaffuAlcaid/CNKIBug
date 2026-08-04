@@ -41,7 +41,7 @@ class ArticleDetailFetcher:
         self._page: Any | None = None
 
     def fetch(self, url: str, *, log_ref: str) -> ArticleDetails:
-        if self._events.cancel_requested():
+        if self._cancel_requested():
             return ArticleDetails([], "", failed=True)
         if not url.strip():
             _logger.warning("论文详情链接为空: %s", log_ref)
@@ -49,11 +49,15 @@ class ArticleDetailFetcher:
 
         try:
             page = self._get_page()
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
             page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=self._settings.timeout_goto_ms,
             )
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
             verify_status = handle_verify_with_progress(
                 page,
                 self._settings,
@@ -64,6 +68,8 @@ class ArticleDetailFetcher:
                 return ArticleDetails([], "", failed=True, verify_timeout=True)
             if verify_status == VERIFY_CANCELLED:
                 return ArticleDetails([], "", failed=True)
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
 
             try:
                 page.wait_for_selector(
@@ -73,11 +79,15 @@ class ArticleDetailFetcher:
             except PlaywrightTimeoutError:
                 if verify_status != VERIFY_PASSED:
                     raise
+                if self._cancel_requested():
+                    return ArticleDetails([], "", failed=True)
                 page.goto(
                     url,
                     wait_until="domcontentloaded",
                     timeout=self._settings.timeout_goto_ms,
                 )
+                if self._cancel_requested():
+                    return ArticleDetails([], "", failed=True)
                 retry_verify_status = handle_verify_with_progress(
                     page,
                     self._settings,
@@ -88,16 +98,25 @@ class ArticleDetailFetcher:
                     return ArticleDetails([], "", failed=True, verify_timeout=True)
                 if retry_verify_status == VERIFY_CANCELLED:
                     return ArticleDetails([], "", failed=True)
+                if self._cancel_requested():
+                    return ArticleDetails([], "", failed=True)
                 page.wait_for_selector(
                     DETAIL_READY_SELECTOR,
                     timeout=self._settings.timeout_selector_ms,
                 )
 
-            return ArticleDetails(
-                self._extract_keywords(page),
-                self._extract_abstract(page),
-            )
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
+            keywords = self._extract_keywords(page)
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
+            abstract = self._extract_abstract(page)
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
+            return ArticleDetails(keywords, abstract)
         except PlaywrightError as error:
+            if self._cancel_requested():
+                return ArticleDetails([], "", failed=True)
             _logger.warning("论文详情抓取失败: %s error=%s", log_ref, error)
             return ArticleDetails([], "", failed=True)
 
@@ -105,6 +124,9 @@ class ArticleDetailFetcher:
         if self._page is None or self._page.is_closed():
             self._page = self._browser_context.new_page()
         return self._page
+
+    def _cancel_requested(self) -> bool:
+        return self._events.cancel_requested()
 
     @staticmethod
     def _extract_keywords(page: Any) -> list[str]:
