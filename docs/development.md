@@ -27,7 +27,7 @@ CNKIBug/
 │   ├── core/               # 界面无关的核心模型与接口
 │   ├── fileio/             # 文件输入输出
 │   └── workflow/           # 多关键词任务编排与收尾
-├── CNKIBug/                # 运行时数据目录
+├── CNKIBug-data/           # 运行时数据目录
 │   ├── config.json         # 用户配置
 │   ├── cache/              # 会话与断点缓存
 │   ├── log/                # 运行日志

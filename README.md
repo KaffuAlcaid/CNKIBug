@@ -1,9 +1,9 @@
 # CNKIBug
 
-> 中国知网（CNKI）论文信息批量抓取工具。Windows 提供 GUI 和终端两个独立 `.exe`；Linux 可通过源码启动 GUI 或终端版本，macOS 继续支持源码终端版。
+> 中国知网（CNKI）论文信息批量抓取工具。Windows 提供 GUI 和终端两个独立 `.exe`；Linux 可通过源码启动 GUI 或终端版本；macOS 可尝试通过源码运行终端版，当前不在正式支持范围。
 
 ![Python](https://img.shields.io/badge/Python-3.10--3.14-blue?logo=python)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Version](https://img.shields.io/github/v/release/KaffuAlcaid/CNKIBug?color=orange&label=Version)
 
@@ -49,10 +49,20 @@
 2. 确保电脑已安装 **Microsoft Edge**（Win10/11 通常已预装）
 3. 启动后输入检索项，按界面提示确认任务
 4. 手动通过知网滑块验证
+5. 抓取完成后，在任务中选择的保存目录查看 Excel 或 CSV；配置、日志和任务报告保存在启动文件旁的 `CNKIBug-data/`
 
 ### 方式二：源码运行（Linux / macOS 用户或开发者）
 
-终端版：
+先取得完整源码并进入项目根目录：
+
+```bash
+git clone https://github.com/KaffuAlcaid/CNKIBug.git
+cd CNKIBug
+```
+
+也可下载 GitHub 提供的 Source code 压缩包，解压后进入项目根目录。
+
+#### Linux 终端版
 
 ```bash
 pip install -e .
@@ -60,7 +70,7 @@ playwright install chromium
 python run.py
 ```
 
-GUI 版（当前用于 Linux 源码运行和开发）：
+#### Linux GUI 版
 
 ```bash
 pip install -e ".[gui]"
@@ -68,9 +78,19 @@ playwright install chromium
 python run_gui.py
 ```
 
-Release 中单独提供的 `source-tui.tar.gz` 只包含终端版源码，不包含 `run_gui.py` 和 `cnkibug/gui/`。
+#### macOS 终端版（非正式支持）
 
-> 必须有图形桌面（X11 / Wayland）完成滑块验证，无法在纯无头服务器运行。
+```bash
+pip install -e .
+playwright install chromium
+python run.py
+```
+
+macOS 当前未纳入正式测试和支持范围。Release 中单独提供的 `CNKIBug-<版本>-source-tui.tar.gz` 只包含终端版源码，不包含 `run_gui.py` 和 `cnkibug/gui/`。
+
+浏览器启动并完成滑块验证后，程序会将 Excel 或 CSV 写入任务中选择的保存目录；配置、日志和任务报告保存在项目根目录的 `CNKIBug-data/`。
+
+> 源码运行需要可用的图形桌面完成滑块验证，Linux 使用 X11 / Wayland；无法在纯无头服务器运行。
 
 ### 更多说明
 
@@ -84,7 +104,7 @@ Release 中单独提供的 `source-tui.tar.gz` 只包含终端版源码，不包
 |---------------|--------------|--------------|
 | Windows 10/11 | `.exe` 或源码运行 | `.exe` 或源码运行 |
 | Linux         | 源码运行         | 源码运行         |
-| macOS         | 不作为正式支持范围    | 源码运行         |
+| macOS         | 不支持          | 源码运行（非正式支持）  |
 
 | 项目     | 要求                                                                                      |
 |--------|-----------------------------------------------------------------------------------------|

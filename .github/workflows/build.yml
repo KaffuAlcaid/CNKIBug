@@ -103,7 +103,7 @@ jobs:
           VERSION="$(python -c 'from cnkibug.core.version import APP_VERSION; print(APP_VERSION)')"
           ARCHIVE="dist/CNKIBug-${VERSION}-source-tui.tar.gz"
           git archive --format=tar --prefix="CNKIBug-${VERSION}/" HEAD -- \
-            LICENSE README.md pyproject.toml run.py cnkibug \
+            LICENSE README.md pyproject.toml run.py logo.png docs cnkibug \
             ':(exclude)cnkibug/gui' | gzip -9 > "$ARCHIVE"
           if tar -tzf "$ARCHIVE" | grep -Eq '(^|/)(run_gui.py|cnkibug/gui/)'; then
             echo "GUI files were included in the TUI source archive" >&2
