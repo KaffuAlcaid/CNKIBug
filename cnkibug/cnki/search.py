@@ -14,6 +14,7 @@ from ..core.settings import ScraperSettings
 from ..browser.session import ScrapeSession, require_page
 from .guard import (
     VERIFY_CANCELLED,
+    VERIFY_PAGE_CLOSED,
     VERIFY_TIMEOUT,
     handle_verify,
     handle_verify_with_progress,
@@ -59,6 +60,9 @@ def _wait_without_session(events: EventSink, seconds: float) -> bool:
 
 
 def _verify_stop_reason(session: ScrapeSession, verify_status: str) -> str:
+    if verify_status == VERIFY_PAGE_CLOSED:
+        session.request_stop("浏览器页面已关闭")
+        return "浏览器页面已关闭"
     if verify_status == VERIFY_TIMEOUT:
         session.request_stop("安全验证等待超时", verify_timeout=True)
         return "安全验证等待超时"
@@ -145,6 +149,9 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
         if session.acknowledge_stop_request():
             _logger.warning("预热因用户停止结束")
             return False
+        if session.acknowledge_page_closed(page):
+            _logger.warning("预热因浏览器页面关闭而停止")
+            return False
         _logger.warning("预热未完全成功，继续正式抓取: %s", warmup_err)
         events.emit(
             "message",
@@ -229,16 +236,20 @@ def run_keyword_search(
     except PlaywrightTimeoutError:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if session.acknowledge_page_closed(page):
+            return _stopped_result(session)
         _logger.warning("关键词首页预热超时，跳过: %s", keyword_ref)
         events.emit("message", text="[!] 预热请求超时，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "首页预热超时")
     except PlaywrightError as exc:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if session.acknowledge_page_closed(page):
+            return _stopped_result(session)
         _logger.warning("关键词首页预热失败，跳过: %s error=%s", keyword_ref, exc)
         events.emit("message", text=f"[!] 预热请求失败: {exc}，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "首页预热失败")
-    if session.acknowledge_stop_request():
+    if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
     stop_reason = _verify_stop_reason(
         session,
@@ -255,16 +266,20 @@ def run_keyword_search(
     except PlaywrightTimeoutError:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if session.acknowledge_page_closed(page):
+            return _stopped_result(session)
         _logger.warning("检索页加载超时，跳过关键词: %s", keyword_ref)
         events.emit("message", text="[!] 检索页加载超时，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "检索页加载超时")
     except PlaywrightError as exc:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if session.acknowledge_page_closed(page):
+            return _stopped_result(session)
         _logger.warning("检索页加载失败，跳过关键词: %s error=%s", keyword_ref, exc)
         events.emit("message", text=f"[!] 检索页加载失败: {exc}，跳过该关键词。", level="warning")
         return SearchResult(SEARCH_FAILED, "检索页加载失败")
-    if session.acknowledge_stop_request():
+    if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
     stop_reason = _verify_stop_reason(
         session,
@@ -274,10 +289,17 @@ def run_keyword_search(
         _logger.warning("关键词因检索页安全验证停止: %s reason=%s", keyword_ref, stop_reason)
         return SearchResult(SEARCH_STOPPED, stop_reason)
 
-    if session.acknowledge_stop_request():
+    if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
-    submit_search(page, keyword, settings, events)
-    if session.acknowledge_stop_request():
+    try:
+        submit_search(page, keyword, settings, events)
+    except PlaywrightError:
+        if session.acknowledge_stop_request():
+            return _stopped_result(session)
+        if session.acknowledge_page_closed(page):
+            return _stopped_result(session)
+        raise
+    if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
     _logger.info("关键词检索已提交: %s", keyword_ref)
     stop_reason = _verify_stop_reason(
@@ -289,12 +311,14 @@ def run_keyword_search(
         return SearchResult(SEARCH_STOPPED, stop_reason)
 
     while True:
-        if session.acknowledge_stop_request():
+        if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
             return _stopped_result(session)
         try:
             outcome = wait_search_outcome(page, settings)
         except PlaywrightTimeoutError:
             if session.acknowledge_stop_request():
+                return _stopped_result(session)
+            if session.acknowledge_page_closed(page):
                 return _stopped_result(session)
             _logger.warning("关键词结果加载超时，跳过: %s", keyword_ref)
             print_page_debug(page, f"关键词「{keyword}」结果加载超时", events)
@@ -305,7 +329,7 @@ def run_keyword_search(
             )
             return SearchResult(SEARCH_FAILED, "结果加载超时")
 
-        if session.acknowledge_stop_request():
+        if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
             return _stopped_result(session)
         if outcome != "verify":
             return SearchResult(outcome)

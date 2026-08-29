@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urljoin
 
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
@@ -17,7 +18,7 @@ from .models import (
     make_keyword_result,
 )
 from .pages import scrape_result_pages
-from .pagination import get_first_result_title
+from .pagination import get_first_result_href, get_first_result_title
 from .results import record_dedup_key
 from .resume import position_after_checkpoint
 from .search import (
@@ -303,13 +304,25 @@ def _restore_checkpoint(
         start_page,
         len(results),
     )
-    expected_first_title = str(results[0][0]).strip() if results and results[0] else ""
+    if session.acknowledge_page_closed(page):
+        return False
+    first_record = results[0] if results else []
+    expected_first_title = str(first_record[0]).strip() if first_record else ""
+    expected_first_url = str(first_record[4]).strip() if len(first_record) > 4 else ""
     current_first_title = get_first_result_title(page)
-    checkpoint_matches = not (
-        expected_first_title
-        and current_first_title
-        and expected_first_title != current_first_title
+    current_first_href = get_first_result_href(page)
+    current_first_url = (
+        urljoin(str(page.url), current_first_href)
+        if current_first_href
+        else ""
     )
+    if session.acknowledge_page_closed(page):
+        return False
+    checkpoint_matches = bool(expected_first_title or expected_first_url)
+    if expected_first_title:
+        checkpoint_matches = checkpoint_matches and current_first_title == expected_first_title
+    if expected_first_url:
+        checkpoint_matches = checkpoint_matches and current_first_url == expected_first_url
     if not checkpoint_matches:
         _logger.warning(
             "页级恢复首页锚点变化，将从第一页重抓: %s completed_page=%d",

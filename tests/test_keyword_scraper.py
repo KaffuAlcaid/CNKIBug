@@ -1,10 +1,20 @@
 from threading import Event
 from types import SimpleNamespace
 
+import pytest
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from cnkibug.browser.session import ScrapeSession
 from cnkibug.cnki import guard, keyword as keyword_scraper, pages, search
 from cnkibug.cnki.details import ArticleDetails
-from cnkibug.cnki.guard import VERIFY_CANCELLED, VERIFY_NONE, VERIFY_PASSED, VERIFY_TIMEOUT
+from cnkibug.cnki.guard import (
+    VERIFY_CANCELLED,
+    VERIFY_NONE,
+    VERIFY_PAGE_CLOSED,
+    VERIFY_PASSED,
+    VERIFY_TIMEOUT,
+)
 from cnkibug.cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_STOPPED, STATUS_SUCCESS
 from cnkibug.cnki.results import PageParseResult
 from cnkibug.cnki.search import SEARCH_RESULTS, SEARCH_STOPPED, SearchResult
@@ -71,6 +81,96 @@ def test_keyword_search_stops_after_verify_is_cancelled(monkeypatch):
     result = search.run_keyword_search(session, "焊接", _settings(), "keyword=<hidden>")
 
     assert result.status == SEARCH_STOPPED
+
+
+@pytest.mark.parametrize("closed_step", ["home", "search", "submit"])
+def test_keyword_search_stops_when_navigation_page_is_closed(monkeypatch, closed_step):
+    class Page:
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+    page = Page()
+    session = ScrapeSession()
+    session.page = page
+
+    def close_page(*args, **kwargs):
+        page.closed = True
+        raise PlaywrightError("Target page, context or browser has been closed")
+
+    monkeypatch.setattr(
+        search,
+        "open_home_page",
+        close_page if closed_step == "home" else lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        search,
+        "handle_verify_with_progress",
+        lambda *args, **kwargs: VERIFY_NONE,
+    )
+    monkeypatch.setattr(
+        search,
+        "open_search_page",
+        close_page if closed_step == "search" else lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        search,
+        "submit_search",
+        close_page if closed_step == "submit" else lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(search, "wait_search_outcome", lambda *args, **kwargs: "no_content")
+
+    result = search.run_keyword_search(session, "焊接", _settings(), "keyword=<hidden>")
+
+    assert result.status == SEARCH_STOPPED
+    assert result.reason == "浏览器页面已关闭"
+    assert session.stop_requested is True
+
+
+@pytest.mark.parametrize("closed_step", ["home", "search", "outcome"])
+def test_keyword_search_treats_closed_page_timeout_as_stop(monkeypatch, closed_step):
+    class Page:
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+    page = Page()
+    session = ScrapeSession()
+    session.page = page
+
+    def close_page(*args, **kwargs):
+        page.closed = True
+        raise PlaywrightTimeoutError("Timeout while page was closing")
+
+    monkeypatch.setattr(
+        search,
+        "open_home_page",
+        close_page if closed_step == "home" else lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        search,
+        "handle_verify_with_progress",
+        lambda *args, **kwargs: VERIFY_NONE,
+    )
+    monkeypatch.setattr(
+        search,
+        "open_search_page",
+        close_page if closed_step == "search" else lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(search, "submit_search", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        search,
+        "wait_search_outcome",
+        close_page if closed_step == "outcome" else lambda *args, **kwargs: "no_content",
+    )
+
+    result = search.run_keyword_search(session, "焊接", _settings(), "keyword=<hidden>")
+
+    assert result.status == SEARCH_STOPPED
+    assert result.reason == "浏览器页面已关闭"
+    assert session.stop_requested is True
 
 
 def test_wait_search_outcome_detects_verify_url():
@@ -160,6 +260,29 @@ def test_verify_wait_stops_promptly_when_gui_requests_cancellation(monkeypatch):
     result = guard.handle_verify_with_progress(page, _settings(), Events())
 
     assert result == VERIFY_CANCELLED
+    assert recorded == ["progress_paused", "verify_required", "progress_resumed"]
+
+
+def test_verify_wait_stops_when_page_is_closed(monkeypatch):
+    recorded = []
+
+    class Page:
+        url = "https://kns.cnki.net/verify"
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+    class Events(EventSink):
+        def emit(self, name, **payload):
+            recorded.append(name)
+
+    page = Page()
+    monkeypatch.setattr(guard.time, "sleep", lambda seconds: setattr(page, "closed", True))
+
+    result = guard.handle_verify_with_progress(page, _settings(), Events())
+
+    assert result == VERIFY_PAGE_CLOSED
     assert recorded == ["progress_paused", "verify_required", "progress_resumed"]
 
 
@@ -364,6 +487,11 @@ def test_scrape_keyword_resumes_after_completed_page(monkeypatch):
     _patch_search_setup(monkeypatch)
     monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
     monkeypatch.setattr(keyword_scraper, "get_first_result_title", lambda page: "旧标题")
+    monkeypatch.setattr(
+        keyword_scraper,
+        "get_first_result_href",
+        lambda page: "https://example.test/old",
+    )
     positioned = []
     monkeypatch.setattr(
         keyword_scraper,
@@ -428,10 +556,33 @@ def test_scrape_keyword_finishes_from_last_page_checkpoint_without_network():
     assert result.records == records
 
 
-def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_changes(monkeypatch, caplog):
+@pytest.mark.parametrize(
+    ("current_title", "current_href"),
+    [
+        ("新首页标题", "https://example.test/old"),
+        ("", "https://example.test/old"),
+        ("旧首页标题", ""),
+        ("旧首页标题", "https://example.test/changed"),
+    ],
+)
+def test_scrape_keyword_logs_and_restarts_when_checkpoint_anchor_is_invalid(
+    monkeypatch,
+    caplog,
+    current_title,
+    current_href,
+):
     _patch_search_setup(monkeypatch)
     monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
-    monkeypatch.setattr(keyword_scraper, "get_first_result_title", lambda page: "新首页标题")
+    monkeypatch.setattr(
+        keyword_scraper,
+        "get_first_result_title",
+        lambda page: current_title,
+    )
+    monkeypatch.setattr(
+        keyword_scraper,
+        "get_first_result_href",
+        lambda page: current_href,
+    )
     monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
     monkeypatch.setattr(pages, "query_first", lambda page, group: None)
     monkeypatch.setattr(
@@ -515,5 +666,98 @@ def test_detail_cancellation_discards_current_page_and_checkpoint(monkeypatch):
     )
 
     assert result.status == STATUS_STOPPED
+    assert result.records == []
+    assert checkpoints == []
+
+
+def test_closed_page_during_page_parse_discards_current_page_and_checkpoint(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(
+        guard,
+        "handle_verify",
+        lambda page, settings, events=None: VERIFY_NONE,
+    )
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+        closed = False
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+    page = Page()
+
+    def parse_result_rows(page, seen, stats, *, stop_requested, **kwargs):
+        page.closed = True
+        assert stop_requested() is True
+        return PageParseResult(
+            records=[["不应提交", "", "", "", "https://example.test/1"]],
+            rows_seen=1,
+            cancelled=True,
+        )
+
+    monkeypatch.setattr(pages, "parse_result_rows", parse_result_rows)
+    session = ScrapeSession()
+    session.page = page
+    checkpoints = []
+
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        1,
+        _settings(),
+        include_citation=True,
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
+
+    assert result.status == STATUS_STOPPED
+    assert result.reason == "浏览器页面已关闭"
+    assert result.records == []
+    assert checkpoints == []
+
+
+def test_closed_page_after_page_parse_discards_current_page_and_checkpoint(monkeypatch):
+    _patch_search_setup(monkeypatch)
+    monkeypatch.setattr(guard, "handle_verify", lambda page, settings, events=None: VERIFY_NONE)
+    monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 1))
+
+    class Page:
+        url = "https://kns.cnki.net/kns8s/"
+        closed = False
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+    page = Page()
+
+    def parse_result_rows(*args, **kwargs):
+        page.closed = True
+        return PageParseResult(
+            records=[["不应提交", "", "", "", "https://example.test/1"]],
+            rows_seen=1,
+        )
+
+    monkeypatch.setattr(pages, "parse_result_rows", parse_result_rows)
+    session = ScrapeSession()
+    session.page = page
+    checkpoints = []
+
+    result = keyword_scraper.scrape_keyword(
+        session,
+        "焊接",
+        1,
+        _settings(),
+        on_page_complete=lambda page, records: checkpoints.append((page, records)),
+    )
+
+    assert result.status == STATUS_STOPPED
+    assert result.reason == "浏览器页面已关闭"
     assert result.records == []
     assert checkpoints == []

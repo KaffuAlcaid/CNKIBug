@@ -80,6 +80,22 @@ def test_parse_result_rows_extracts_records_and_updates_stats():
     assert stats["skipped_no_title"] == 1
 
 
+def test_parse_result_rows_skips_whitespace_only_title():
+    stats = new_scrape_stats()
+    seen = set()
+    page = _page([
+        _row(" \t\n ", "/detail/blank", ["作者"]),
+    ])
+
+    result = parse_result_rows(page, seen, stats)
+
+    assert result.records == []
+    assert result.rows_seen == 1
+    assert result.skipped_no_title == 1
+    assert stats["skipped_no_title"] == 1
+    assert seen == set()
+
+
 def test_parse_result_rows_counts_missing_fields():
     stats = new_scrape_stats()
     seen = set()

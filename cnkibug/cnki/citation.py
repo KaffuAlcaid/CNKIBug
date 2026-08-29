@@ -57,9 +57,12 @@ def fetch_gbt_citation(
             _logger.warning("GB/T 引文内容为空: %s", log_ref)
         return citation
     except PlaywrightError as exc:
+        if page.is_closed():
+            raise
         _logger.warning("GB/T 引文抓取失败: %s error=%s", log_ref, exc)
         return ""
     finally:
-        if popup is None:
-            popup = page.locator(_QUOTE_POPUP_SELECTOR).last
-        _close_popup(popup, timeout_ms)
+        if not page.is_closed():
+            if popup is None:
+                popup = page.locator(_QUOTE_POPUP_SELECTOR).last
+            _close_popup(popup, timeout_ms)

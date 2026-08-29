@@ -14,6 +14,7 @@ from ..core.settings import ScraperSettings
 from .details import ArticleDetailFetcher
 from .guard import (
     VERIFY_CANCELLED,
+    VERIFY_PAGE_CLOSED,
     VERIFY_PASSED,
     VERIFY_TIMEOUT,
     handle_verify_with_progress,
@@ -87,7 +88,10 @@ def scrape_result_pages(
     abstracts_present = 0
 
     for current_page in range(start_page, max_pages + 1):
-        if session.acknowledge_stop_request(reason="用户请求停止"):
+        if (
+            session.acknowledge_stop_request(reason="用户请求停止")
+            or session.acknowledge_page_closed(page)
+        ):
             break
 
         page_seen = set(seen)
@@ -109,7 +113,10 @@ def scrape_result_pages(
                     break
                 incomplete_reason = step.failure_reason
                 break
-            if session.acknowledge_stop_request(reason="用户请求停止"):
+            if (
+                session.acknowledge_stop_request(reason="用户请求停止")
+                or session.acknowledge_page_closed(page)
+            ):
                 break
 
             page_parse = step.parsed
@@ -158,8 +165,7 @@ def scrape_result_pages(
         except PlaywrightError:
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 break
-            if page.is_closed():
-                session.request_stop("浏览器页面已关闭")
+            if session.acknowledge_page_closed(page):
                 _logger.warning(
                     "浏览器页面已关闭，结束关键词: %s page=%d",
                     keyword_ref,
@@ -226,6 +232,9 @@ def process_result_page(
         if session.acknowledge_stop_request(reason="用户请求停止"):
             return PageStepResult()
         verify_status = handle_verify_with_progress(page, settings, events)
+        if verify_status == VERIFY_PAGE_CLOSED:
+            session.request_stop("浏览器页面已关闭")
+            return PageStepResult()
         if verify_status == VERIFY_PASSED:
             try:
                 page.wait_for_selector(
@@ -234,6 +243,8 @@ def process_result_page(
                 )
             except PlaywrightTimeoutError:
                 if session.acknowledge_stop_request(reason="用户请求停止"):
+                    return PageStepResult()
+                if session.acknowledge_page_closed(page):
                     return PageStepResult()
                 reason = f"第 {current_page} 页验证通过后仍加载超时"
                 _logger.warning(
@@ -279,6 +290,9 @@ def process_result_page(
         return PageStepResult()
 
     verify_status = handle_verify_with_progress(page, settings, events)
+    if verify_status == VERIFY_PAGE_CLOSED:
+        session.request_stop("浏览器页面已关闭")
+        return PageStepResult()
     if verify_status == VERIFY_CANCELLED:
         session.request_stop("用户请求停止")
         return PageStepResult()
@@ -326,11 +340,16 @@ def process_result_page(
         page,
         seen,
         stats,
-        stop_requested=session.acknowledge_stop_request,
+        stop_requested=lambda: (
+            session.acknowledge_stop_request()
+            or session.acknowledge_page_closed(page)
+        ),
         **citation_options,
     )
-    if page_parse.cancelled or session.acknowledge_stop_request(
-        reason="用户请求停止"
+    if (
+        page_parse.cancelled
+        or session.acknowledge_stop_request(reason="用户请求停止")
+        or session.acknowledge_page_closed(page)
     ):
         return PageStepResult()
     if detail_fetcher is not None and not _append_page_details(
@@ -342,7 +361,10 @@ def process_result_page(
         log_titles=settings.log_scraped_records,
     ):
         return PageStepResult()
-    if session.acknowledge_stop_request(reason="用户请求停止"):
+    if (
+        session.acknowledge_stop_request(reason="用户请求停止")
+        or session.acknowledge_page_closed(page)
+    ):
         return PageStepResult()
     unreadable_rows = page_parse.skipped_no_title + page_parse.parse_errors
     if page_parse.rows_seen == 0:
@@ -405,6 +427,11 @@ def _append_page_details(
                 log_ref = f"{log_ref} title={record[0]!r}"
             detail_url = str(record[4]).strip() if len(record) > 4 else ""
             details = detail_fetcher.fetch(detail_url, log_ref=log_ref)
+            if details.page_closed:
+                session.request_stop("浏览器页面已关闭")
+                return False
+            if session.acknowledge_page_closed():
+                return False
             if details.verify_timeout:
                 session.request_stop("安全验证等待超时", verify_timeout=True)
                 return False
@@ -499,7 +526,10 @@ def advance_result_page(
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
-            stop_requested=session.acknowledge_stop_request,
+            stop_requested=lambda: (
+                session.acknowledge_stop_request()
+                or session.acknowledge_page_closed(page)
+            ),
         ):
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return PageAdvanceResult(STOPPED)
@@ -509,6 +539,9 @@ def advance_result_page(
             return PageAdvanceResult(STOPPED)
 
         verify_status = handle_verify_with_progress(page, settings, events)
+        if verify_status == VERIFY_PAGE_CLOSED:
+            session.request_stop("浏览器页面已关闭")
+            return PageAdvanceResult(STOPPED)
         if verify_status == VERIFY_CANCELLED:
             session.request_stop("用户请求停止")
             return PageAdvanceResult(STOPPED)
@@ -526,7 +559,10 @@ def advance_result_page(
             old_next_page=old_next_page,
             old_current_page=old_current_page,
             timeout=settings.timeout_selector_ms,
-            stop_requested=session.acknowledge_stop_request,
+            stop_requested=lambda: (
+                session.acknowledge_stop_request()
+                or session.acknowledge_page_closed(page)
+            ),
         ):
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return PageAdvanceResult(STOPPED)
@@ -570,6 +606,9 @@ def advance_result_page(
     if not session.wait_interruptibly(random.uniform(1, 2)):
         return PageAdvanceResult(STOPPED)
     verify_status = handle_verify_with_progress(page, settings, events)
+    if verify_status == VERIFY_PAGE_CLOSED:
+        session.request_stop("浏览器页面已关闭")
+        return PageAdvanceResult(STOPPED)
     if verify_status == VERIFY_CANCELLED:
         session.request_stop("用户请求停止")
         return PageAdvanceResult(STOPPED)

@@ -2,6 +2,7 @@ import csv
 import os
 
 import openpyxl
+import pytest
 
 from cnkibug.fileio import exporter
 from cnkibug.fileio.exporter import (
@@ -434,28 +435,124 @@ def test_save_all_multi_csv_skips_empty_results(monkeypatch, tmp_path):
     assert list(tmp_path.glob("*.csv")) == []
 
 
-# ============ PermissionError 回退到程序目录（核心防丢逻辑） ============
-def test_try_save_workbook_falls_back_to_cwd_on_permission_error(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)  # 让回退落点 = 临时目录，不污染真实 cwd
+# ============ 原子保存与输出目录失败 ============
+def test_try_save_workbook_uses_same_directory_temporary_file(monkeypatch, tmp_path):
     wb = _build_single_sheet_workbook([["t", "a", "s", "d"]])
-    target = os.path.join(str(tmp_path), "locked", "out.xlsx")
+    target = tmp_path / "out.xlsx"
 
     real_save = wb.save
     calls = []
 
     def fake_save(path):
         calls.append(str(path))
-        if len(calls) == 1:
-            raise PermissionError("file is open in Excel")  # 模拟桌面文件被占用
         return real_save(path)
 
     monkeypatch.setattr(wb, "save", fake_save)
-    saved = _try_save_workbook(wb, target)
+    saved = _try_save_workbook(wb, str(target))
 
-    assert saved is not None
-    assert os.path.basename(saved) == "out.xlsx"
-    assert os.path.dirname(os.path.abspath(saved)) == str(tmp_path)
-    assert os.path.exists(saved)
+    assert saved == str(target.resolve())
+    assert len(calls) == 1
+    assert os.path.dirname(os.path.abspath(calls[0])) == str(tmp_path)
+    assert os.path.abspath(calls[0]) != str(target.resolve())
+    assert not os.path.exists(calls[0])
+    assert target.exists()
+
+
+def test_workbook_write_failure_preserves_target_and_cleans_temporary_file(
+    monkeypatch,
+    tmp_path,
+):
+    wb = _build_single_sheet_workbook([["new", "", "", ""]])
+    target = tmp_path / "out.xlsx"
+    target.write_bytes(b"existing-valid-content")
+    temporary_paths = []
+
+    def fail_save(path):
+        temporary_paths.append(str(path))
+        with open(path, "wb") as file:
+            file.write(b"partial-content")
+        raise PermissionError("simulated write failure")
+
+    monkeypatch.setattr(wb, "save", fail_save)
+
+    assert _try_save_workbook(wb, str(target)) is None
+    assert target.read_bytes() == b"existing-valid-content"
+    assert len(temporary_paths) == 1
+    assert os.path.dirname(os.path.abspath(temporary_paths[0])) == str(tmp_path)
+    assert not os.path.exists(temporary_paths[0])
+
+
+def test_workbook_replace_failure_preserves_target_and_cleans_temporary_file(
+    monkeypatch,
+    tmp_path,
+):
+    wb = _build_single_sheet_workbook([["new", "", "", ""]])
+    target = tmp_path / "out.xlsx"
+    target.write_bytes(b"existing-valid-content")
+    temporary_paths = []
+
+    def fail_replace(source, destination):
+        temporary_paths.append(source)
+        raise PermissionError("simulated replace failure")
+
+    monkeypatch.setattr(exporter.os, "replace", fail_replace)
+
+    assert _try_save_workbook(wb, str(target)) is None
+    assert target.read_bytes() == b"existing-valid-content"
+    assert len(temporary_paths) == 1
+    assert os.path.dirname(os.path.abspath(temporary_paths[0])) == str(tmp_path)
+    assert not os.path.exists(temporary_paths[0])
+
+
+def test_csv_write_failure_preserves_target_and_cleans_temporary_file(monkeypatch, tmp_path):
+    target = tmp_path / "out.csv"
+    target.write_text("existing-valid-content", encoding="utf-8")
+    temporary_paths = []
+
+    def fail_write(filepath, all_results, include_citation=False, include_details=False):
+        temporary_paths.append(filepath)
+        with open(filepath, "w", encoding="utf-8") as file:
+            file.write("partial-content")
+        raise PermissionError("simulated write failure")
+
+    monkeypatch.setattr(exporter, "_write_multi_csv", fail_write)
+
+    saved = exporter._try_save_csv(
+        str(target),
+        {"焊接": [["标题", "", "", ""]]},
+    )
+
+    assert saved is None
+    assert target.read_text(encoding="utf-8") == "existing-valid-content"
+    assert len(temporary_paths) == 1
+    assert os.path.dirname(os.path.abspath(temporary_paths[0])) == str(tmp_path)
+    assert not os.path.exists(temporary_paths[0])
+
+
+@pytest.mark.parametrize("use_explicit_directory", [True, False])
+def test_unavailable_output_directory_raises_without_cwd_fallback(
+    monkeypatch,
+    tmp_path,
+    use_explicit_directory,
+):
+    working_dir = tmp_path / "working"
+    working_dir.mkdir()
+    unavailable_dir = tmp_path / "unavailable"
+    monkeypatch.chdir(working_dir)
+    if not use_explicit_directory:
+        monkeypatch.setattr(exporter, "get_real_desktop_path", lambda: str(unavailable_dir))
+
+    def fail_makedirs(path, exist_ok=False):
+        raise PermissionError("simulated unavailable directory")
+
+    monkeypatch.setattr(exporter.os, "makedirs", fail_makedirs)
+
+    output_dir = unavailable_dir if use_explicit_directory else None
+    with pytest.raises(OSError, match="无法使用输出目录") as error:
+        exporter._get_output_path("out.xlsx", output_dir)
+
+    assert str(unavailable_dir.resolve()) in str(error.value)
+    assert list(working_dir.iterdir()) == []
 
 
 def test_save_all_reports_failed_save(monkeypatch, tmp_path):

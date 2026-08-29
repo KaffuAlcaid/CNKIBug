@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from cnkibug.app.runtime import DEFAULT_CONFIG, get_runtime_paths
 from cnkibug.browser.runtime import BrowserLaunchResult
@@ -38,6 +39,34 @@ class RecordingEvents(EventSink):
 
     def emit(self, name, **payload):
         self.events.append((name, payload))
+
+
+def test_resumed_progress_estimate_uses_only_remaining_pages():
+    keywords = ["完成", "部分完成"]
+    state = task_state.make_task_state(keywords, 3, "multi_merge", "TS")
+    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("完成", 1, 2, records, STATUS_SUCCESS),
+    )
+    task_state.mark_keyword_progress(state, "部分完成", 2, records)
+    recorded = []
+    task = SimpleNamespace(
+        keywords=keywords,
+        terminal_results={"完成": records},
+        session=SimpleNamespace(stop_requested=False),
+        state=state,
+        max_pages=3,
+        include_citation=False,
+        include_details=False,
+        events=RecordingEvents(recorded),
+    )
+
+    keyword_run.start_progress(task)
+
+    assert recorded == [
+        ("progress_started", {"low_seconds": 8, "high_seconds": 12})
+    ]
 
 
 def _patch_workflow(monkeypatch, tmp_path, saved_results, deleted, recorded=None):
@@ -206,6 +235,63 @@ def test_resume_preserves_partial_records_when_retry_fails(monkeypatch, tmp_path
     ) in progress_events
     assert not any(name == "progress_completed" for name, _ in progress_events)
     assert "已合并保留部分结果" in caplog.text
+
+
+def test_resume_merges_same_article_fields_without_duplicate():
+    historical = [
+        [
+            "论文",
+            "旧作者",
+            "期刊",
+            "2026",
+            "https://example.test/detail",
+            "[1] 已有引文",
+            "",
+            "旧摘要",
+        ],
+        [
+            "论文",
+            "",
+            "期刊",
+            "2026",
+            "https://example.test/detail",
+            "[1] 已有引文",
+            "旧关键词",
+            "",
+        ],
+    ]
+    result = make_keyword_result(
+        "焊接",
+        1,
+        1,
+        [
+            [
+                "论文",
+                "新作者",
+                None,
+                "",
+                "https://example.test/detail",
+                "",
+                "关键词一\n关键词二",
+                "新摘要",
+            ],
+        ],
+        STATUS_FAILED,
+        "再次失败",
+    )
+
+    keyword_run._merge_historical_records(result, historical, "keyword_index=1/1")
+
+    assert result.records == [[
+        "论文",
+        "新作者",
+        "期刊",
+        "2026",
+        "https://example.test/detail",
+        "[1] 已有引文",
+        "关键词一\n关键词二",
+        "新摘要",
+    ]]
 
 
 def test_browser_launch_failure_still_writes_not_started_report(monkeypatch, tmp_path):

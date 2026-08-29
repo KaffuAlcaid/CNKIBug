@@ -5,10 +5,11 @@ import os
 import time
 import tkinter as tk
 from base64 import b64encode
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 from queue import Empty, Queue
+from tempfile import TemporaryFile
 from threading import Event, Thread
 from tkinter import filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
@@ -18,7 +19,20 @@ import ttkbootstrap as ttk
 from PIL import Image
 
 from ..app.runtime import cleanup_runtime_history, init_runtime
-from ..core.estimate import estimate_progress, estimate_seconds, format_eta
+from ..cnki.models import (
+    STATUS_EMPTY,
+    STATUS_FAILED,
+    STATUS_STOPPED,
+    STATUS_SUCCESS,
+)
+from ..core.estimate import (
+    LONG_TASK_WARNING_SECONDS,
+    LONG_TASK_WARNING_TEXT,
+    estimate_progress,
+    estimate_seconds,
+    estimate_work_seconds,
+    format_eta,
+)
 from ..core.memory import MemorySampler, format_memory
 from ..core.settings import ScraperSettings, get_scraper_settings
 from ..core.version import APP_VERSION
@@ -35,6 +49,7 @@ from ..workflow.state import (
     describe_task,
     get_last_task_path,
     load_last_task,
+    remaining_workload,
 )
 from .events import GuiEvent, GuiEventSink
 
@@ -44,6 +59,8 @@ _logger = logging.getLogger("cnkibug.gui")
 _PREFERRED_WINDOW_WIDTH = 900
 _PREFERRED_WINDOW_HEIGHT = 1219
 _WINDOW_MARGIN = 80
+_EVENTS_PER_DRAIN = 100
+_MAX_LOG_LINES = 1000
 
 
 @dataclass(frozen=True)
@@ -89,6 +106,22 @@ def _fit_window_geometry(screen_width: int, screen_height: int) -> tuple[int, in
     x = max(0, (screen_width - width) // 2)
     y = max(0, (screen_height - height) // 2)
     return width, height, x, y
+
+
+def _prepare_output_directory(path: Path) -> Path:
+    target = path.expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    if not target.is_dir():
+        raise NotADirectoryError(f"保存位置不是文件夹：{target}")
+    with TemporaryFile(dir=target):
+        pass
+    return target
+
+
+def _long_task_warning(high_seconds: int) -> str:
+    if high_seconds <= LONG_TASK_WARNING_SECONDS:
+        return ""
+    return f"{LONG_TASK_WARNING_TEXT}\n\n"
 
 
 class CNKIBugApp:
@@ -145,6 +178,7 @@ class CNKIBugApp:
             "detail_index": 0,
             "detail_total": 0,
         }
+        self._log_line_count = 0
         self._keywords: list[str] = []
 
         self._build_ui()
@@ -265,8 +299,33 @@ class CNKIBugApp:
             bootstyle="danger-outline",
         ).pack(fill=tk.X, pady=(6, 0))
 
-        self._form = ttk.Frame(container)
-        self._form.pack(fill=tk.X)
+        self._form_view = ttk.Frame(container)
+        self._form_view.pack(fill=tk.BOTH, expand=True)
+        self._form_canvas = tk.Canvas(
+            self._form_view,
+            borderwidth=0,
+            highlightthickness=0,
+            yscrollincrement=20,
+        )
+        self._form_scrollbar = ttk.Scrollbar(
+            self._form_view,
+            orient=tk.VERTICAL,
+            command=self._form_canvas.yview,
+        )
+        self._form_canvas.configure(yscrollcommand=self._form_scrollbar.set)
+        self._form_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._form_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._form = ttk.Frame(self._form_canvas)
+        self._form_window = self._form_canvas.create_window(
+            (0, 0),
+            window=self._form,
+            anchor=tk.NW,
+        )
+        self._form.bind("<Configure>", self._update_form_scrollregion)
+        self._form_canvas.bind("<Configure>", self._resize_form_width)
+        self.root.bind_all("<MouseWheel>", self._scroll_form, add="+")
+        self.root.bind_all("<Button-4>", self._scroll_form, add="+")
+        self.root.bind_all("<Button-5>", self._scroll_form, add="+")
 
         keyword_frame = ttk.Labelframe(self._form, text="检索内容", padding=10)
         keyword_frame.pack(fill=tk.X, pady=(0, 10))
@@ -502,10 +561,10 @@ class CNKIBugApp:
         )
         self._stop_button.pack(side=tk.RIGHT)
 
-        footer = ttk.Frame(container)
-        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        self._footer = ttk.Frame(container)
+        self._footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
         self._memory_var = tk.StringVar(value="内存：正在读取")
-        ttk.Label(footer, textvariable=self._memory_var, bootstyle="secondary").pack(side=tk.RIGHT)
+        ttk.Label(self._footer, textvariable=self._memory_var, bootstyle="secondary").pack(side=tk.RIGHT)
 
         self._form_controls = [
             self._keyword_entry,
@@ -523,6 +582,41 @@ class CNKIBugApp:
             self._review_button,
         ]
         self._sync_option_states()
+
+    def _update_form_scrollregion(self, _event: tk.Event | None = None) -> None:
+        bounds = self._form_canvas.bbox("all")
+        if bounds is not None:
+            self._form_canvas.configure(scrollregion=bounds)
+
+    def _resize_form_width(self, event: tk.Event) -> None:
+        self._form_canvas.itemconfigure(self._form_window, width=event.width)
+
+    def _scroll_form(self, event: tk.Event) -> None:
+        if not self._form_view.winfo_ismapped():
+            return
+        pointer = self.root.winfo_containing(*self.root.winfo_pointerxy())
+        if pointer is self._keyword_list:
+            return
+        current = pointer
+        while current is not None and current not in {
+            self._form,
+            self._form_canvas,
+            self._form_view,
+        }:
+            current = getattr(current, "master", None)
+        if current is None:
+            return
+        event_number = getattr(event, "num", None)
+        if event_number == 4:
+            units = -3
+        elif event_number == 5:
+            units = 3
+        else:
+            delta = int(getattr(event, "delta", 0))
+            if not delta:
+                return
+            units = -3 if delta > 0 else 3
+        self._form_canvas.yview_scroll(units, "units")
 
     # 关键词列表和输入框始终由这一组方法同步，避免可见内容与任务数据分离。
     def _selected_keyword_index(self) -> int | None:
@@ -722,8 +816,9 @@ class CNKIBugApp:
             f"附加内容：{'、'.join(extras) if extras else '无'}\n"
             f"预计耗时：{format_eta(low, high)}\n"
             f"保存位置：{request.output_dir}\n\n"
-            "确认无误后才会启动浏览器和抓取任务。"
         )
+        summary += _long_task_warning(high)
+        summary += "确认无误后才会启动浏览器和抓取任务。"
         if messagebox.askokcancel("开始前确认", summary, parent=self.root):
             self._start_task(request=request)
 
@@ -781,23 +876,58 @@ class CNKIBugApp:
         last_task_path = get_last_task_path(self.runtime.paths)
         if state is None:
             if last_task_path.exists():
-                delete_last_task(self.runtime.paths)
-                messagebox.showwarning(
-                    "未完成任务",
-                    "检测到损坏的任务缓存，已删除。",
-                    parent=self.root,
-                )
+                if delete_last_task(self.runtime.paths) or not last_task_path.exists():
+                    messagebox.showwarning(
+                        "未完成任务",
+                        "检测到损坏的任务缓存，已删除。",
+                        parent=self.root,
+                    )
+                else:
+                    messagebox.showerror(
+                        "断点删除失败",
+                        f"损坏的断点文件无法删除，请手动删除后重新启动：\n{last_task_path}",
+                        parent=self.root,
+                    )
+                    self.root.destroy()
             return
-        if messagebox.askyesno(
-            "发现未完成任务",
-            f"{describe_task(state)}\n\n是否继续上次任务？\n选择“否”将删除缓存并新建任务。",
-            parent=self.root,
-        ):
-            self._populate_resume_form(state)
-            self._start_task(resume_state=state)
-        else:
-            delete_last_task(self.runtime.paths)
-            self._append_log("已删除上次未完成任务。", "warning")
+        while True:
+            remaining_pages, pending_keywords = remaining_workload(
+                state,
+                [str(item) for item in state.get("keywords", [])],
+                int(state.get("max_pages", 1)),
+            )
+            _, remaining_high = estimate_work_seconds(
+                remaining_pages,
+                pending_keywords,
+                include_citation=bool(state.get("include_citation", False)),
+                include_details=bool(state.get("include_details", False)),
+            )
+            choice = messagebox.askyesnocancel(
+                "继续或忽略断点",
+                (
+                    f"{describe_task(state)}\n\n"
+                    f"{_long_task_warning(remaining_high)}"
+                    "选择“是”：继续上次任务。\n"
+                    "选择“否”：忽略断点，删除断点文件并新建任务。\n"
+                    "选择“取消”：保留断点并退出程序。"
+                ),
+                parent=self.root,
+            )
+            if choice is None:
+                self.root.destroy()
+                return
+            if choice:
+                self._populate_resume_form(state)
+                self._start_task(resume_state=state)
+                return
+            if delete_last_task(self.runtime.paths) or not last_task_path.exists():
+                self._append_log("已忽略并删除上次任务断点。", "warning")
+                return
+            messagebox.showerror(
+                "断点删除失败",
+                f"断点文件仍然存在，尚未忽略该任务：\n{last_task_path}",
+                parent=self.root,
+            )
 
     def _populate_resume_form(self, state: dict[str, Any]) -> None:
         keywords = state.get("keywords", [])
@@ -831,18 +961,34 @@ class CNKIBugApp:
                 include_citation=bool(resume_state.get("include_citation", False)),
                 include_details=bool(resume_state.get("include_details", False)),
                 detail_txt_export=bool(resume_state.get("detail_txt_export", False)),
-                output_dir=Path(stored_output_dir) if isinstance(stored_output_dir, str) else None,
+                output_dir=(
+                    Path(stored_output_dir)
+                    if isinstance(stored_output_dir, str) and stored_output_dir.strip()
+                    else None
+                ),
             )
         assert request is not None
+
+        output_dir = request.output_dir or Path(get_real_desktop_path())
+        try:
+            output_dir = _prepare_output_directory(output_dir)
+        except OSError as error:
+            messagebox.showerror(
+                "保存位置不可用",
+                f"无法创建或写入保存位置：\n{output_dir}\n\n{error}",
+                parent=self.root,
+            )
+            return
+        request = replace(request, output_dir=output_dir)
 
         self._cancel_event.clear()
         self._set_running(True)
         self._reset_progress()
-        self._set_total_eta(request)
+        self._set_total_eta(request, resume_state)
         self._memory_sampler.reset()
         self._update_memory_status()
         self._clear_log()
-        self._form.pack_forget()
+        self._form_view.pack_forget()
         self._progress_frame.pack(fill=tk.BOTH, expand=True)
         self._new_task_button.configure(state=tk.DISABLED)
 
@@ -906,12 +1052,12 @@ class CNKIBugApp:
 
     # Tk 控件只能在主线程修改，因此定时排空工作线程事件队列。
     def _drain_events(self) -> None:
-        try:
-            while True:
+        for _ in range(_EVENTS_PER_DRAIN):
+            try:
                 event = self._event_queue.get_nowait()
-                self._handle_event(event)
-        except Empty:
-            pass
+            except Empty:
+                break
+            self._handle_event(event)
         try:
             if self.root.winfo_exists():
                 self.root.after(100, self._drain_events)
@@ -955,6 +1101,10 @@ class CNKIBugApp:
             self._append_log("等待安全验证超时，将保存当前结果。", "warning")
         elif name == "verify_passed":
             self._append_log("安全验证已通过，继续抓取。", "success")
+        elif name == "page_debug":
+            self._append_log(f"页面异常：{payload.get('context', '未记录上下文')}", "warning")
+            self._append_log(f"当前 URL：{payload.get('url', '<无法读取>')}")
+            self._append_log(f"页面标题：{payload.get('title', '<无法读取>')}")
         elif name == "progress_started":
             self._eta_low = int(payload["low_seconds"])
             self._eta_high = int(payload["high_seconds"])
@@ -996,6 +1146,28 @@ class CNKIBugApp:
         elif name == "task_finished":
             self._actual_seconds = max(0.0, float(payload.get("elapsed_seconds", 0.0)))
             self._time_var.set(f"实际用时：{_format_duration(self._actual_seconds)}")
+        elif name == "task_report":
+            report = payload["report"]
+            total_records = sum(
+                len(records)
+                for records in payload.get("all_results", {}).values()
+            )
+            success = report.count_status(STATUS_SUCCESS)
+            empty = report.count_status(STATUS_EMPTY)
+            failed = report.count_status(STATUS_FAILED)
+            stopped = report.count_status(STATUS_STOPPED)
+            level = "warning" if failed or stopped else "success"
+            self._append_log(
+                f"本轮摘要：成功 {success}，无结果 {empty}，失败 {failed}，"
+                f"中止 {stopped}，共 {total_records} 条。",
+                level,
+            )
+            for item in report.failed_items():
+                reason = item.reason or "未记录原因"
+                self._append_log(
+                    f"第 {item.index}/{item.total} 个检索项「{item.keyword}」：{reason}",
+                    "error" if item.status == STATUS_FAILED else "warning",
+                )
         elif name == "export_finished":
             result = payload["result"]
             if result.failed:
@@ -1041,7 +1213,8 @@ class CNKIBugApp:
         if self._running:
             return
         self._progress_frame.pack_forget()
-        self._form.pack(fill=tk.X)
+        self._form_view.pack(fill=tk.BOTH, expand=True, before=self._footer)
+        self._form_canvas.yview_moveto(0)
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -1083,13 +1256,30 @@ class CNKIBugApp:
             self._eta_high,
         )
 
-    def _set_total_eta(self, request: GuiTaskRequest) -> None:
-        self._total_eta_low, self._total_eta_high = estimate_seconds(
-            request.max_pages,
-            len(request.keywords),
-            include_citation=request.include_citation,
-            include_details=request.include_details,
-        )
+    def _set_total_eta(
+        self,
+        request: GuiTaskRequest,
+        resume_state: dict[str, Any] | None = None,
+    ) -> None:
+        if resume_state is None:
+            self._total_eta_low, self._total_eta_high = estimate_seconds(
+                request.max_pages,
+                len(request.keywords),
+                include_citation=request.include_citation,
+                include_details=request.include_details,
+            )
+        else:
+            remaining_pages, pending_keywords = remaining_workload(
+                resume_state,
+                request.keywords,
+                request.max_pages,
+            )
+            self._total_eta_low, self._total_eta_high = estimate_work_seconds(
+                remaining_pages,
+                pending_keywords,
+                include_citation=request.include_citation,
+                include_details=request.include_details,
+            )
         self._total_eta_var.set(
             f"预计总耗时：{format_eta(self._total_eta_low, self._total_eta_high, compact=True)}"
         )
@@ -1120,8 +1310,16 @@ class CNKIBugApp:
         self._detail_var.set("  |  ".join(parts))
 
     def _append_log(self, text: str, level: str = "") -> None:
+        line = text.rstrip() + "\n"
+        added_lines = line.count("\n")
+        line_count = getattr(self, "_log_line_count", 0) + added_lines
         self._log.configure(state=tk.NORMAL)
-        self._log.insert(tk.END, text.rstrip() + "\n", level if level in {"warning", "error", "success"} else "")
+        self._log.insert(tk.END, line, level if level in {"warning", "error", "success"} else "")
+        overflow = max(line_count - _MAX_LOG_LINES, 0)
+        if overflow:
+            self._log.delete("1.0", f"{overflow + 1}.0")
+            line_count -= overflow
+        self._log_line_count = line_count
         self._log.see(tk.END)
         self._log.configure(state=tk.DISABLED)
 
@@ -1129,6 +1327,7 @@ class CNKIBugApp:
         self._log.configure(state=tk.NORMAL)
         self._log.delete("1.0", tk.END)
         self._log.configure(state=tk.DISABLED)
+        self._log_line_count = 0
 
     # 停止和关闭都先通知工作线程收尾，避免丢失结果或留下浏览器进程。
     def _request_stop(self) -> None:

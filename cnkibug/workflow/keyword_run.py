@@ -15,13 +15,15 @@ from ..cnki.models import (
     KeywordResult,
     make_keyword_result,
 )
+from ..cnki.results import record_dedup_key
 from ..fileio.exporter import save_all
-from ..core.estimate import estimate_active_seconds
+from ..core.estimate import estimate_active_work_seconds
 from .state import (
     keyword_checkpoint,
     mark_keyword_done,
     mark_keyword_progress,
     persist_task_state,
+    remaining_workload,
 )
 from .task import TaskContext
 
@@ -30,16 +32,18 @@ _logger = logging.getLogger("cnkibug.workflow.keyword_run")
 
 
 def start_progress(task: TaskContext) -> None:
-    pending = [
-        keyword
-        for keyword in task.keywords
-        if keyword not in task.terminal_results
-    ]
-    if task.session.stop_requested or not pending:
+    if task.session.stop_requested:
         return
-    eta_low, eta_high = estimate_active_seconds(
+    remaining_pages, pending_count = remaining_workload(
+        task.state,
+        task.keywords,
         task.max_pages,
-        len(pending),
+    )
+    if not pending_count:
+        return
+    eta_low, eta_high = estimate_active_work_seconds(
+        remaining_pages,
+        pending_count,
         include_citation=task.include_citation,
         include_details=task.include_details,
     )
@@ -252,6 +256,16 @@ def _scrape_with_errors(
             detail_fetcher=task.detail_fetcher,
         )
     except PlaywrightTimeoutError as error:
+        if task.session.acknowledge_page_closed():
+            _logger.warning("浏览器页面已关闭，停止后续关键词: %s", keyword_ref)
+            return make_keyword_result(
+                keyword,
+                index,
+                len(task.keywords),
+                [],
+                STATUS_STOPPED,
+                "浏览器页面已关闭",
+            )
         _logger.warning("关键词页面等待超时，跳过: %s error=%s", keyword_ref, error)
         task.events.emit(
             "message",
@@ -267,6 +281,16 @@ def _scrape_with_errors(
             "关键词页面等待超时",
         )
     except PlaywrightError as error:
+        if task.session.acknowledge_page_closed():
+            _logger.warning("浏览器页面已关闭，停止后续关键词: %s", keyword_ref)
+            return make_keyword_result(
+                keyword,
+                index,
+                len(task.keywords),
+                [],
+                STATUS_STOPPED,
+                "浏览器页面已关闭",
+            )
         _logger.warning("浏览器连接异常，停止后续关键词: %s error=%s", keyword_ref, error)
         task.events.emit(
             "message",
@@ -303,13 +327,19 @@ def _merge_historical_records(
     if result.status not in {STATUS_FAILED, STATUS_STOPPED} or not historical_records:
         return
     current_count = len(result.records)
-    merged_records = list(historical_records)
-    seen_records = {tuple(record) for record in merged_records}
-    for record in result.records:
-        record_key = tuple(record)
-        if record_key not in seen_records:
-            seen_records.add(record_key)
-            merged_records.append(record)
+    merged_records = []
+    record_indexes = {}
+    for record in [*historical_records, *result.records]:
+        record_key = record_dedup_key(record)
+        existing_index = record_indexes.get(record_key)
+        if existing_index is None:
+            record_indexes[record_key] = len(merged_records)
+            merged_records.append(list(record))
+            continue
+        merged_records[existing_index] = _merge_record_fields(
+            merged_records[existing_index],
+            record,
+        )
     result.records = merged_records
     _logger.warning(
         "关键词重试仍未完整完成，已合并保留部分结果: "
@@ -319,6 +349,16 @@ def _merge_historical_records(
         current_count,
         len(merged_records),
     )
+
+
+def _merge_record_fields(previous: list, current: list) -> list:
+    merged = list(previous)
+    if len(merged) < len(current):
+        merged.extend([""] * (len(current) - len(merged)))
+    for index, value in enumerate(current):
+        if value is not None and str(value).strip():
+            merged[index] = value
+    return merged
 
 
 def _record_keyword_result(

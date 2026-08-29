@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from cnkibug.cnki.citation import fetch_gbt_citation
@@ -104,3 +105,20 @@ def test_fetch_gbt_citation_returns_empty_when_button_is_missing(page, caplog):
 
     assert citation == ""
     assert "引用按钮不存在" in caplog.text
+
+
+def test_fetch_gbt_citation_propagates_closed_page_error():
+    class ClosedPage:
+        def locator(self, selector):
+            raise PlaywrightError("Target page, context or browser has been closed")
+
+        def is_closed(self):
+            return True
+
+    with pytest.raises(PlaywrightError):
+        fetch_gbt_citation(
+            ClosedPage(),
+            object(),
+            log_ref="page=1 row=1",
+            timeout_ms=50,
+        )

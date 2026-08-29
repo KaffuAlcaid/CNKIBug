@@ -73,6 +73,10 @@ def parse_result_rows(
                 pending_stats["skipped_no_title"] += 1
                 continue
             title = title_el.inner_text().strip()
+            if not title:
+                result.skipped_no_title += 1
+                pending_stats["skipped_no_title"] += 1
+                continue
 
             href = title_el.get_attribute("href") or ""
             detail_url = urljoin(page.url, href) if href else ""

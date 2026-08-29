@@ -232,6 +232,29 @@ def task_is_finished(state: dict[str, Any]) -> bool:
     )
 
 
+def remaining_workload(
+    state: dict[str, Any],
+    keywords: list[str],
+    max_pages: int,
+) -> tuple[int, int]:
+    completed = state.get("completed", {})
+    if not isinstance(completed, dict):
+        completed = {}
+
+    remaining_pages = 0
+    pending_keywords = 0
+    for keyword in keywords:
+        item = completed.get(keyword)
+        if isinstance(item, dict) and item.get("status") in _TERMINAL_STATUSES:
+            continue
+        completed_page, _ = keyword_checkpoint(state, keyword)
+        if completed_page > max_pages:
+            completed_page = 0
+        remaining_pages += max(max_pages - completed_page, 0)
+        pending_keywords += 1
+    return remaining_pages, pending_keywords
+
+
 def describe_task(state: dict[str, Any]) -> str:
     keywords = state.get("keywords", [])
     completed = state.get("completed", {})

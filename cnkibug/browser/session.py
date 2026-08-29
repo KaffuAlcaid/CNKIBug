@@ -36,6 +36,14 @@ class ScrapeSession:
         self.request_stop(reason)
         return True
 
+    def acknowledge_page_closed(self, page: Any | None = None) -> bool:
+        target_page = self.page if page is None else page
+        is_closed = getattr(target_page, "is_closed", None)
+        if target_page is None or not callable(is_closed) or not is_closed():
+            return False
+        self.request_stop("浏览器页面已关闭")
+        return True
+
     def wait_interruptibly(self, seconds: float) -> bool:
         if self.acknowledge_stop_request():
             return False

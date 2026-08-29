@@ -1,12 +1,15 @@
 from dataclasses import replace
+from types import SimpleNamespace
 from urllib.parse import quote
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from cnkibug.app.runtime import DEFAULT_CONFIG
 from cnkibug.cnki.details import ArticleDetailFetcher
 from cnkibug.cnki.details import ArticleDetails
+from cnkibug.cnki.guard import VERIFY_NONE
 from cnkibug.cnki.pages import _append_page_details
 from cnkibug.cnki.results import PageParseResult
 from cnkibug.browser.session import ScrapeSession
@@ -197,3 +200,78 @@ def test_page_enrichment_stops_after_fetch_when_cancelled():
         "progress_updated",
         {"detail_index": 0, "detail_total": 0},
     )
+
+
+def test_closed_detail_page_stops_enrichment_without_committing_record():
+    class ClosedDetailPage:
+        closed = False
+
+        def goto(self, *args, **kwargs):
+            self.closed = True
+            raise PlaywrightError("Target page, context or browser has been closed")
+
+        def is_closed(self):
+            return self.closed
+
+    class BrowserContext:
+        def new_page(self):
+            return ClosedDetailPage()
+
+    events = _RecordingEvents()
+    session = ScrapeSession(events)
+    parsed = PageParseResult(records=[
+        ["论文", "", "", "", "https://example.test/detail"],
+    ])
+    fetcher = ArticleDetailFetcher(BrowserContext(), _settings(), events)
+
+    completed = _append_page_details(
+        session,
+        parsed,
+        fetcher,
+        keyword_ref="keyword_index=1/1",
+        current_page=1,
+        log_titles=False,
+    )
+
+    assert completed is False
+    assert session.stop_requested is True
+    assert session.stop_reason == "浏览器页面已关闭"
+    assert parsed.records == [["论文", "", "", "", "https://example.test/detail"]]
+
+
+def test_detail_fetch_reports_page_closed_after_final_dom_read(monkeypatch):
+    class Page:
+        closed = False
+
+        def goto(self, *args, **kwargs):
+            return None
+
+        def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+    page = Page()
+    fetcher = ArticleDetailFetcher(
+        SimpleNamespace(new_page=lambda: page),
+        _settings(),
+    )
+    monkeypatch.setattr(
+        "cnkibug.cnki.details.handle_verify_with_progress",
+        lambda *args, **kwargs: VERIFY_NONE,
+    )
+    monkeypatch.setattr(fetcher, "_extract_keywords", lambda _page: ["关键词"])
+
+    def close_after_abstract(_page):
+        page.closed = True
+        return "摘要"
+
+    monkeypatch.setattr(fetcher, "_extract_abstract", close_after_abstract)
+
+    result = fetcher.fetch("https://example.test/detail", log_ref="page=1 row=1")
+
+    assert result.failed is True
+    assert result.page_closed is True
+    assert result.keywords == []
+    assert result.abstract == ""

@@ -159,24 +159,40 @@ def _handle_pending_task(
     resume_state = load_last_task(paths)
     last_task_path = get_last_task_path(paths)
     if resume_state is None:
-        if last_task_path and last_task_path.exists():
-            _console.print("[yellow][!] 检测到损坏的未完成任务缓存，已删除。[/yellow]")
-            delete_last_task(paths)
+        if last_task_path.exists():
+            if delete_last_task(paths) or not last_task_path.exists():
+                _console.print("[yellow][!] 检测到损坏的未完成任务缓存，已删除。[/yellow]")
+            else:
+                _console.print(
+                    "[red][x] 损坏的断点文件无法删除，请手动删除后重新启动："
+                    f"{last_task_path}[/red]"
+                )
+                return "exit"
         return "new"
 
     _console.print("\n[yellow][!] 检测到上次未完成的抓取任务。[/yellow]")
     _console.print(f"    {describe_task(resume_state)}")
     print("  1 -> 继续上次任务")
-    print("  0 -> 删除缓存并开始新任务")
+    print("  2 -> 忽略断点，删除断点文件并开始新任务")
+    print("  0 -> 保留断点并退出程序")
     while True:
-        choice = safe_input("请输入选项（1 或 0）: ").strip()
-        if choice in {"0", "1"}:
+        choice = safe_input("请输入选项（1、2 或 0）: ").strip()
+        if choice not in {"0", "1", "2"}:
+            print("[!] 无效选项，请重新输入。")
+            continue
+        if choice == "0":
+            _logger.info("用户选择保留断点并退出")
+            return "exit"
+        if choice == "1":
             break
-        print("[!] 无效选项，请重新输入。")
-    if choice == "0":
-        delete_last_task(paths)
-        _logger.info("用户选择删除未完成任务缓存")
-        return "new"
+        if delete_last_task(paths) or not last_task_path.exists():
+            _logger.info("用户选择忽略并删除未完成任务断点")
+            _console.print("[yellow][*] 已忽略并删除上次任务断点。[/yellow]")
+            return "new"
+        _console.print(
+            "[red][x] 断点文件删除失败，尚未忽略该任务。"
+            f"请关闭占用文件的程序后重试：{last_task_path}[/red]"
+        )
 
     _logger.info("用户选择继续未完成任务")
     _run_task(

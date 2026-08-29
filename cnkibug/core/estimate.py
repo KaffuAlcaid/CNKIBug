@@ -14,6 +14,10 @@ _SEC_PER_DETAIL_LOW = 3
 _SEC_PER_DETAIL_HIGH = 8
 _STARTUP_OVERHEAD_LOW = 18
 _STARTUP_OVERHEAD_HIGH = 25
+LONG_TASK_WARNING_SECONDS = 10 * 60
+LONG_TASK_WARNING_TEXT = (
+    "风险提示：预计耗时上限已超过 10 分钟，任务较大且更容易触发知网反爬验证。"
+)
 
 
 def estimate_active_seconds(
@@ -24,6 +28,22 @@ def estimate_active_seconds(
 ) -> tuple[int, int]:
     effective_keyword_count = max(keyword_count, 1)
     page_units = pages * effective_keyword_count
+    return estimate_active_work_seconds(
+        page_units,
+        effective_keyword_count,
+        include_citation=include_citation,
+        include_details=include_details,
+    )
+
+
+def estimate_active_work_seconds(
+    page_units: int,
+    keyword_count: int,
+    include_citation: bool = False,
+    include_details: bool = False,
+) -> tuple[int, int]:
+    page_units = max(page_units, 0)
+    effective_keyword_count = max(keyword_count, 0)
     transition_count = max(effective_keyword_count - 1, 0)
     low = page_units * _SEC_PER_PAGE_LOW + transition_count * _INTER_KEYWORD_LOW
     high = page_units * _SEC_PER_PAGE_HIGH + transition_count * _INTER_KEYWORD_HIGH
@@ -46,6 +66,21 @@ def estimate_seconds(
 ) -> tuple[int, int]:
     low, high = estimate_active_seconds(
         pages,
+        keyword_count,
+        include_citation=include_citation,
+        include_details=include_details,
+    )
+    return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
+
+
+def estimate_work_seconds(
+    page_units: int,
+    keyword_count: int,
+    include_citation: bool = False,
+    include_details: bool = False,
+) -> tuple[int, int]:
+    low, high = estimate_active_work_seconds(
+        page_units,
         keyword_count,
         include_citation=include_citation,
         include_details=include_details,

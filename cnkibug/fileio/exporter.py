@@ -2,6 +2,8 @@ import csv
 import logging
 import os
 import re
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import openpyxl
@@ -63,34 +65,39 @@ def _get_output_path(
     filename: str,
     output_dir: str | os.PathLike | None = None,
 ) -> str:
+    target_dir = os.fspath(output_dir) if output_dir is not None else get_real_desktop_path()
+    target_dir = os.path.abspath(target_dir)
     try:
-        target_dir = os.fspath(output_dir) if output_dir is not None else get_real_desktop_path()
         os.makedirs(target_dir, exist_ok=True)
-        return os.path.join(target_dir, filename)
-    except OSError:
-        return os.path.join(os.getcwd(), filename)
+    except OSError as error:
+        raise OSError(f"无法使用输出目录：{target_dir}") from error
+    return os.path.join(target_dir, filename)
 
 
-def _try_save_fallback(
-    wb,
+def _write_atomically(
     filepath: str,
-    save_err: OSError,
-    log_save_path: bool,
-) -> str | None:
-    fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
-    if log_save_path:
-        _logger.warning("文件保存失败，尝试备用路径: target=%s fallback=%s error=%s", filepath, fallback, save_err)
-    else:
-        _logger.warning("文件保存失败，尝试备用路径: error=%s", save_err)
-
+    writer: Callable[[str], None],
+) -> str:
+    target_path = os.path.abspath(filepath)
+    target_dir = os.path.dirname(target_path)
+    suffix = os.path.splitext(target_path)[1]
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        dir=target_dir,
+        prefix=f".{os.path.basename(target_path)}.",
+        suffix=f".tmp{suffix}",
+    )
+    os.close(file_descriptor)
     try:
-        wb.save(fallback)
-        saved_path = os.path.abspath(fallback)
-        _log_save_success(saved_path, log_save_path, "fallback")
-        return saved_path
-    except OSError as fb_err:
-        _logger.error("备用路径保存失败: %s", fb_err)
-        return None
+        writer(temporary_path)
+        os.replace(temporary_path, target_path)
+    finally:
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup_error:
+            _logger.warning("临时导出文件清理失败: %s", cleanup_error)
+    return target_path
 
 
 def _log_save_success(saved_path: str, log_save_path: bool, save_type: str) -> None:
@@ -108,12 +115,15 @@ def _try_save_workbook(
     save_type: str = "final",
 ) -> str | None:
     try:
-        wb.save(filepath)
-        saved_path = os.path.abspath(filepath)
+        saved_path = _write_atomically(filepath, wb.save)
         _log_save_success(saved_path, log_save_path, save_type)
         return saved_path
     except OSError as save_err:
-        return _try_save_fallback(wb, filepath, save_err, log_save_path)
+        if log_save_path:
+            _logger.error("文件保存失败: target=%s error=%s", filepath, save_err)
+        else:
+            _logger.error("文件保存失败: error=%s", save_err)
+        return None
 
 
 def _export_headers(
@@ -339,29 +349,23 @@ def _try_save_csv(
     save_type: str = "final",
 ) -> str | None:
     try:
-        _write_multi_csv(filepath, all_results, include_citation, include_details)
-        saved_path = os.path.abspath(filepath)
+        saved_path = _write_atomically(
+            filepath,
+            lambda temporary_path: _write_multi_csv(
+                temporary_path,
+                all_results,
+                include_citation,
+                include_details,
+            ),
+        )
         _log_save_success(saved_path, log_save_path, save_type)
         return saved_path
     except OSError as save_err:
-        fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
         if log_save_path:
-            _logger.warning(
-                "CSV 保存失败，尝试备用路径: target=%s fallback=%s error=%s",
-                filepath,
-                fallback,
-                save_err,
-            )
+            _logger.error("CSV 保存失败: target=%s error=%s", filepath, save_err)
         else:
-            _logger.warning("CSV 保存失败，尝试备用路径: error=%s", save_err)
-        try:
-            _write_multi_csv(fallback, all_results, include_citation, include_details)
-            saved_path = os.path.abspath(fallback)
-            _log_save_success(saved_path, log_save_path, "fallback")
-            return saved_path
-        except OSError as fallback_err:
-            _logger.error("CSV 备用路径保存失败: %s", fallback_err)
-            return None
+            _logger.error("CSV 保存失败: error=%s", save_err)
+        return None
 
 
 def _save_multi_csv(
@@ -443,25 +447,16 @@ def _save_keyword_txt(
         _write_keyword_txt(filepath, lines)
         result.keyword_txt_path = os.path.abspath(filepath)
         _log_save_success(result.keyword_txt_path, log_save_path, save_type)
-        return
     except OSError as save_error:
-        fallback = os.path.join(os.getcwd(), os.path.basename(filepath))
+        result.keyword_txt_failed = True
         if log_save_path:
-            _logger.warning(
-                "关键词 TXT 保存失败，尝试备用路径: target=%s fallback=%s error=%s",
+            _logger.error(
+                "关键词 TXT 保存失败: target=%s error=%s",
                 filepath,
-                fallback,
                 save_error,
             )
         else:
-            _logger.warning("关键词 TXT 保存失败，尝试备用路径: error=%s", save_error)
-    try:
-        _write_keyword_txt(fallback, lines)
-        result.keyword_txt_path = os.path.abspath(fallback)
-        _log_save_success(result.keyword_txt_path, log_save_path, "fallback")
-    except OSError as fallback_error:
-        result.keyword_txt_failed = True
-        _logger.error("关键词 TXT 备用路径保存失败: %s", fallback_error)
+            _logger.error("关键词 TXT 保存失败: error=%s", save_error)
 
 
 def _write_keyword_txt(filepath: str, lines: list[str]) -> None:

@@ -9,6 +9,7 @@ from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
 from .guard import (
     VERIFY_CANCELLED,
+    VERIFY_PAGE_CLOSED,
     VERIFY_PASSED,
     VERIFY_TIMEOUT,
     handle_verify_with_progress,
@@ -61,7 +62,10 @@ def position_after_checkpoint(
                 old_next_page=old_next_page,
                 old_current_page=old_current_page,
                 timeout=settings.timeout_selector_ms,
-                stop_requested=session.acknowledge_stop_request,
+                stop_requested=lambda: (
+                    session.acknowledge_stop_request()
+                    or session.acknowledge_page_closed(page)
+                ),
             )
             if not advanced:
                 if session.acknowledge_stop_request(reason="用户请求停止"):
@@ -71,6 +75,9 @@ def position_after_checkpoint(
                     settings,
                     events,
                 )
+                if verify_status == VERIFY_PAGE_CLOSED:
+                    session.request_stop("浏览器页面已关闭")
+                    return False
                 if verify_status == VERIFY_CANCELLED:
                     session.request_stop("用户请求停止")
                     return False
@@ -90,7 +97,10 @@ def position_after_checkpoint(
                         old_next_page=old_next_page,
                         old_current_page=old_current_page,
                         timeout=settings.timeout_selector_ms,
-                        stop_requested=session.acknowledge_stop_request,
+                        stop_requested=lambda: (
+                            session.acknowledge_stop_request()
+                            or session.acknowledge_page_closed(page)
+                        ),
                     )
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
@@ -107,6 +117,9 @@ def position_after_checkpoint(
                 settings,
                 events,
             )
+            if verify_status == VERIFY_PAGE_CLOSED:
+                session.request_stop("浏览器页面已关闭")
+                return False
             if verify_status == VERIFY_CANCELLED:
                 session.request_stop("用户请求停止")
                 return False
@@ -129,6 +142,8 @@ def position_after_checkpoint(
             )
         except PlaywrightError:
             if session.acknowledge_stop_request(reason="用户请求停止"):
+                return False
+            if session.acknowledge_page_closed(page):
                 return False
             _logger.warning(
                 "页级恢复定位出现页面异常: %s current_page=%d target_page=%d",

@@ -111,7 +111,7 @@ def _save_final_results(task: TaskContext) -> tuple[SaveResult, bool]:
         )
         task.events.emit(
             "message",
-            text="请关闭已打开的同名结果文件，并检查桌面或程序目录写入权限。",
+            text="请关闭已打开的同名结果文件，并检查所选保存目录的写入权限。",
             level="warning",
         )
         return result, True

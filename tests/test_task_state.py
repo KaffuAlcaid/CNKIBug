@@ -201,6 +201,24 @@ def test_keyword_checkpoint_restarts_when_page_has_no_records(caplog):
     assert "页级断点没有记录" in caplog.text
 
 
+def test_remaining_workload_excludes_terminal_keywords_and_completed_pages():
+    keywords = ["完成", "部分完成", "待重试"]
+    state = task_state.make_task_state(keywords, 4, "multi_merge", "TS")
+    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("完成", 1, 3, records, STATUS_SUCCESS),
+    )
+    task_state.mark_keyword_progress(state, "部分完成", 2, records)
+    task_state.mark_keyword_progress(state, "待重试", 1, records)
+    task_state.mark_keyword_done(
+        state,
+        make_keyword_result("待重试", 3, 3, records, STATUS_FAILED, "页面失败"),
+    )
+
+    assert task_state.remaining_workload(state, keywords, 4) == (5, 2)
+
+
 def test_completed_results_only_contains_terminal_statuses(tmp_path):
     runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
     state = task_state.make_task_state(["成功", "空", "失败", "中止"], 3, "multi_merge", "TS")

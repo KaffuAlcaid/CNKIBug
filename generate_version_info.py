@@ -48,7 +48,11 @@ def main() -> None:
     root = Path(__file__).resolve().parent
     destination = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "version.txt"
     project_version = read_project_version(root / "pyproject.toml")
-    destination.write_text(build_version_info(project_version), encoding="utf-8")
+    destination.write_text(
+        build_version_info(project_version),
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 if __name__ == "__main__":

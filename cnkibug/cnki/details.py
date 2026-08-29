@@ -9,7 +9,13 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
-from .guard import VERIFY_CANCELLED, VERIFY_PASSED, VERIFY_TIMEOUT, handle_verify_with_progress
+from .guard import (
+    VERIFY_CANCELLED,
+    VERIFY_PAGE_CLOSED,
+    VERIFY_PASSED,
+    VERIFY_TIMEOUT,
+    handle_verify_with_progress,
+)
 
 
 DETAIL_READY_SELECTOR = ".brief h1"
@@ -26,6 +32,7 @@ class ArticleDetails:
     abstract: str
     failed: bool = False
     verify_timeout: bool = False
+    page_closed: bool = False
 
 
 class ArticleDetailFetcher:
@@ -43,6 +50,8 @@ class ArticleDetailFetcher:
     def fetch(self, url: str, *, log_ref: str) -> ArticleDetails:
         if self._cancel_requested():
             return ArticleDetails([], "", failed=True)
+        if self._page_closed():
+            return ArticleDetails([], "", failed=True, page_closed=True)
         if not url.strip():
             _logger.warning("论文详情链接为空: %s", log_ref)
             return ArticleDetails([], "", failed=True)
@@ -66,6 +75,8 @@ class ArticleDetailFetcher:
             if verify_status == VERIFY_TIMEOUT:
                 _logger.warning("论文详情页安全验证超时: %s", log_ref)
                 return ArticleDetails([], "", failed=True, verify_timeout=True)
+            if verify_status == VERIFY_PAGE_CLOSED:
+                return ArticleDetails([], "", failed=True, page_closed=True)
             if verify_status == VERIFY_CANCELLED:
                 return ArticleDetails([], "", failed=True)
             if self._cancel_requested():
@@ -96,6 +107,8 @@ class ArticleDetailFetcher:
                 if retry_verify_status == VERIFY_TIMEOUT:
                     _logger.warning("论文详情页重新访问时安全验证超时: %s", log_ref)
                     return ArticleDetails([], "", failed=True, verify_timeout=True)
+                if retry_verify_status == VERIFY_PAGE_CLOSED:
+                    return ArticleDetails([], "", failed=True, page_closed=True)
                 if retry_verify_status == VERIFY_CANCELLED:
                     return ArticleDetails([], "", failed=True)
                 if self._cancel_requested():
@@ -113,17 +126,25 @@ class ArticleDetailFetcher:
             abstract = self._extract_abstract(page)
             if self._cancel_requested():
                 return ArticleDetails([], "", failed=True)
+            if self._page_closed():
+                return ArticleDetails([], "", failed=True, page_closed=True)
             return ArticleDetails(keywords, abstract)
         except PlaywrightError as error:
             if self._cancel_requested():
                 return ArticleDetails([], "", failed=True)
+            if self._page_closed():
+                _logger.warning("论文详情页已关闭: %s", log_ref)
+                return ArticleDetails([], "", failed=True, page_closed=True)
             _logger.warning("论文详情抓取失败: %s error=%s", log_ref, error)
             return ArticleDetails([], "", failed=True)
 
     def _get_page(self) -> Any:
-        if self._page is None or self._page.is_closed():
+        if self._page is None:
             self._page = self._browser_context.new_page()
         return self._page
+
+    def _page_closed(self) -> bool:
+        return self._page is not None and self._page.is_closed()
 
     def _cancel_requested(self) -> bool:
         return self._events.cancel_requested()

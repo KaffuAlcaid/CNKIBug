@@ -1,3 +1,5 @@
+import builtins
+import importlib.util
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
@@ -6,20 +8,102 @@ from unittest.mock import Mock
 
 import run_gui
 
+from cnkibug.app.runtime import get_runtime_paths
+from cnkibug.cnki.models import STATUS_FAILED, STATUS_SUCCESS, make_keyword_result
 from cnkibug.core.version import APP_VERSION
 from cnkibug.gui.app import (
     CNKIBugApp,
     GuiTaskRequest,
+    _EVENTS_PER_DRAIN,
+    _MAX_LOG_LINES,
     _fit_window_geometry,
     _merge_task_keywords,
+    _prepare_output_directory,
     _resolve_save_mode,
 )
 from cnkibug.gui.events import GuiEvent, GuiEventSink
+from cnkibug.workflow.report import TaskReport
+from cnkibug.workflow.state import (
+    make_task_state,
+    mark_keyword_done,
+    mark_keyword_progress,
+)
 
 
 def test_gui_self_check_reports_app_version(capsys):
     assert run_gui._run_self_check() == 0
     assert capsys.readouterr().out.strip() == f"CNKIBug GUI self-check OK: {APP_VERSION}"
+
+
+def test_gui_launcher_module_load_does_not_import_project(monkeypatch):
+    original_import = builtins.__import__
+
+    def fail_project_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "cnkibug" or name.startswith("cnkibug."):
+            raise ImportError("project import blocked")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_project_import)
+    spec = importlib.util.spec_from_file_location("isolated_run_gui", run_gui.__file__)
+    assert spec is not None
+    assert spec.loader is not None
+    isolated_launcher = importlib.util.module_from_spec(spec)
+
+    spec.loader.exec_module(isolated_launcher)
+
+    assert callable(isolated_launcher._run)
+    assert callable(isolated_launcher._run_self_check)
+
+
+def test_gui_startup_import_failure_reports_console_dialog_and_log_path(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    original_import = builtins.__import__
+    import_error = ImportError("No module named 'ttkbootstrap'")
+    log_path = tmp_path / "gui_startup_error.log"
+    shown = []
+
+    def fail_gui_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "cnkibug.gui.app":
+            raise import_error
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_gui_import)
+    monkeypatch.setattr(run_gui, "_write_startup_error_log", lambda error: log_path)
+    monkeypatch.setattr(run_gui, "_show_startup_error_dialog", shown.append)
+
+    try:
+        run_gui._run()
+    except SystemExit as error:
+        assert error.code == 1
+        assert error.__cause__ is import_error
+    else:
+        raise AssertionError("GUI launcher did not exit after an import failure")
+
+    assert capsys.readouterr().out.splitlines() == [
+        "CNKIBug GUI 启动失败：No module named 'ttkbootstrap'",
+        '请运行：pip install -e ".[gui]"',
+        f"日志路径：{log_path}",
+    ]
+    assert shown == [
+        "CNKIBug GUI 启动失败：No module named 'ttkbootstrap'"
+        f"\n\n日志路径：{log_path}"
+    ]
+
+
+def test_gui_startup_import_failure_writes_traceback_log(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_gui, "_entry_directory", lambda: tmp_path)
+    try:
+        raise ImportError("broken GUI dependency")
+    except ImportError as error:
+        log_path = run_gui._write_startup_error_log(error)
+
+    assert log_path == tmp_path / "CNKIBug-data" / "log" / "gui_startup_error.log"
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "GUI startup import failure" in log_text
+    assert "ImportError: broken GUI dependency" in log_text
 
 
 def test_gui_source_and_frozen_entry_directories(monkeypatch, tmp_path):
@@ -232,6 +316,70 @@ def test_gui_progress_percent_label_tracks_reset_running_save_stop_and_completio
     app._progress_percent_var.set.assert_called_with("100%")
 
 
+def test_gui_event_drain_limits_each_callback_batch():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._event_queue = Queue()
+    app._handle_event = Mock()
+    app.root = Mock()
+    app.root.winfo_exists.return_value = False
+    for index in range(_EVENTS_PER_DRAIN + 1):
+        app._event_queue.put(GuiEvent("test", {"index": index}))
+
+    app._drain_events()
+
+    assert app._handle_event.call_count == _EVENTS_PER_DRAIN
+    assert app._event_queue.qsize() == 1
+
+
+def test_gui_log_discards_oldest_lines_at_limit():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._log = Mock()
+    app._log_line_count = _MAX_LOG_LINES
+
+    app._append_log("新日志")
+
+    app._log.delete.assert_called_once_with("1.0", "2.0")
+    assert app._log_line_count == _MAX_LOG_LINES
+
+
+def test_gui_handles_page_debug_and_task_report_events():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._append_log = Mock()
+    report = TaskReport(total_keywords=2)
+    report.add(
+        make_keyword_result(
+            "完成项",
+            1,
+            2,
+            [["标题", "作者", "来源", "日期"]],
+            STATUS_SUCCESS,
+        )
+    )
+    report.add(
+        make_keyword_result("失败项", 2, 2, [], STATUS_FAILED, "结果页超时")
+    )
+
+    app._handle_event(
+        GuiEvent(
+            "page_debug",
+            {"context": "结果加载超时", "url": "https://example.test", "title": "错误页"},
+        )
+    )
+    app._handle_event(
+        GuiEvent(
+            "task_report",
+            {"report": report, "all_results": {"完成项": [["标题"]], "失败项": []}},
+        )
+    )
+
+    logged = [call.args[0] for call in app._append_log.call_args_list]
+    assert "页面异常：结果加载超时" in logged
+    assert "当前 URL：https://example.test" in logged
+    assert "页面标题：错误页" in logged
+    assert "本轮摘要：成功 1，无结果 0，失败 1，中止 0，共 1 条。" in logged
+    assert "第 2/2 个检索项「失败项」：结果页超时" in logged
+
+
 def test_gui_total_eta_is_calculated_independently_for_new_and_resumed_tasks():
     app = CNKIBugApp.__new__(CNKIBugApp)
     app._total_eta_var = Mock()
@@ -252,17 +400,90 @@ def test_gui_total_eta_is_calculated_independently_for_new_and_resumed_tasks():
 
     resumed_request = GuiTaskRequest(
         keywords=["焊接", "铸造"],
-        max_pages=1,
+        max_pages=3,
         save_mode="multi_merge",
-        include_citation=True,
+        include_citation=False,
         include_details=False,
         detail_txt_export=False,
         output_dir=None,
     )
-    app._set_total_eta(resumed_request)
+    resume_state = make_task_state(["焊接", "铸造"], 3, "multi_merge", "TS")
+    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
+    mark_keyword_done(
+        resume_state,
+        make_keyword_result("焊接", 1, 2, records, STATUS_SUCCESS),
+    )
+    mark_keyword_progress(resume_state, "铸造", 2, records)
+    app._set_total_eta(resumed_request, resume_state)
 
-    assert (app._total_eta_low, app._total_eta_high) == (77, 107)
-    app._total_eta_var.set.assert_called_with("预计总耗时：01:17～01:47")
+    assert (app._total_eta_low, app._total_eta_high) == (26, 37)
+    app._total_eta_var.set.assert_called_with("预计总耗时：00:26～00:37")
+
+
+def test_gui_task_review_includes_long_task_risk_warning(monkeypatch):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = object()
+    app._start_task = Mock()
+    request = GuiTaskRequest(
+        keywords=["焊接"],
+        max_pages=50,
+        save_mode="single",
+        include_citation=False,
+        include_details=False,
+        detail_txt_export=False,
+        output_dir=Path("results"),
+    )
+    app._collect_request = Mock(return_value=request)
+    prompts = []
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.askokcancel",
+        lambda title, message, **kwargs: prompts.append((title, message, kwargs)) or False,
+    )
+
+    app._review_task()
+
+    assert "预计耗时上限已超过 10 分钟" in prompts[0][1]
+    assert "更容易触发知网反爬验证" in prompts[0][1]
+    app._start_task.assert_not_called()
+
+
+def test_gui_output_directory_is_created_and_write_checked(tmp_path):
+    output_dir = tmp_path / "nested" / "results"
+
+    assert _prepare_output_directory(output_dir) == output_dir.resolve()
+    assert output_dir.is_dir()
+    assert list(output_dir.iterdir()) == []
+
+
+def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tmp_path):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._running = False
+    app.root = object()
+    app._set_running = Mock()
+    errors = []
+    request = GuiTaskRequest(
+        keywords=["焊接"],
+        max_pages=1,
+        save_mode="single",
+        include_citation=False,
+        include_details=False,
+        detail_txt_export=False,
+        output_dir=tmp_path / "unavailable",
+    )
+    monkeypatch.setattr(
+        "cnkibug.gui.app._prepare_output_directory",
+        lambda _path: (_ for _ in ()).throw(OSError("拒绝访问")),
+    )
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.showerror",
+        lambda title, message, **kwargs: errors.append((title, message, kwargs)),
+    )
+
+    app._start_task(request=request)
+
+    assert errors[0][0] == "保存位置不可用"
+    assert "拒绝访问" in errors[0][1]
+    app._set_running.assert_not_called()
 
 
 def test_gui_memory_status_is_updated_outside_task_status_frame():
@@ -274,3 +495,124 @@ def test_gui_memory_status_is_updated_outside_task_status_frame():
     app._update_memory_status()
 
     app._memory_var.set.assert_called_once_with("内存：暂不可用")
+
+
+def _resume_app(paths):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = Mock()
+    app.runtime = SimpleNamespace(paths=paths)
+    app._append_log = Mock()
+    app._populate_resume_form = Mock()
+    app._start_task = Mock()
+    return app
+
+
+def test_gui_ignore_checkpoint_deletes_file(monkeypatch, tmp_path):
+    paths = get_runtime_paths(tmp_path)
+    checkpoint = paths.cache_dir / "last_task.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("{}\n", encoding="utf-8")
+    app = _resume_app(paths)
+    state = make_task_state(["焊接"], 2, "single", "TS")
+    monkeypatch.setattr("cnkibug.gui.app.load_last_task", lambda _paths: state)
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.askyesnocancel",
+        lambda *args, **kwargs: False,
+    )
+
+    app._offer_resume()
+
+    assert not checkpoint.exists()
+    app._append_log.assert_called_once_with("已忽略并删除上次任务断点。", "warning")
+    app._start_task.assert_not_called()
+    app.root.destroy.assert_not_called()
+
+
+def test_gui_cancel_resume_keeps_checkpoint_and_exits(monkeypatch, tmp_path):
+    paths = get_runtime_paths(tmp_path)
+    checkpoint = paths.cache_dir / "last_task.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("{}\n", encoding="utf-8")
+    app = _resume_app(paths)
+    state = make_task_state(["焊接"], 2, "single", "TS")
+    monkeypatch.setattr("cnkibug.gui.app.load_last_task", lambda _paths: state)
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.askyesnocancel",
+        lambda *args, **kwargs: None,
+    )
+
+    app._offer_resume()
+
+    assert checkpoint.exists()
+    app.root.destroy.assert_called_once_with()
+    app._start_task.assert_not_called()
+
+
+def test_gui_failed_checkpoint_delete_reprompts(monkeypatch, tmp_path):
+    paths = get_runtime_paths(tmp_path)
+    checkpoint = paths.cache_dir / "last_task.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("{}\n", encoding="utf-8")
+    app = _resume_app(paths)
+    choices = iter([False, None])
+    errors = []
+    state = make_task_state(["焊接"], 2, "single", "TS")
+    monkeypatch.setattr("cnkibug.gui.app.load_last_task", lambda _paths: state)
+    monkeypatch.setattr("cnkibug.gui.app.delete_last_task", lambda _paths: False)
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.askyesnocancel",
+        lambda *args, **kwargs: next(choices),
+    )
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.showerror",
+        lambda *args, **kwargs: errors.append((args, kwargs)),
+    )
+
+    app._offer_resume()
+
+    assert checkpoint.exists()
+    assert len(errors) == 1
+    app.root.destroy.assert_called_once_with()
+    app._append_log.assert_not_called()
+    app._start_task.assert_not_called()
+
+
+def test_gui_damaged_checkpoint_delete_failure_exits(monkeypatch, tmp_path):
+    paths = get_runtime_paths(tmp_path)
+    checkpoint = paths.cache_dir / "last_task.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("broken\n", encoding="utf-8")
+    app = _resume_app(paths)
+    errors = []
+    monkeypatch.setattr("cnkibug.gui.app.load_last_task", lambda _paths: None)
+    monkeypatch.setattr("cnkibug.gui.app.delete_last_task", lambda _paths: False)
+    monkeypatch.setattr(
+        "cnkibug.gui.app.messagebox.showerror",
+        lambda *args, **kwargs: errors.append((args, kwargs)),
+    )
+
+    app._offer_resume()
+
+    assert checkpoint.exists()
+    assert len(errors) == 1
+    app.root.destroy.assert_called_once_with()
+    app._start_task.assert_not_called()
+
+
+def test_gui_show_form_restores_scroll_view_before_footer():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._running = False
+    app._progress_frame = Mock()
+    app._form_view = Mock()
+    app._form_canvas = Mock()
+    app._footer = object()
+
+    app._show_form()
+
+    app._progress_frame.pack_forget.assert_called_once_with()
+    app._form_view.pack.assert_called_once_with(
+        fill="both",
+        expand=True,
+        before=app._footer,
+    )
+    app._form_canvas.yview_moveto.assert_called_once_with(0)

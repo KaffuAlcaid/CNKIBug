@@ -14,6 +14,7 @@ VERIFY_NONE = "none"
 VERIFY_PASSED = "passed"
 VERIFY_TIMEOUT = "timeout"
 VERIFY_CANCELLED = "cancelled"
+VERIFY_PAGE_CLOSED = "page_closed"
 
 _logger = logging.getLogger("cnkibug.cnki_guard")
 
@@ -23,6 +24,8 @@ def handle_verify(
     settings: ScraperSettings,
     events: EventSink = NULL_EVENTS,
 ) -> str:
+    if _page_closed(page):
+        return VERIFY_PAGE_CLOSED
     if "/verify" not in page.url:
         return VERIFY_NONE
 
@@ -33,7 +36,13 @@ def handle_verify(
     waited = 0.0
     interval = 1.0
     next_notice = float(settings.verify_notice_interval_sec)
-    while "/verify" in page.url:
+    while True:
+        if _page_closed(page):
+            _logger.info("安全验证等待因浏览器页面关闭而停止")
+            events.emit("progress_resumed")
+            return VERIFY_PAGE_CLOSED
+        if "/verify" not in page.url:
+            break
         if events.cancel_requested():
             _logger.info("安全验证等待被用户停止")
             events.emit("progress_resumed")
@@ -61,6 +70,11 @@ def handle_verify_with_progress(
     events: EventSink = NULL_EVENTS,
 ) -> str:
     return handle_verify(page, settings, events)
+
+
+def _page_closed(page: Any) -> bool:
+    is_closed = getattr(page, "is_closed", None)
+    return bool(callable(is_closed) and is_closed())
 
 
 def print_page_debug(

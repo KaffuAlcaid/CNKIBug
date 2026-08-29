@@ -2,8 +2,10 @@ import pytest
 
 from cnkibug.core.estimate import (
     estimate_active_seconds,
+    estimate_active_work_seconds,
     estimate_progress,
     estimate_seconds,
+    estimate_work_seconds,
     format_eta,
 )
 
@@ -16,6 +18,11 @@ def test_estimate_single_keyword():
 def test_estimate_multi_keyword():
     assert estimate_active_seconds(3, 2) == (53, 80)
     assert estimate_seconds(3, 2) == (71, 105)
+
+
+def test_estimate_workload_accepts_partial_pages_across_keywords():
+    assert estimate_active_work_seconds(5, 2) == (45, 68)
+    assert estimate_work_seconds(5, 2) == (63, 93)
 
 
 def test_estimate_with_citations_uses_paired_sample_range():

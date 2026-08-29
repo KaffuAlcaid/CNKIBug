@@ -11,12 +11,16 @@ from ..fileio.keyword_input import (
     load_keywords_txt,
 )
 from .console import safe_input
-from ..core.estimate import estimate_seconds, format_eta
+from ..core.estimate import (
+    LONG_TASK_WARNING_SECONDS,
+    LONG_TASK_WARNING_TEXT,
+    estimate_seconds,
+    format_eta,
+)
 from .ui import _console
 
 
 _logger = logging.getLogger("cnkibug.app.prompts")
-_LONG_TASK_WARNING_SECONDS = 10 * 60
 
 
 @dataclass(frozen=True)
@@ -272,11 +276,8 @@ def _preview_task(
         _console.print(
             f"  [dim]另有 {len(keywords) - len(preview_keywords)} 个关键词未展开显示[/dim]"
         )
-    if eta_high > _LONG_TASK_WARNING_SECONDS:
-        _console.print(
-            "  [bold yellow]风险提示：预计耗时上限已超过 10 分钟，"
-            "任务较大且更容易触发知网反爬验证。[/bold yellow]"
-        )
+    if eta_high > LONG_TASK_WARNING_SECONDS:
+        _console.print(f"  [bold yellow]{LONG_TASK_WARNING_TEXT}[/bold yellow]")
     _console.print("=" * 50)
     choice = _ask_choice(
         "",
