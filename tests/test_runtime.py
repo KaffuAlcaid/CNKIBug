@@ -162,6 +162,60 @@ def test_load_or_create_config_backs_up_broken_json(tmp_path):
     assert any(level == "WARNING" for level, _ in events)
 
 
+def test_config_theme_defaults_for_existing_files_without_warning(tmp_path):
+    paths = runtime.get_runtime_paths(tmp_path)
+    paths.data_dir.mkdir()
+    old_config = runtime.DEFAULT_CONFIG.copy()
+    old_config.pop("gui_theme")
+    paths.config_path.write_text(json.dumps(old_config), encoding="utf-8")
+
+    config, events = runtime.load_or_create_config(paths)
+
+    assert config["gui_theme"] == "litera"
+    assert not any(level == "WARNING" for level, _ in events)
+
+
+def test_save_config_persists_theme_and_scraper_values(tmp_path):
+    path = tmp_path / "config.json"
+    config = {**runtime.DEFAULT_CONFIG, "gui_theme": "darkly", "timeout_selector_ms": 30500}
+
+    saved = runtime.save_config(path, config)
+
+    assert saved == config
+    assert runtime.read_config(path) == config
+    assert b"\r\n" not in path.read_bytes()
+
+
+@pytest.mark.parametrize("key,value", [
+    ("timeout_goto_ms", 0),
+    ("timeout_load_ms", True),
+    ("verify_wait_timeout_sec", 1.5),
+    ("session_cache_enabled", "false"),
+    ("gui_theme", "unknown"),
+    ("log_level", ["INFO"]),
+])
+def test_save_config_rejects_invalid_values_before_writing(tmp_path, key, value):
+    path = tmp_path / "config.json"
+    runtime.save_config(path, runtime.DEFAULT_CONFIG)
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match=key):
+        runtime.save_config(path, {**runtime.DEFAULT_CONFIG, key: value})
+
+    assert path.read_bytes() == before
+
+
+def test_read_config_reports_invalid_json_without_repairing_file(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text("{ broken", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        runtime.read_config(path)
+
+    assert path.read_text(encoding="utf-8") == "{ broken"
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_build_log_path_uses_log_dir_and_current_day(tmp_path):
     paths = runtime.get_runtime_paths(tmp_path)
     log_path = runtime.build_log_path(paths, datetime(2026, 6, 30, 12, 0, 0))

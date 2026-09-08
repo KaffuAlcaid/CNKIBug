@@ -8,7 +8,11 @@
 CNKIBug-data/config.json
 ```
 
-修改配置后请重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
+GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话和日志选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
+
+手动编辑配置文件后，可在设置窗口点击重新读取配置；GUI 开始抓取前也会读取配置文件。终端版需重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
+
+恢复默认只填写设置窗口中的选项，点击保存后才会写入文件。重新读取配置会立即应用文件中的设置；读取失败时保留当前设置。
 
 ```json
 {
@@ -25,7 +29,8 @@ CNKIBug-data/config.json
   "log_save_path": true,
   "log_keywords": false,
   "log_scraped_records": false,
-  "detail_txt_export": false
+  "detail_txt_export": false,
+  "gui_theme": "litera"
 }
 ```
 
@@ -45,11 +50,12 @@ CNKIBug-data/config.json
 | `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |
 | `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
 | `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                 |
+| `gui_theme`                  | `"litera"` | `"litera"` / `"darkly"`          | GUI 浅色或暗色主题，随设置保存并记忆                 |
 
 ## 常见调整
 
 - 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大
 - 验证码来不及处理：把 `verify_wait_timeout_sec` 调大
-- 会话状态异常：删除 `CNKIBug-data/cache/cookies`，或把 `session_cache_enabled` 改为 `false` 后重启
+- 会话状态异常：删除 `CNKIBug-data/cache/cookies`，或在 GUI 设置中关闭复用浏览器会话；终端版将 `session_cache_enabled` 改为 `false` 后重启
 - 不想日志记录本机路径：把 `log_save_path` 改为 `false`
 - 需要把论文关键词重新导入软件：把 `detail_txt_export` 改为 `true` 后重启

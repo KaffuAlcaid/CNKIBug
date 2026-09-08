@@ -254,6 +254,7 @@ def _scrape_with_errors(
             on_page_complete=on_page_complete,
             include_citation=task.include_citation,
             detail_fetcher=task.detail_fetcher,
+            **({"advanced_query": task.advanced_queries[keyword]} if keyword in task.advanced_queries else {}),
         )
     except PlaywrightTimeoutError as error:
         if task.session.acknowledge_page_closed():

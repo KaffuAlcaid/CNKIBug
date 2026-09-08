@@ -176,6 +176,8 @@ def build_task_report(
             "record_count": len(records),
             "missing_fields": _field_stats_dict(field_stats),
         }
+        if keyword in task_state.get("advanced_queries", {}):
+            keyword_report["advanced_query"] = task_state["advanced_queries"][keyword]
         if include_citation:
             keyword_report["citation"] = collect_citation_stats(records)
         if include_details:

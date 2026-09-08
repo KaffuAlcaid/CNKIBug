@@ -5,7 +5,7 @@ import os
 import time
 import tkinter as tk
 from base64 import b64encode
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from pathlib import Path
 from queue import Empty, Queue
@@ -18,7 +18,7 @@ from typing import Any
 import ttkbootstrap as ttk
 from PIL import Image
 
-from ..app.runtime import cleanup_runtime_history, init_runtime
+from ..app.runtime import cleanup_runtime_history, init_runtime, read_config
 from ..cnki.models import (
     STATUS_EMPTY,
     STATUS_FAILED,
@@ -35,6 +35,7 @@ from ..core.estimate import (
 )
 from ..core.memory import MemorySampler, format_memory
 from ..core.settings import ScraperSettings, get_scraper_settings
+from ..core.search_query import AdvancedQuery, load_advanced_queries
 from ..core.version import APP_VERSION
 from ..fileio.keyword_input import (
     KeywordImportError,
@@ -52,6 +53,8 @@ from ..workflow.state import (
     remaining_workload,
 )
 from .events import GuiEvent, GuiEventSink
+from .advanced import AdvancedSearchDialog, confirm_advanced_task
+from .settings import SettingsDialog
 
 
 _logger = logging.getLogger("cnkibug.gui")
@@ -72,6 +75,7 @@ class GuiTaskRequest:
     include_details: bool
     detail_txt_export: bool
     output_dir: Path | None
+    advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
 
 
 def _format_duration(seconds: float) -> str:
@@ -148,6 +152,7 @@ class CNKIBugApp:
             self.root.destroy()
             raise SystemExit(1) from error
         self.settings = get_scraper_settings(self.runtime.config)
+        self.root.style.theme_use(self.runtime.config["gui_theme"])
 
         self._event_queue: Queue[GuiEvent] = Queue()
         self._cancel_event = Event()
@@ -180,8 +185,10 @@ class CNKIBugApp:
         }
         self._log_line_count = 0
         self._keywords: list[str] = []
+        self._advanced_queries: dict[str, AdvancedQuery] = {}
 
         self._build_ui()
+        self._apply_config(self.runtime.config)
         self._update_memory_status()
         self.root.after(100, self._drain_events)
         self.root.after(250, self._tick)
@@ -224,6 +231,34 @@ class CNKIBugApp:
             ),
             parent=self.root,
         )
+
+    def _open_settings(self) -> None:
+        if self._running or not self._form_view.winfo_ismapped():
+            return
+        SettingsDialog(
+            self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config,
+        ).show()
+
+    def _apply_config(self, config: dict[str, Any]) -> None:
+        self.settings = get_scraper_settings(config)
+        self.runtime = replace(self.runtime, config=config.copy())
+        logging.getLogger().setLevel(config["log_level"])
+        style = self.root.style
+        if style.theme_use() != config["gui_theme"]:
+            style.theme_use(config["gui_theme"])
+        colors = style.colors
+        self._form_canvas.configure(background=colors.bg)
+        self._log.configure(
+            background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.inputfg,
+            selectbackground=colors.selectbg, selectforeground=colors.selectfg,
+        )
+        log_colors = (
+            {"warning": "#a56a00", "error": "#b42318", "success": "#19713f"}
+            if style.theme.type == "light"
+            else {"warning": colors.warning, "error": colors.danger, "success": colors.success}
+        )
+        for tag, color in log_colors.items():
+            self._log.tag_configure(tag, foreground=color)
 
     def _open_log_directory(self) -> None:
         try:
@@ -278,12 +313,18 @@ class CNKIBugApp:
         )
         header_actions = ttk.Frame(header)
         header_actions.pack(side=tk.RIGHT)
+        toolbar = ttk.Frame(header_actions)
+        toolbar.pack(fill=tk.X)
         ttk.Button(
-            header_actions,
+            toolbar,
             text="信息",
             command=self._show_info,
             bootstyle="secondary-outline",
-        ).pack(fill=tk.X)
+        ).pack(side=tk.RIGHT)
+        self._settings_button = ttk.Button(
+            toolbar, text="设置", command=self._open_settings, bootstyle="secondary-outline",
+        )
+        self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
         self._maintenance_actions = ttk.Frame(header_actions)
         self._maintenance_actions.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(
@@ -323,12 +364,21 @@ class CNKIBugApp:
         )
         self._form.bind("<Configure>", self._update_form_scrollregion)
         self._form_canvas.bind("<Configure>", self._resize_form_width)
-        self.root.bind_all("<MouseWheel>", self._scroll_form, add="+")
-        self.root.bind_all("<Button-4>", self._scroll_form, add="+")
-        self.root.bind_all("<Button-5>", self._scroll_form, add="+")
+        self.root.bind("<MouseWheel>", self._scroll_form, add="+")
+        self.root.bind("<Button-4>", self._scroll_form, add="+")
+        self.root.bind("<Button-5>", self._scroll_form, add="+")
 
         keyword_frame = ttk.Labelframe(self._form, text="检索内容", padding=10)
         keyword_frame.pack(fill=tk.X, pady=(0, 10))
+
+        advanced_row = ttk.Frame(keyword_frame)
+        advanced_row.pack(fill=tk.X, pady=(0, 10))
+        self._advanced_button = ttk.Button(
+            advanced_row, text="高级检索", command=self._open_advanced,
+            bootstyle="secondary-outline",
+        )
+        self._advanced_button.pack(side=tk.LEFT)
+        ttk.Label(advanced_row, text="实验性", bootstyle="warning").pack(side=tk.LEFT, padx=8)
 
         entry_row = ttk.Frame(keyword_frame)
         entry_row.pack(fill=tk.X)
@@ -357,17 +407,20 @@ class CNKIBugApp:
         list_frame.pack(fill=tk.X)
         self._keyword_list = ttk.Treeview(
             list_frame,
-            columns=("number", "keyword"),
+            columns=("number", "type", "keyword"),
             show="headings",
             height=6,
             selectmode="browse",
         )
         self._keyword_list.heading("number", text="#")
+        self._keyword_list.heading("type", text="类型")
         self._keyword_list.heading("keyword", text="当前任务检索项")
         self._keyword_list.column("number", width=48, minwidth=48, stretch=False, anchor=tk.CENTER)
+        self._keyword_list.column("type", width=92, minwidth=92, stretch=False, anchor=tk.CENTER)
         self._keyword_list.column("keyword", minwidth=300, anchor=tk.W)
         self._keyword_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._keyword_list.bind("<<TreeviewSelect>>", self._keyword_selected)
+        self._keyword_list.bind("<Double-1>", self._edit_selected_item)
         keyword_scrollbar = ttk.Scrollbar(
             list_frame,
             orient=tk.VERTICAL,
@@ -538,9 +591,6 @@ class CNKIBugApp:
 
         self._log = ScrolledText(progress_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
         self._log.pack(fill=tk.BOTH, expand=True)
-        self._log.tag_configure("warning", foreground="#a56a00")
-        self._log.tag_configure("error", foreground="#b42318")
-        self._log.tag_configure("success", foreground="#19713f")
 
         stop_row = ttk.Frame(progress_frame)
         stop_row.pack(fill=tk.X, pady=(8, 0))
@@ -569,6 +619,7 @@ class CNKIBugApp:
         self._form_controls = [
             self._keyword_entry,
             self._add_keyword_button,
+            self._advanced_button,
             self._import_button,
             self._pages_entry,
             self._output_entry,
@@ -594,7 +645,11 @@ class CNKIBugApp:
     def _scroll_form(self, event: tk.Event) -> None:
         if not self._form_view.winfo_ismapped():
             return
-        pointer = self.root.winfo_containing(*self.root.winfo_pointerxy())
+        try:
+            pointer = self.root.winfo_containing(*self.root.winfo_pointerxy())
+        except KeyError:
+            # Tcl-created controls such as Combobox popdowns have no Python widget.
+            return
         if pointer is self._keyword_list:
             return
         current = pointer
@@ -633,6 +688,7 @@ class CNKIBugApp:
 
     def _set_keywords(self, keywords: list[str], status: str | None = None) -> None:
         self._keywords = list(keywords)
+        self._advanced_queries = {key: query for key, query in self._advanced_queries.items() if key in self._keywords}
         items = self._keyword_list.get_children()
         if items:
             self._keyword_list.delete(*items)
@@ -641,7 +697,11 @@ class CNKIBugApp:
                 "",
                 tk.END,
                 iid=f"keyword-{index}",
-                values=(index + 1, keyword),
+                values=(
+                    index + 1,
+                    "高级检索" if keyword in self._advanced_queries else "普通检索",
+                    self._advanced_queries[keyword].summary() if keyword in self._advanced_queries else keyword,
+                ),
             )
         self._keyword_status_var.set(status or f"当前任务：{len(self._keywords)} 项")
         self._sync_keyword_action_states()
@@ -654,8 +714,59 @@ class CNKIBugApp:
     def _keyword_selected(self, _event: tk.Event | None = None) -> None:
         index = self._selected_keyword_index()
         if index is not None:
-            self._keyword_var.set(self._keywords[index])
+            keyword = self._keywords[index]
+            self._keyword_var.set("" if keyword in self._advanced_queries else keyword)
         self._sync_keyword_action_states()
+
+    def _edit_selected_item(self, event: tk.Event) -> None:
+        if self._running:
+            return
+        item_id = self._keyword_list.identify_row(event.y)
+        if not item_id:
+            return
+        self._keyword_list.selection_set(item_id)
+        self._keyword_selected()
+        index = self._selected_keyword_index()
+        if index is not None and self._keywords[index] in self._advanced_queries:
+            self._open_advanced(index)
+        else:
+            self._keyword_entry.focus_set()
+
+    def _open_advanced(self, index: int | None = None) -> None:
+        if self._running:
+            return
+        pending = self._keyword_var.get().strip()
+        selected = self._selected_keyword_index()
+        if pending and (selected is None or pending != self._keywords[selected]):
+            messagebox.showwarning(
+                "检索项尚未保存", "请先将输入框中的内容保存到任务列表。", parent=self.root,
+            )
+            return
+        keyword = self._keywords[index] if index is not None else None
+        original = self._advanced_queries.get(keyword) if keyword is not None else None
+        query = AdvancedSearchDialog(self.root, original).show()
+        if query is None:
+            return
+        for existing, value in self._advanced_queries.items():
+            if existing != keyword and value == query:
+                self._select_keyword(self._keywords.index(existing))
+                messagebox.showwarning("重复检索项", "相同的高级检索条件已在当前任务中。", parent=self.root)
+                return
+        if keyword is None:
+            number = 1
+            while f"高级检索 {number}" in self._keywords:
+                number += 1
+            keyword = f"高级检索 {number}"
+            try:
+                keywords = _merge_task_keywords(self._keywords, [keyword]).keywords
+            except KeywordImportError as error:
+                messagebox.showerror("任务列表已满", str(error), parent=self.root)
+                return
+        else:
+            keywords = list(self._keywords)
+        self._advanced_queries[keyword] = query
+        self._set_keywords(keywords)
+        self._select_keyword(keywords.index(keyword))
 
     def _reset_keyword_editor(self, *, focus: bool = False) -> None:
         self._keyword_var.set("")
@@ -686,8 +797,13 @@ class CNKIBugApp:
         self._reset_keyword_editor(focus=True)
 
     def _modify_keyword(self) -> None:
+        if self._running:
+            return
         index = self._selected_keyword_index()
         if index is None:
+            return
+        if self._keywords[index] in self._advanced_queries:
+            self._open_advanced(index)
             return
         keyword = self._keyword_var.get().strip()
         if not keyword:
@@ -706,6 +822,8 @@ class CNKIBugApp:
         self._reset_keyword_editor(focus=True)
 
     def _delete_keyword(self) -> None:
+        if self._running:
+            return
         index = self._selected_keyword_index()
         if index is None:
             return
@@ -749,6 +867,8 @@ class CNKIBugApp:
             return
         duplicate_count = imported.duplicate_count + merged.duplicate_count
         duplicate_text = f"；跳过 {duplicate_count} 个重复项" if duplicate_count else ""
+        if not append:
+            self._advanced_queries.clear()
         self._set_keywords(
             merged.keywords,
             f"已从 TXT 载入 {len(imported.keywords)} 项；当前任务：{len(merged.keywords)} 项"
@@ -819,7 +939,12 @@ class CNKIBugApp:
         )
         summary += _long_task_warning(high)
         summary += "确认无误后才会启动浏览器和抓取任务。"
-        if messagebox.askokcancel("开始前确认", summary, parent=self.root):
+        confirmed = (
+            confirm_advanced_task(self.root, summary, request.advanced_queries)
+            if request.advanced_queries
+            else messagebox.askokcancel("开始前确认", summary, parent=self.root)
+        )
+        if confirmed:
             self._start_task(request=request)
 
     def _collect_request(self) -> GuiTaskRequest | None:
@@ -869,6 +994,7 @@ class CNKIBugApp:
             include_details=include_details,
             detail_txt_export=self._txt_var.get(),
             output_dir=output_dir,
+            advanced_queries=dict(self._advanced_queries),
         )
 
     def _offer_resume(self) -> None:
@@ -931,6 +1057,7 @@ class CNKIBugApp:
 
     def _populate_resume_form(self, state: dict[str, Any]) -> None:
         keywords = state.get("keywords", [])
+        self._advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
         self._set_keywords([str(item) for item in keywords])
         self._reset_keyword_editor()
         self._pages_var.set(str(state.get("max_pages", 1)))
@@ -966,6 +1093,7 @@ class CNKIBugApp:
                     if isinstance(stored_output_dir, str) and stored_output_dir.strip()
                     else None
                 ),
+                advanced_queries=load_advanced_queries(resume_state.get("advanced_queries", {}), resume_state["keywords"]),
             )
         assert request is not None
 
@@ -981,6 +1109,13 @@ class CNKIBugApp:
             return
         request = replace(request, output_dir=output_dir)
 
+        try:
+            config = read_config(self.runtime.paths.config_path)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("无法读取配置", str(error), parent=self.root)
+            return
+        self._apply_config(config)
+        task_settings = self.settings
         self._cancel_event.clear()
         self._set_running(True)
         self._reset_progress()
@@ -989,6 +1124,7 @@ class CNKIBugApp:
         self._update_memory_status()
         self._clear_log()
         self._form_view.pack_forget()
+        self._settings_button.pack_forget()
         self._progress_frame.pack(fill=tk.BOTH, expand=True)
         self._new_task_button.configure(state=tk.DISABLED)
 
@@ -1003,11 +1139,12 @@ class CNKIBugApp:
                     include_citation=request.include_citation,
                     include_details=request.include_details,
                     detail_txt_export=request.detail_txt_export,
-                    settings=self.settings,
+                    settings=task_settings,
                     paths=self.runtime.paths,
                     events=self._events,
                     output_dir=request.output_dir,
                     cancel_event=self._cancel_event,
+                    **({"advanced_queries": request.advanced_queries} if request.advanced_queries else {}),
                 )
             except Exception as error:
                 _logger.exception("GUI 任务线程异常")
@@ -1215,6 +1352,7 @@ class CNKIBugApp:
         self._progress_frame.pack_forget()
         self._form_view.pack(fill=tk.BOTH, expand=True, before=self._footer)
         self._form_canvas.yview_moveto(0)
+        self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
 
     def _tick(self) -> None:
         now = time.monotonic()

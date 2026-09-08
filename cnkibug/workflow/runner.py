@@ -11,10 +11,11 @@ from playwright.sync_api import sync_playwright
 
 from ..browser.runtime import BrowserLaunchError, create_browser_context, launch_browser
 from ..cnki.details import ArticleDetailFetcher
-from ..cnki.search import warmup
+from ..cnki.search import CNKIOverseaRedirectError, warmup
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
+from ..core.search_query import AdvancedQuery
 from .finalize import finalize_task
 from .keyword_run import run_keywords, start_progress
 from .task import TaskContext, initialize_task
@@ -37,6 +38,7 @@ def scrape_cnki(
     events: EventSink = NULL_EVENTS,
     output_dir: Path | None = None,
     cancel_event: Event | None = None,
+    advanced_queries: dict[str, AdvancedQuery] | None = None,
 ) -> None:
     if not keywords:
         events.emit("message", text="[!] 未提供任何关键词，已跳过抓取。", level="warning")
@@ -57,6 +59,7 @@ def scrape_cnki(
         events,
         output_dir=output_dir,
         cancel_event=cancel_event,
+        **({"advanced_queries": advanced_queries} if advanced_queries else {}),
     )
     _logger.info(
         "抓取任务开始: keyword_count=%d max_pages=%d save_mode=%s "
@@ -90,6 +93,10 @@ def scrape_cnki(
                 task.session.request_stop("浏览器启动失败")
                 _logger.error("浏览器启动失败: %s", error)
                 task.events.emit("browser_launch_failed", error=str(error))
+            except CNKIOverseaRedirectError as error:
+                task.session.request_stop(str(error))
+                _logger.error("CNKI 海外页面不受支持: url=%s", error.url)
+                task.events.emit("message", text=f"[x] {error}", level="error")
             except RuntimeError as error:
                 task.session.request_stop("运行时错误")
                 _logger.error("抓取任务运行时错误: %s", error)

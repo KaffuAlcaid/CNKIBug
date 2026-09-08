@@ -59,8 +59,13 @@ def test_no_result_fixture_matches_outcome_contract(page):
 
 
 def test_verify_fixture_matches_url_contract(page):
-    page.goto((FIXTURES / "verify" / "index.html").as_uri())
-
-    outcome = wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
-
-    assert outcome == "verify"
+    url = "https://kns.cnki.net/verify/index.html"
+    page.route(url, lambda route: route.fulfill(
+        path=str(FIXTURES / "verify" / "index.html"), content_type="text/html",
+    ))
+    try:
+        page.goto(url)
+        outcome = wait_search_outcome(page, type("Settings", (), {"timeout_selector_ms": 1000})())
+        assert outcome == "verify"
+    finally:
+        page.unroute(url)

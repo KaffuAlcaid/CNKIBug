@@ -11,6 +11,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
+from ..core.search_query import AdvancedQuery
 from ..browser.session import ScrapeSession, require_page
 from .guard import (
     VERIFY_CANCELLED,
@@ -26,10 +27,13 @@ from .selectors import (
     SELECTOR_SEARCH_BUTTON,
     SELECTOR_SEARCH_INPUT,
 )
+from .advanced import submit_advanced_search
 
 
 CNKI_HOME_URL = "https://www.cnki.net/"
 CNKI_SEARCH_URL = "https://kns.cnki.net/kns8s/"
+CNKI_ADVANCED_URL = "https://kns.cnki.net/kns8s/AdvSearch"
+CNKI_OVERSEA_MARKER = "oversea.cnki.net"
 WARMUP_KEYWORD = "焊接"
 
 _logger = logging.getLogger("cnkibug.cnki.search")
@@ -38,6 +42,16 @@ SEARCH_RESULTS = "has_results"
 SEARCH_EMPTY = "no_content"
 SEARCH_FAILED = "failed"
 SEARCH_STOPPED = "stopped"
+SEARCH_OVERSEA = "oversea"
+
+
+class CNKIOverseaRedirectError(RuntimeError):
+    def __init__(self, url: str) -> None:
+        self.url = url
+        super().__init__(
+            "检测到 CNKI 海外页面，当前抓取仅支持国内站点，"
+            "请关闭代理或切换到中国大陆出口后重试。"
+        )
 
 
 @dataclass(frozen=True)
@@ -80,6 +94,14 @@ def _stopped_result(session: ScrapeSession) -> SearchResult:
     return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户请求停止")
 
 
+def _ensure_supported_site(page: Any, stage: str) -> None:
+    url = str(page.url)
+    _logger.info("页面导航完成: stage=%s url=%s", stage, url)
+    if CNKI_OVERSEA_MARKER in url.lower():
+        _logger.error("检测到 CNKI 海外页面: stage=%s url=%s", stage, url)
+        raise CNKIOverseaRedirectError(url)
+
+
 def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
     events = session.events
     _logger.info("预热开始")
@@ -97,6 +119,7 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
             page.wait_for_load_state("domcontentloaded", timeout=settings.timeout_load_ms)
             if session.acknowledge_stop_request():
                 return False
+            _ensure_supported_site(page, "预热首页")
         _logger.info("预热首页加载完成")
         stop_reason = _verify_stop_reason(
             session,
@@ -115,6 +138,18 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
             page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
             if session.acknowledge_stop_request():
                 return False
+            _ensure_supported_site(page, "预热检索页")
+            stop_reason = _verify_stop_reason(
+                session,
+                handle_verify(page, settings, events),
+            )
+            if stop_reason:
+                _logger.warning("预热检索页因验证或停止请求结束: reason=%s", stop_reason)
+                return False
+            # Verification can navigate to a document whose form scripts are still loading.
+            page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+            if session.acknowledge_stop_request():
+                return False
             page.fill(
                 SELECTOR_SEARCH_INPUT,
                 WARMUP_KEYWORD,
@@ -125,10 +160,19 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
             page.click(SELECTOR_SEARCH_BUTTON, timeout=settings.timeout_selector_ms)
             if session.acknowledge_stop_request():
                 return False
-            page.wait_for_selector(
-                SELECTOR_RESULT_ROWS,
-                timeout=settings.timeout_selector_ms,
-            )
+            while True:
+                outcome = wait_search_outcome(page, settings)
+                if outcome == SEARCH_OVERSEA:
+                    _ensure_supported_site(page, "预热结果页")
+                if outcome != "verify":
+                    break
+                stop_reason = _verify_stop_reason(
+                    session,
+                    handle_verify(page, settings, events),
+                )
+                if stop_reason:
+                    _logger.warning("预热结果页因验证或停止请求结束: reason=%s", stop_reason)
+                    return False
             if session.acknowledge_stop_request():
                 return False
         _logger.info("预热检索完成")
@@ -152,6 +196,12 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
         if session.acknowledge_page_closed(page):
             _logger.warning("预热因浏览器页面关闭而停止")
             return False
+        if "ERR_CERT_" in str(warmup_err):
+            reason = "CNKI 连接证书校验失败，当前代理或网络环境不受支持，请关闭代理后重试。"
+            session.request_stop(reason)
+            _logger.error("预热因证书校验失败停止: %s", warmup_err)
+            events.emit("message", text=f"[x] {reason}", level="error")
+            return False
         _logger.warning("预热未完全成功，继续正式抓取: %s", warmup_err)
         events.emit(
             "message",
@@ -173,20 +223,24 @@ def open_home_page(
         if events.cancel_requested():
             return
         page.wait_for_load_state("domcontentloaded", timeout=settings.timeout_load_ms)
+        _ensure_supported_site(page, "关键词首页")
 
 
 def open_search_page(
     page: Any,
     settings: ScraperSettings,
     events: EventSink = NULL_EVENTS,
+    *,
+    advanced: bool = False,
 ) -> None:
     with events.activity("少女祈祷中..."):
         if events.cancel_requested():
             return
-        page.goto(CNKI_SEARCH_URL, timeout=settings.timeout_goto_ms)
+        page.goto(CNKI_ADVANCED_URL if advanced else CNKI_SEARCH_URL, timeout=settings.timeout_goto_ms)
         if events.cancel_requested():
             return
         page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+        _ensure_supported_site(page, "关键词检索页")
 
 
 def submit_search(
@@ -208,7 +262,13 @@ def submit_search(
 def wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
     return page.wait_for_function(
         """(selectors) => {
-            if (location.pathname.includes('/verify')) return 'verify';
+            const href = location.href.toLowerCase();
+            const host = location.hostname.toLowerCase();
+            const path = location.pathname.toLowerCase();
+            const isCnki = host === 'cnki.net' || host.endsWith('.cnki.net');
+            if (href.includes('oversea.cnki.net')) return 'oversea';
+            if (isCnki && (path.includes('/verify') ||
+                (document.title || '').includes('安全验证'))) return 'verify';
             if (document.querySelector(selectors.resultRows)) return 'has_results';
             if (document.querySelector(selectors.noContent)) return 'no_content';
             return false;
@@ -226,6 +286,8 @@ def run_keyword_search(
     keyword: str,
     settings: ScraperSettings,
     keyword_ref: str,
+    *,
+    advanced_query: AdvancedQuery | None = None,
 ) -> SearchResult:
     if session.acknowledge_stop_request():
         return _stopped_result(session)
@@ -262,7 +324,10 @@ def run_keyword_search(
     if session.acknowledge_stop_request():
         return _stopped_result(session)
     try:
-        open_search_page(page, settings, events)
+        if advanced_query is None:
+            open_search_page(page, settings, events)
+        else:
+            open_search_page(page, settings, events, advanced=True)
     except PlaywrightTimeoutError:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
@@ -292,7 +357,13 @@ def run_keyword_search(
     if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
     try:
-        submit_search(page, keyword, settings, events)
+        page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
+        if session.acknowledge_stop_request():
+            return _stopped_result(session)
+        if advanced_query is None:
+            submit_search(page, keyword, settings, events)
+        else:
+            submit_advanced_search(page, advanced_query, settings, events)
     except PlaywrightError:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
@@ -314,6 +385,7 @@ def run_keyword_search(
         if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
             return _stopped_result(session)
         try:
+            _ensure_supported_site(page, "关键词结果页")
             outcome = wait_search_outcome(page, settings)
         except PlaywrightTimeoutError:
             if session.acknowledge_stop_request():
@@ -331,6 +403,8 @@ def run_keyword_search(
 
         if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
             return _stopped_result(session)
+        if outcome == SEARCH_OVERSEA:
+            _ensure_supported_site(page, "关键词结果页")
         if outcome != "verify":
             return SearchResult(outcome)
 

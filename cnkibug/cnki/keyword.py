@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
+from ..core.search_query import AdvancedQuery
 from .details import ArticleDetailFetcher
 from .metrics import keyword_log_ref, missing_field_text, new_scrape_stats
 from .models import (
@@ -44,6 +45,7 @@ def scrape_keyword(
     on_page_complete: Callable[[int, list[list[str]]], None] | None = None,
     include_citation: bool = False,
     detail_fetcher: ArticleDetailFetcher | None = None,
+    advanced_query: AdvancedQuery | None = None,
 ) -> KeywordResult:
     current_start_page = start_page
     current_records = list(initial_records or [])
@@ -60,6 +62,7 @@ def scrape_keyword(
             on_page_complete=on_page_complete,
             include_citation=include_citation,
             detail_fetcher=detail_fetcher,
+            **({"advanced_query": advanced_query} if advanced_query is not None else {}),
         )
         if result is not None:
             return result
@@ -80,6 +83,7 @@ def _scrape_keyword_attempt(
     on_page_complete: Callable[[int, list[list[str]]], None] | None,
     include_citation: bool,
     detail_fetcher: ArticleDetailFetcher | None,
+    advanced_query: AdvancedQuery | None = None,
 ) -> KeywordResult | None:
     page = require_page(session)
     events = session.events
@@ -92,7 +96,10 @@ def _scrape_keyword_attempt(
     )
     stats = new_scrape_stats()
     seen: set[Any] = {record_dedup_key(record) for record in results}
-    events.emit("message", text=f"\n[*] 目标关键词：{keyword}")
+    if advanced_query is None:
+        events.emit("message", text=f"\n[*] 目标关键词：{keyword}")
+    else:
+        events.emit("message", text=f"\n[*] {keyword}：{advanced_query.summary()}")
     _logger.info(
         "关键词开始: %s max_pages=%d start_page=%d initial_records=%d",
         keyword_ref,
@@ -130,6 +137,7 @@ def _scrape_keyword_attempt(
         keyword,
         settings,
         keyword_ref,
+        **({"advanced_query": advanced_query} if advanced_query is not None else {}),
     )
     if session.acknowledge_stop_request():
         return _result(

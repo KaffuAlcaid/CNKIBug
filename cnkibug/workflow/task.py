@@ -13,6 +13,7 @@ from ..cnki.models import STATUS_FAILED, make_keyword_result
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
+from ..core.search_query import AdvancedQuery, load_advanced_queries
 from .report import TaskReport
 from .state import (
     completed_results,
@@ -46,6 +47,7 @@ class TaskContext:
     browser: Any | None = None
     browser_context: Any | None = None
     detail_fetcher: ArticleDetailFetcher | None = None
+    advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
 
     @property
     def total_records(self) -> int:
@@ -66,6 +68,7 @@ def initialize_task(
     *,
     output_dir: Path | None = None,
     cancel_event: Event | None = None,
+    advanced_queries: dict[str, AdvancedQuery] | None = None,
 ) -> TaskContext:
     if resume_state is not None:
         keywords = list(resume_state["keywords"])
@@ -78,6 +81,7 @@ def initialize_task(
         output_dir = Path(stored_output_dir) if isinstance(stored_output_dir, str) else None
         ts = str(resume_state["ts"])
         state = resume_state
+        advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
         all_results = stored_results(state)
         terminal_results = completed_results(state)
         events.emit(
@@ -115,6 +119,7 @@ def initialize_task(
             include_details=include_details,
             detail_txt_export=detail_txt_export,
             output_dir=output_dir,
+            advanced_queries=advanced_queries,
         )
         persist_task_state(state, "创建新任务", paths, events)
 
@@ -155,4 +160,5 @@ def initialize_task(
         events=events,
         session=ScrapeSession(events, cancel_event),
         output_dir=output_dir,
+        advanced_queries=dict(advanced_queries or {}),
     )

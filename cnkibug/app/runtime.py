@@ -31,6 +31,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "log_keywords": False,
     "log_scraped_records": False,
     "detail_txt_export": False,
+    "gui_theme": "litera",
 }
 
 
@@ -219,6 +220,32 @@ def load_or_create_config(paths: RuntimePaths) -> tuple[dict[str, Any], list[tup
     return config, events
 
 
+def validate_config(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("配置文件根结构必须是 JSON 对象。")
+    for key, default in DEFAULT_CONFIG.items():
+        if key in raw and type(raw[key]) is not type(default):
+            raise ValueError(f"配置项类型无效：{key}")
+    config, _, _ = _normalize_config(raw)
+    invalid = [
+        key for key in raw.keys() & DEFAULT_CONFIG.keys()
+        if raw[key] != config[key] and not (key == "version" and raw[key] == 1)
+    ]
+    if invalid:
+        raise ValueError(f"配置项取值无效：{', '.join(sorted(invalid))}")
+    return config
+
+
+def read_config(path: Path) -> dict[str, Any]:
+    return validate_config(json.loads(path.read_text(encoding="utf-8")))
+
+
+def save_config(path: Path, config: dict[str, Any]) -> dict[str, Any]:
+    validated = validate_config(config)
+    _write_config(path, validated)
+    return validated
+
+
 def setup_file_logging(log_path: Path, config: dict[str, Any]) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     level = getattr(logging, str(config.get("log_level", "INFO")), logging.INFO)
@@ -235,6 +262,7 @@ def _write_config(path: Path, config: dict[str, Any]) -> None:
     path.write_text(
         json.dumps(config, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -258,7 +286,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     for key, default in DEFAULT_CONFIG.items():
         if key not in raw:
             changed = True
-            level = "INFO" if raw_version == 1 and key == "detail_txt_export" else "WARNING"
+            level = "INFO" if key == "gui_theme" or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
             events.append((level, f"配置项缺失，已使用默认值: {key}={default!r}"))
             continue
         config[key] = raw[key]
@@ -287,6 +315,11 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     if config.get("log_level") not in {"INFO", "WARNING", "ERROR"}:
         events.append(("WARNING", "配置项无效，已恢复默认值: log_level='INFO'"))
         config["log_level"] = DEFAULT_CONFIG["log_level"]
+        changed = True
+
+    if config.get("gui_theme") not in ("litera", "darkly"):
+        events.append(("WARNING", "配置项无效，已恢复默认值: gui_theme='litera'"))
+        config["gui_theme"] = DEFAULT_CONFIG["gui_theme"]
         changed = True
 
     bool_keys = (

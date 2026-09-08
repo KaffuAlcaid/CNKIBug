@@ -83,13 +83,17 @@ def test_keyword_search_stops_after_verify_is_cancelled(monkeypatch):
     assert result.status == SEARCH_STOPPED
 
 
-@pytest.mark.parametrize("closed_step", ["home", "search", "submit"])
+@pytest.mark.parametrize("closed_step", ["home", "search", "ready", "submit"])
 def test_keyword_search_stops_when_navigation_page_is_closed(monkeypatch, closed_step):
     class Page:
         closed = False
 
         def is_closed(self):
             return self.closed
+
+        def wait_for_load_state(self, *args, **kwargs):
+            if closed_step == "ready":
+                close_page()
 
     page = Page()
     session = ScrapeSession()
@@ -128,13 +132,18 @@ def test_keyword_search_stops_when_navigation_page_is_closed(monkeypatch, closed
     assert session.stop_requested is True
 
 
-@pytest.mark.parametrize("closed_step", ["home", "search", "outcome"])
+@pytest.mark.parametrize("closed_step", ["home", "search", "ready", "outcome"])
 def test_keyword_search_treats_closed_page_timeout_as_stop(monkeypatch, closed_step):
     class Page:
+        url = search.CNKI_SEARCH_URL
         closed = False
 
         def is_closed(self):
             return self.closed
+
+        def wait_for_load_state(self, *args, **kwargs):
+            if closed_step == "ready":
+                close_page()
 
     page = Page()
     session = ScrapeSession()
@@ -180,7 +189,9 @@ def test_wait_search_outcome_detects_verify_url():
 
     class Page:
         def wait_for_function(self, script, **kwargs):
-            assert "location.pathname.includes('/verify')" in script
+            assert "path.includes('/verify')" in script
+            assert "document.title" in script
+            assert "href.includes('oversea.cnki.net')" in script
             return Result()
 
     outcome = search.wait_search_outcome(
@@ -191,19 +202,166 @@ def test_wait_search_outcome_detects_verify_url():
     assert outcome == "verify"
 
 
-def test_verify_progress_callback_pauses_and_resumes(monkeypatch):
-    page = SimpleNamespace(url="https://kns.cnki.net/verify")
+def test_warmup_handles_verify_before_and_after_search_submission(monkeypatch):
+    class Page:
+        url = "https://www.cnki.net/"
+        loaded = False
+
+        def goto(self, url, **kwargs):
+            self.url = "https://kns.cnki.net/verify/home" if "kns8s" in url else url
+
+        def wait_for_load_state(self, *args, **kwargs):
+            self.loaded = True
+
+        def fill(self, selector, value, **kwargs):
+            assert "/verify" not in self.url
+            assert self.loaded, "verification destination must finish loading before filling"
+
+        def click(self, selector, **kwargs):
+            self.url = "https://kns.cnki.net/verify/home"
+
+        def is_closed(self):
+            return False
+
+    page = Page()
+    session = ScrapeSession()
+    session.page = page
+    verify_calls = []
+
+    def pass_verify(page, settings, events=None):
+        if "/verify" not in page.url:
+            return VERIFY_NONE
+        verify_calls.append(page.url)
+        page.url = "https://kns.cnki.net/kns8s/"
+        page.loaded = False
+        return VERIFY_PASSED
+
+    monkeypatch.setattr(search, "handle_verify", pass_verify)
+    monkeypatch.setattr(
+        search,
+        "wait_search_outcome",
+        lambda page, settings: "verify" if "/verify" in page.url else SEARCH_RESULTS,
+    )
+    monkeypatch.setattr(session, "wait_interruptibly", lambda seconds: True)
+
+    assert search.warmup(session, _settings()) is True
+    assert verify_calls == [
+        "https://kns.cnki.net/verify/home",
+        "https://kns.cnki.net/verify/home",
+    ]
+
+
+def test_keyword_search_waits_for_page_load_after_verification(monkeypatch):
+    actions = []
+
+    def wait_for_load_state(state, **kwargs):
+        assert state == "load"
+        actions.append("loaded")
+
+    def verify(page, *args):
+        if "/verify" in page.url:
+            page.url = search.CNKI_SEARCH_URL
+            actions.append("verified")
+            return VERIFY_PASSED
+        return VERIFY_NONE
+
+    session = ScrapeSession()
+    session.page = SimpleNamespace(
+        url=search.CNKI_HOME_URL,
+        wait_for_load_state=wait_for_load_state,
+    )
+    monkeypatch.setattr(search, "open_home_page", lambda *args: None)
+    monkeypatch.setattr(
+        search, "open_search_page",
+        lambda page, *args: setattr(page, "url", "https://kns.cnki.net/verify"),
+    )
+    monkeypatch.setattr(search, "handle_verify_with_progress", verify)
+    monkeypatch.setattr(search, "submit_search", lambda *args: actions.append("submitted"))
+    monkeypatch.setattr(search, "wait_search_outcome", lambda *args: SEARCH_RESULTS)
+
+    result = search.run_keyword_search(session, "welding", _settings(), "ref")
+
+    assert result.status == SEARCH_RESULTS
+    assert actions == ["verified", "loaded", "submitted"]
+
+
+def test_warmup_accepts_empty_search_results(monkeypatch):
+    class Page:
+        url = "https://www.cnki.net/"
+
+        def goto(self, url, **kwargs):
+            self.url = url
+
+        def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+        def fill(self, *args, **kwargs):
+            return None
+
+        def click(self, *args, **kwargs):
+            return None
+
+        def is_closed(self):
+            return False
+
+    session = ScrapeSession()
+    session.page = Page()
+    monkeypatch.setattr(search, "handle_verify", lambda *args, **kwargs: VERIFY_NONE)
+    monkeypatch.setattr(search, "wait_search_outcome", lambda *args: search.SEARCH_EMPTY)
+    monkeypatch.setattr(session, "wait_interruptibly", lambda seconds: True)
+
+    assert search.warmup(session, _settings()) is True
+
+
+def test_warmup_rejects_url_containing_oversea_marker():
+    class Page:
+        url = "https://www.oversea.cnki.net/kns8s/"
+
+        def goto(self, *args, **kwargs):
+            return None
+
+        def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+    session = ScrapeSession()
+    session.page = Page()
+
+    with pytest.raises(search.CNKIOverseaRedirectError):
+        search.warmup(session, _settings())
+
+
+def test_warmup_stops_on_proxy_certificate_error():
+    class Page:
+        def goto(self, *args, **kwargs):
+            raise PlaywrightError("net::ERR_CERT_COMMON_NAME_INVALID")
+
+        def is_closed(self):
+            return False
+
+    session = ScrapeSession()
+    session.page = Page()
+
+    assert search.warmup(session, _settings()) is False
+    assert session.stop_requested is True
+    assert "证书校验失败" in session.stop_reason
+
+
+def test_verify_progress_callback_pauses_and_resumes():
+    waits = []
+
+    def dispatch_browser_events(milliseconds):
+        waits.append(milliseconds)
+        page.url = "https://kns.cnki.net/kns8s/"
+
+    page = SimpleNamespace(
+        url="https://kns.cnki.net/verify",
+        wait_for_timeout=dispatch_browser_events,
+    )
     recorded = []
 
     class Events(EventSink):
         def emit(self, name, **payload):
             recorded.append(name)
-
-    monkeypatch.setattr(
-        guard.time,
-        "sleep",
-        lambda seconds: setattr(page, "url", "https://kns.cnki.net/"),
-    )
 
     result = guard.handle_verify_with_progress(
         page,
@@ -212,12 +370,32 @@ def test_verify_progress_callback_pauses_and_resumes(monkeypatch):
     )
 
     assert result == VERIFY_PASSED
+    assert waits == [1000]
     assert recorded == [
         "progress_paused",
         "verify_required",
         "verify_passed",
         "progress_resumed",
     ]
+
+
+def test_verify_detects_cnki_security_title_without_verify_path():
+    page = SimpleNamespace(
+        url="https://kns.cnki.net/kns8s/",
+        title=lambda: "安全验证",
+        wait_for_timeout=lambda milliseconds: setattr(page, "title", lambda: "中国知网"),
+    )
+
+    assert guard.handle_verify(page, _settings()) == VERIFY_PASSED
+
+
+def test_verify_ignores_non_cnki_page_with_security_title():
+    page = SimpleNamespace(
+        url="https://example.test/verify",
+        title=lambda: "安全验证",
+    )
+
+    assert guard.handle_verify(page, _settings()) == VERIFY_NONE
 
 
 def test_verify_timeout_keeps_progress_paused(monkeypatch):
@@ -228,7 +406,8 @@ def test_verify_timeout_keeps_progress_paused(monkeypatch):
         def emit(self, name, **payload):
             recorded.append(name)
 
-    monkeypatch.setattr(guard.time, "sleep", lambda seconds: None)
+    clock = iter([0.0, 1.0])
+    monkeypatch.setattr(guard.time, "monotonic", lambda: next(clock))
 
     result = guard.handle_verify_with_progress(
         page,
@@ -240,8 +419,11 @@ def test_verify_timeout_keeps_progress_paused(monkeypatch):
     assert recorded == ["progress_paused", "verify_required", "verify_timeout"]
 
 
-def test_verify_wait_stops_promptly_when_gui_requests_cancellation(monkeypatch):
-    page = SimpleNamespace(url="https://kns.cnki.net/verify")
+def test_verify_wait_stops_promptly_when_gui_requests_cancellation():
+    page = SimpleNamespace(
+        url="https://kns.cnki.net/verify",
+        wait_for_timeout=lambda milliseconds: pytest.fail("must not wait"),
+    )
     recorded = []
 
     class Events(EventSink):
@@ -251,19 +433,14 @@ def test_verify_wait_stops_promptly_when_gui_requests_cancellation(monkeypatch):
         def cancel_requested(self):
             return True
 
-    monkeypatch.setattr(
-        guard.time,
-        "sleep",
-        lambda seconds: (_ for _ in ()).throw(AssertionError("must not sleep")),
-    )
-
     result = guard.handle_verify_with_progress(page, _settings(), Events())
 
     assert result == VERIFY_CANCELLED
     assert recorded == ["progress_paused", "verify_required", "progress_resumed"]
 
 
-def test_verify_wait_stops_when_page_is_closed(monkeypatch):
+@pytest.mark.parametrize("raise_on_close", [False, True])
+def test_verify_wait_stops_when_page_is_closed(raise_on_close):
     recorded = []
 
     class Page:
@@ -273,17 +450,35 @@ def test_verify_wait_stops_when_page_is_closed(monkeypatch):
         def is_closed(self):
             return self.closed
 
+        def wait_for_timeout(self, milliseconds):
+            self.closed = True
+            if raise_on_close:
+                raise PlaywrightError("Target page, context or browser has been closed")
+
     class Events(EventSink):
         def emit(self, name, **payload):
             recorded.append(name)
 
     page = Page()
-    monkeypatch.setattr(guard.time, "sleep", lambda seconds: setattr(page, "closed", True))
 
     result = guard.handle_verify_with_progress(page, _settings(), Events())
 
     assert result == VERIFY_PAGE_CLOSED
     assert recorded == ["progress_paused", "verify_required", "progress_resumed"]
+
+
+def test_verify_wait_propagates_error_while_page_is_open():
+    def fail_wait(milliseconds):
+        raise PlaywrightError("Browser wait failed")
+
+    page = SimpleNamespace(
+        url="https://kns.cnki.net/verify",
+        is_closed=lambda: False,
+        wait_for_timeout=fail_wait,
+    )
+
+    with pytest.raises(PlaywrightError, match="Browser wait failed"):
+        guard.handle_verify(page, _settings())
 
 
 def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
@@ -305,7 +500,10 @@ def test_scrape_keyword_waits_for_delayed_verify(monkeypatch):
     monkeypatch.setattr(search, "wait_search_outcome", lambda page, settings: next(outcomes))
     monkeypatch.setattr(guard, "handle_verify", handle_verify)
     session = ScrapeSession()
-    session.page = object()
+    session.page = SimpleNamespace(
+        url=search.CNKI_SEARCH_URL,
+        wait_for_load_state=lambda *args, **kwargs: None,
+    )
 
     result = keyword_scraper.scrape_keyword(session, "焊接", 1, _settings())
 

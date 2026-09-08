@@ -6,9 +6,10 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 import run_gui
 
-from cnkibug.app.runtime import get_runtime_paths
+from cnkibug.app.runtime import DEFAULT_CONFIG, RuntimeState, get_runtime_paths
 from cnkibug.cnki.models import STATUS_FAILED, STATUS_SUCCESS, make_keyword_result
 from cnkibug.core.version import APP_VERSION
 from cnkibug.gui.app import (
@@ -22,6 +23,7 @@ from cnkibug.gui.app import (
     _resolve_save_mode,
 )
 from cnkibug.gui.events import GuiEvent, GuiEventSink
+from cnkibug.gui.settings import SettingsDialog, _NUMERIC_FIELDS
 from cnkibug.workflow.report import TaskReport
 from cnkibug.workflow.state import (
     make_task_state,
@@ -606,6 +608,7 @@ def test_gui_show_form_restores_scroll_view_before_footer():
     app._form_view = Mock()
     app._form_canvas = Mock()
     app._footer = object()
+    app._settings_button = Mock()
 
     app._show_form()
 
@@ -616,3 +619,143 @@ def test_gui_show_form_restores_scroll_view_before_footer():
         before=app._footer,
     )
     app._form_canvas.yview_moveto.assert_called_once_with(0)
+    app._settings_button.pack.assert_called_once_with(side="right", padx=(0, 8))
+
+
+def test_gui_scroll_ignores_tcl_only_popdown():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = Mock()
+    app.root.winfo_pointerxy.return_value = (100, 200)
+    app.root.winfo_containing.side_effect = KeyError("popdown")
+    app._form_view = Mock()
+    app._form_view.winfo_ismapped.return_value = True
+    app._form_canvas = Mock()
+
+    assert app._scroll_form(SimpleNamespace(delta=-120)) is None
+
+    app._form_canvas.yview_scroll.assert_not_called()
+
+
+def test_gui_scroll_still_scrolls_main_form_children():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = Mock()
+    app.root.winfo_pointerxy.return_value = (100, 200)
+    app._form = Mock()
+    app._form_view = Mock()
+    app._form_view.winfo_ismapped.return_value = True
+    app._form_canvas = Mock()
+    app._keyword_list = Mock()
+    app.root.winfo_containing.return_value = Mock(master=app._form)
+
+    app._scroll_form(SimpleNamespace(delta=-120))
+    app._form_canvas.yview_scroll.assert_called_with(3, "units")
+    app._scroll_form(SimpleNamespace(delta=120))
+    app._form_canvas.yview_scroll.assert_called_with(-3, "units")
+
+
+@pytest.mark.parametrize("running,form_visible", [(True, True), (False, False)])
+def test_gui_settings_cannot_open_in_task_progress_view(monkeypatch, running, form_visible):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._running = running
+    app._form_view = Mock()
+    app._form_view.winfo_ismapped.return_value = form_visible
+    dialog = Mock()
+    monkeypatch.setattr("cnkibug.gui.app.SettingsDialog", dialog)
+
+    app._open_settings()
+
+    dialog.assert_not_called()
+
+
+def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, tmp_path):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    paths = get_runtime_paths(tmp_path)
+    app.runtime = RuntimeState(paths, DEFAULT_CONFIG.copy(), paths.log_dir / "run.log", [])
+    app.root = Mock()
+    app.root.style.theme_use.return_value = "litera"
+    app.root.style.theme.type = "dark"
+    app._form_canvas = Mock()
+    app._log = Mock()
+    logger = Mock()
+    monkeypatch.setattr("cnkibug.gui.app.logging.getLogger", lambda: logger)
+    config = {**DEFAULT_CONFIG, "gui_theme": "darkly", "log_level": "WARNING", "timeout_goto_ms": 45000}
+
+    app._apply_config(config)
+
+    assert app.runtime.config == config
+    assert app.runtime.config is not config
+    assert app.settings.timeout_goto_ms == 45000
+    logger.setLevel.assert_called_once_with("WARNING")
+    app.root.style.theme_use.assert_called_with("darkly")
+    app._form_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
+    app._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
+
+
+def _settings_dialog(config=None):
+    dialog = SettingsDialog.__new__(SettingsDialog)
+    dialog._config = (config or DEFAULT_CONFIG).copy()
+    dialog.window = Mock()
+    dialog._on_apply = Mock()
+    dialog._theme = Mock(get=lambda: "darkly")
+    dialog._log_level = Mock(get=lambda: "INFO")
+    dialog._numbers = {key: Mock() for key, _label, _divisor in _NUMERIC_FIELDS}
+    for key, _label, divisor in _NUMERIC_FIELDS:
+        dialog._numbers[key].get.return_value = str(DEFAULT_CONFIG[key] / divisor)
+    dialog._flags = {
+        key: Mock() for key in ("session_cache_enabled", "log_save_path", "log_keywords", "log_scraped_records")
+    }
+    for key, variable in dialog._flags.items():
+        variable.get.return_value = DEFAULT_CONFIG[key]
+    return dialog
+
+
+def test_gui_settings_converts_seconds_without_changing_task_output_option():
+    dialog = _settings_dialog({**DEFAULT_CONFIG, "detail_txt_export": True})
+    dialog._numbers["timeout_selector_ms"].get.return_value = "30.001"
+
+    config = dialog._collect()
+
+    assert config["timeout_selector_ms"] == 30001
+    assert config["gui_theme"] == "darkly"
+    assert config["detail_txt_export"] is True
+
+
+@pytest.mark.parametrize("value", ["", "abc", "0", "-1", "NaN", "Infinity", "1.0001"])
+def test_gui_settings_rejects_invalid_durations(value):
+    dialog = _settings_dialog()
+    dialog._numbers["timeout_selector_ms"].get.return_value = value
+
+    with pytest.raises(ValueError):
+        dialog._collect()
+
+
+def test_gui_settings_save_failure_keeps_dialog_and_current_settings(monkeypatch, tmp_path):
+    dialog = _settings_dialog()
+    dialog._config_path = tmp_path / "config.json"
+    monkeypatch.setattr("cnkibug.gui.settings.save_config", Mock(side_effect=OSError("write failed")))
+    show_error = Mock()
+    monkeypatch.setattr("cnkibug.gui.settings.messagebox.showerror", show_error)
+
+    dialog._save()
+
+    dialog._on_apply.assert_not_called()
+    dialog.window.destroy.assert_not_called()
+    show_error.assert_called_once()
+
+
+def test_gui_settings_reload_applies_file_without_writing_it(tmp_path):
+    import json
+
+    dialog = _settings_dialog()
+    dialog._config_path = tmp_path / "config.json"
+    config = {**DEFAULT_CONFIG, "gui_theme": "darkly", "verify_wait_timeout_sec": 240}
+    dialog._config_path.write_text(json.dumps(config), encoding="utf-8")
+    before = dialog._config_path.read_bytes()
+    dialog._populate = Mock()
+
+    dialog._reload()
+
+    dialog._on_apply.assert_called_once_with(config)
+    dialog._populate.assert_called_once_with(config)
+    assert dialog._config_path.read_bytes() == before
+    dialog.window.destroy.assert_not_called()
