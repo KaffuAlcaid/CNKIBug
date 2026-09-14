@@ -85,6 +85,9 @@ def _run_self_check() -> int:
     if not _resource_path("icon.ico").is_file():
         _write_message("CNKIBug GUI self-check failed: icon.ico missing")
         return 1
+    if not _resource_path("cnkibug/gui/apply_update.ps1").is_file():
+        _write_message("CNKIBug GUI self-check failed: update script missing")
+        return 1
     _write_message(f"CNKIBug GUI self-check OK: {APP_VERSION}")
     return 0
 

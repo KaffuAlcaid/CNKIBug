@@ -22,3 +22,6 @@ gui = [
 
 [tool.setuptools.packages.find]
 include = ["cnkibug*"]
+
+[tool.setuptools.package-data]
+"cnkibug.gui" = ["apply_update.ps1"]

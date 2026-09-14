@@ -47,6 +47,29 @@ jobs:
           fi
           printf 'tag_name=%s\n' "$TARGET_TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ steps.get_tag.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Verify release version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.get_tag.outputs.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          if not re.fullmatch(r"v?\d+\.\d+\.\d+", tag) or tag.removeprefix("v") != version:
+              raise SystemExit(f"Release tag {tag} does not match project version {version}")
+          PY
+
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
@@ -92,6 +115,7 @@ jobs:
             --copy-metadata cnkibug \
             --copy-metadata ttkbootstrap \
             --collect-all ttkbootstrap \
+            --add-data "cnkibug/gui/apply_update.ps1:cnkibug/gui" \
             --add-data "icon.ico:." \
             --add-data "pyproject.toml:." \
             --name CNKIBug-GUI \

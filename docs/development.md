@@ -8,7 +8,7 @@
 pip install -e ".[gui]" -r requirements-build.txt
 python generate_version_info.py version.txt
 pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkibug --name CNKIBug run.py
-pyinstaller --onefile --windowed --icon=icon.ico --version-file=version.txt --copy-metadata cnkibug --copy-metadata ttkbootstrap --collect-all ttkbootstrap --add-data "icon.ico:." --name CNKIBug-GUI run_gui.py
+pyinstaller --onefile --windowed --icon=icon.ico --version-file=version.txt --copy-metadata cnkibug --copy-metadata ttkbootstrap --collect-all ttkbootstrap --add-data "icon.ico:." --add-data "cnkibug/gui/apply_update.ps1:cnkibug/gui" --name CNKIBug-GUI run_gui.py
 ```
 
 生成文件位于 `dist/CNKIBug.exe` 和 `dist/CNKIBug-GUI.exe`。

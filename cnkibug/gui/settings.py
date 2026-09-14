@@ -10,6 +10,8 @@ from typing import Any
 import ttkbootstrap as ttk
 
 from ..app.runtime import DEFAULT_CONFIG, read_config, save_config
+from ..core.version import APP_VERSION
+from .update_dialog import UpdateDialog
 
 
 _NUMERIC_FIELDS = (
@@ -30,10 +32,13 @@ class SettingsDialog:
         config: dict[str, Any],
         config_path: Path,
         on_apply: Callable[[dict[str, Any]], None],
+        *,
+        on_restart: Callable[[], None],
     ) -> None:
         self._config = config.copy()
         self._config_path = config_path
         self._on_apply = on_apply
+        self._on_restart = on_restart
         self.window = ttk.Toplevel(title="设置", transient=parent, master=parent)
         self.window.withdraw()
         self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
@@ -55,11 +60,18 @@ class SettingsDialog:
         notebook = ttk.Notebook(outer)
         notebook.pack(fill=tk.BOTH, expand=True)
         tabs = {}
-        for name in ("外观", "抓取", "会话", "日志"):
+        for name in ("外观", "抓取", "会话", "日志", "更新"):
             tab = ttk.Frame(notebook, padding=18)
             tab.columnconfigure(1, weight=1)
             notebook.add(tab, text=name)
             tabs[name] = tab
+
+        ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}").grid(
+            row=0, column=0, sticky=tk.W, pady=(0, 16),
+        )
+        ttk.Button(tabs["更新"], text="检查更新", command=self._check_updates).grid(
+            row=1, column=0, sticky=tk.W,
+        )
 
         self._theme = tk.StringVar(master=self.window)
         ttk.Label(tabs["外观"], text="主题").grid(row=0, column=0, sticky=tk.W, padx=(0, 24))
@@ -166,3 +178,34 @@ class SettingsDialog:
 
     def _reset(self) -> None:
         self._populate(DEFAULT_CONFIG)
+
+    def _check_updates(self) -> None:
+        UpdateDialog(
+            self.window, self._config_path.parent, self._prepare_update, self._on_restart,
+        ).show()
+
+    def _prepare_update(self, parent: tk.Misc) -> bool:
+        try:
+            config = self._collect()
+        except ValueError as error:
+            messagebox.showerror("设置无效", str(error), parent=parent)
+            return False
+        if config == self._config:
+            return True
+        choice = messagebox.askyesnocancel(
+            "保存设置",
+            "设置尚未保存。是否保存后继续更新？\n选择否将使用已保存的设置。",
+            parent=parent,
+        )
+        if choice is None:
+            return False
+        if choice:
+            try:
+                config = save_config(self._config_path, config)
+            except (OSError, ValueError) as error:
+                messagebox.showerror("无法保存设置", str(error), parent=parent)
+                return False
+            self._config = config
+            self._on_apply(config)
+        self._populate(self._config)
+        return True

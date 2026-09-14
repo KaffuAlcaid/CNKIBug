@@ -237,6 +237,7 @@ class CNKIBugApp:
             return
         SettingsDialog(
             self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config,
+            on_restart=self.root.destroy,
         ).show()
 
     def _apply_config(self, config: dict[str, Any]) -> None:
