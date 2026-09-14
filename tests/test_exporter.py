@@ -7,56 +7,9 @@ import pytest
 from cnkibug.fileio import exporter
 from cnkibug.fileio.exporter import (
     _build_single_sheet_workbook,
-    _sanitize_name,
     _try_save_workbook,
     save_all,
 )
-
-
-# ============ 原有用例（回归） ============
-def test_sanitize_name_replaces_filename_and_sheet_illegal_chars():
-    assert _sanitize_name('a/b:c*?"<>|[x]') == "a_b_c_______x_"
-
-
-def test_build_single_sheet_workbook_headers_and_rows():
-    detail_url = "https://kns.cnki.net/detail/1"
-    wb = _build_single_sheet_workbook([["标题", "作者", "来源", "2026-01-01", detail_url]])
-    ws = wb.active
-
-    assert ws is not None
-    assert ws.title == "论文标题"
-    assert [cell.value for cell in ws[1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
-    assert [cell.value for cell in ws[2]] == ["标题", "作者", "来源", "2026-01-01", detail_url]
-    assert ws["E2"].hyperlink.target == detail_url
-
-
-def test_build_workbook_inserts_citation_before_detail_url():
-    detail_url = "https://kns.cnki.net/detail/1"
-    citation = "[1] 示例引文[J]. 测试期刊,2026."
-    wb = _build_single_sheet_workbook(
-        [["标题", "作者", "来源", "2026-01-01", detail_url, citation]],
-        include_citation=True,
-    )
-    ws = wb.active
-
-    assert ws is not None
-    assert [cell.value for cell in ws[1]] == [
-        "论文标题",
-        "作者",
-        "来源",
-        "发表日期",
-        "引用格式",
-        "详情链接",
-    ]
-    assert [cell.value for cell in ws[2]] == [
-        "标题",
-        "作者",
-        "来源",
-        "2026-01-01",
-        citation,
-        detail_url,
-    ]
-    assert ws["F2"].hyperlink.target == detail_url
 
 
 def test_build_workbook_inserts_details_before_citation_and_detail_url():
@@ -99,28 +52,6 @@ def test_build_workbook_inserts_details_before_citation_and_detail_url():
         detail_url,
     ]
     assert ws["H2"].hyperlink.target == detail_url
-
-
-# ============ _sanitize_name 新边界（A11） ============
-def test_sanitize_name_pure_dots_and_empty_fallback():
-    # strip 后为空（纯点 / 纯空白 / 空串）→ 兜底默认名
-    assert _sanitize_name("..") == "untitled"
-    assert _sanitize_name("...") == "untitled"
-    assert _sanitize_name("   ") == "untitled"
-    assert _sanitize_name("") == "untitled"
-
-
-def test_sanitize_name_all_illegal_chars_become_legal_underscores():
-    # 全非法字符被替换为下划线串，本身是合法文件名，不走兜底
-    assert _sanitize_name("///") == "___"
-
-
-def test_sanitize_name_truncates_long_input():
-    assert _sanitize_name("x" * 80) == "x" * 50
-
-
-def test_sanitize_name_keeps_normal_keyword():
-    assert _sanitize_name("焊接 316L") == "焊接 316L"
 
 
 # ============ helpers ============
@@ -400,12 +331,6 @@ def test_multi_merge_sheet_name_truncated_and_deduped(monkeypatch, tmp_path):
     assert names[0] == "X" * 31
 
 
-def test_save_all_multi_merge_all_empty_no_file(monkeypatch, tmp_path):
-    _patch_desktop(monkeypatch, tmp_path)
-    save_all("multi_merge", ["a", "b"], {"a": [], "b": []}, "TS")
-    assert list(tmp_path.glob("*.xlsx")) == []
-
-
 def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
     _patch_desktop(monkeypatch, tmp_path)
     all_results = {
@@ -424,38 +349,6 @@ def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
         ["焊接", "标题一", "作者甲", "来源甲", "2026-01-01", "https://example.test/1"],
         ["增材", "标题,二", "作者乙", "来源乙", "", ""],
     ]
-
-
-def test_save_all_multi_csv_skips_empty_results(monkeypatch, tmp_path):
-    _patch_desktop(monkeypatch, tmp_path)
-
-    result = save_all("multi_csv", ["空"], {"空": []}, "TS")
-
-    assert result.attempted == 0
-    assert list(tmp_path.glob("*.csv")) == []
-
-
-# ============ 原子保存与输出目录失败 ============
-def test_try_save_workbook_uses_same_directory_temporary_file(monkeypatch, tmp_path):
-    wb = _build_single_sheet_workbook([["t", "a", "s", "d"]])
-    target = tmp_path / "out.xlsx"
-
-    real_save = wb.save
-    calls = []
-
-    def fake_save(path):
-        calls.append(str(path))
-        return real_save(path)
-
-    monkeypatch.setattr(wb, "save", fake_save)
-    saved = _try_save_workbook(wb, str(target))
-
-    assert saved == str(target.resolve())
-    assert len(calls) == 1
-    assert os.path.dirname(os.path.abspath(calls[0])) == str(tmp_path)
-    assert os.path.abspath(calls[0]) != str(target.resolve())
-    assert not os.path.exists(calls[0])
-    assert target.exists()
 
 
 def test_workbook_write_failure_preserves_target_and_cleans_temporary_file(

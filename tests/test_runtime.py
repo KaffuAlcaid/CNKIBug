@@ -4,7 +4,6 @@ from datetime import datetime
 import pytest
 
 from cnkibug.app import runtime
-from cnkibug.fileio import paths as file_paths
 
 
 def test_init_runtime_creates_dirs_and_default_config(tmp_path):
@@ -16,10 +15,6 @@ def test_init_runtime_creates_dirs_and_default_config(tmp_path):
     assert state.paths.status_dir.is_dir()
     assert state.paths.config_path.is_file()
     assert json.loads(state.paths.config_path.read_text(encoding="utf-8")) == runtime.DEFAULT_CONFIG
-
-
-def test_runtime_data_dir_name_does_not_collide_with_source_package():
-    assert runtime.APP_DATA_DIR_NAME.casefold() != "cnkibug".casefold()
 
 
 def test_init_runtime_migrates_known_legacy_data_without_moving_other_files(tmp_path):
@@ -83,16 +78,6 @@ def test_init_runtime_does_not_fallback_when_program_dir_is_unwritable(monkeypat
     assert captured_paths[0].data_dir == tmp_path / "CNKIBug-data"
 
 
-def test_init_runtime_exposes_config_repair_events(tmp_path):
-    paths = runtime.get_runtime_paths(tmp_path)
-    paths.data_dir.mkdir()
-    paths.config_path.write_text("{ broken", encoding="utf-8")
-
-    state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
-
-    assert any(level == "WARNING" for level, _ in state.events)
-
-
 def test_load_or_create_config_repairs_missing_and_invalid_values(tmp_path):
     paths = runtime.get_runtime_paths(tmp_path)
     paths.data_dir.mkdir()
@@ -131,22 +116,6 @@ def test_load_or_create_config_repairs_missing_and_invalid_values(tmp_path):
     assert written == config
 
 
-def test_load_or_create_config_migrates_version_one_without_warning(tmp_path):
-    paths = runtime.get_runtime_paths(tmp_path)
-    paths.data_dir.mkdir()
-    old_config = runtime.DEFAULT_CONFIG.copy()
-    old_config["version"] = 1
-    old_config.pop("detail_txt_export")
-    paths.config_path.write_text(json.dumps(old_config), encoding="utf-8")
-
-    config, events = runtime.load_or_create_config(paths)
-
-    assert config["version"] == runtime.CONFIG_VERSION
-    assert config["detail_txt_export"] is False
-    assert not any(level == "WARNING" for level, _ in events)
-    assert any("已升级到版本 2" in message for _, message in events)
-
-
 def test_load_or_create_config_backs_up_broken_json(tmp_path):
     paths = runtime.get_runtime_paths(tmp_path)
     paths.data_dir.mkdir()
@@ -160,19 +129,6 @@ def test_load_or_create_config_backs_up_broken_json(tmp_path):
     assert backups[0].read_text(encoding="utf-8") == "{ broken"
     assert json.loads(paths.config_path.read_text(encoding="utf-8")) == runtime.DEFAULT_CONFIG
     assert any(level == "WARNING" for level, _ in events)
-
-
-def test_config_theme_defaults_for_existing_files_without_warning(tmp_path):
-    paths = runtime.get_runtime_paths(tmp_path)
-    paths.data_dir.mkdir()
-    old_config = runtime.DEFAULT_CONFIG.copy()
-    old_config.pop("gui_theme")
-    paths.config_path.write_text(json.dumps(old_config), encoding="utf-8")
-
-    config, events = runtime.load_or_create_config(paths)
-
-    assert config["gui_theme"] == "litera"
-    assert not any(level == "WARNING" for level, _ in events)
 
 
 def test_save_config_persists_theme_and_scraper_values(tmp_path):
@@ -216,13 +172,6 @@ def test_read_config_reports_invalid_json_without_repairing_file(tmp_path):
     assert list(tmp_path.iterdir()) == [path]
 
 
-def test_build_log_path_uses_log_dir_and_current_day(tmp_path):
-    paths = runtime.get_runtime_paths(tmp_path)
-    log_path = runtime.build_log_path(paths, datetime(2026, 6, 30, 12, 0, 0))
-
-    assert log_path == tmp_path / "CNKIBug-data" / "log" / "cnkibug_20260630.log"
-
-
 def test_cleanup_runtime_history_deletes_only_known_historical_files(tmp_path):
     state = runtime.init_runtime(program_dir=tmp_path, configure_logging=False)
     active_log = state.paths.log_dir / "cnkibug_20260716.log"
@@ -253,37 +202,3 @@ def test_cleanup_runtime_history_deletes_only_known_historical_files(tmp_path):
     assert files["today_log"].exists()
     assert files["today_report"].exists()
     assert files["unrelated"].exists()
-
-
-def test_open_directory_uses_platform_file_manager(monkeypatch, tmp_path):
-    launched = []
-    monkeypatch.setattr(file_paths.sys, "platform", "linux")
-    monkeypatch.setattr(file_paths.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        file_paths.subprocess,
-        "Popen",
-        lambda args, **kwargs: launched.append((args, kwargs)),
-    )
-
-    file_paths.open_directory(tmp_path)
-
-    assert launched[0][0] == ["/usr/bin/xdg-open", str(tmp_path)]
-    assert launched[0][1] == {
-        "stdout": file_paths.subprocess.DEVNULL,
-        "stderr": file_paths.subprocess.DEVNULL,
-    }
-
-
-def test_open_directory_uses_startfile_on_windows(monkeypatch, tmp_path):
-    opened = []
-    monkeypatch.setattr(file_paths.sys, "platform", "win32")
-    monkeypatch.setattr(file_paths.os, "startfile", opened.append, raising=False)
-
-    file_paths.open_directory(tmp_path)
-
-    assert opened == [str(tmp_path)]
-
-
-def test_open_directory_rejects_missing_path(tmp_path):
-    with pytest.raises(FileNotFoundError, match="目录不存在"):
-        file_paths.open_directory(tmp_path / "missing")

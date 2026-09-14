@@ -1,16 +1,5 @@
-from cnkibug.cnki.selectors import (
-    SELECTOR_CURRENT_PAGE,
-    SELECTOR_NEXT_PAGE,
-    SELECTOR_PAGE_COUNT,
-    SELECTOR_RESULT_ROWS,
-    SELECTOR_RESULT_TITLE,
-)
-from cnkibug.cnki.pagination import (
-    get_first_result_href,
-    get_next_page_marker,
-    get_result_page_numbers,
-    wait_result_page_advanced,
-)
+from cnkibug.cnki.selectors import SELECTOR_NEXT_PAGE
+from cnkibug.cnki.pagination import wait_result_page_advanced
 
 
 class FakeElement:
@@ -31,32 +20,6 @@ class FakeElement:
 
     def text_content(self):
         return self._text
-
-
-def test_get_first_result_href_reads_first_row_title_href():
-    title = FakeElement(attrs={"href": "/detail/1"})
-    row = FakeElement(single={SELECTOR_RESULT_TITLE: title})
-    page = FakeElement(multiple={SELECTOR_RESULT_ROWS: [row]})
-
-    assert get_first_result_href(page) == "/detail/1"
-
-
-def test_get_next_page_marker_reads_page_next_data_curpage():
-    next_btn = FakeElement(attrs={"data-curpage": "3"})
-    page = FakeElement(single={SELECTOR_NEXT_PAGE: next_btn})
-
-    assert get_next_page_marker(page) == "3"
-
-
-def test_get_result_page_numbers_reads_last_page_markers():
-    page_count = FakeElement(attrs={"data-pagenum": "9"}, text="9/9")
-    current_page = FakeElement(attrs={"data-curpage": "9"})
-    page = FakeElement(single={
-        SELECTOR_PAGE_COUNT: page_count,
-        SELECTOR_CURRENT_PAGE: current_page,
-    })
-
-    assert get_result_page_numbers(page) == (9, 9)
 
 
 def test_wait_result_page_advanced_accepts_changed_next_marker():

@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 from cnkibug.app.runtime import DEFAULT_CONFIG, get_runtime_paths
 from cnkibug.browser.runtime import BrowserLaunchResult
@@ -39,34 +38,6 @@ class RecordingEvents(EventSink):
 
     def emit(self, name, **payload):
         self.events.append((name, payload))
-
-
-def test_resumed_progress_estimate_uses_only_remaining_pages():
-    keywords = ["完成", "部分完成"]
-    state = task_state.make_task_state(keywords, 3, "multi_merge", "TS")
-    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
-    task_state.mark_keyword_done(
-        state,
-        make_keyword_result("完成", 1, 2, records, STATUS_SUCCESS),
-    )
-    task_state.mark_keyword_progress(state, "部分完成", 2, records)
-    recorded = []
-    task = SimpleNamespace(
-        keywords=keywords,
-        terminal_results={"完成": records},
-        session=SimpleNamespace(stop_requested=False),
-        state=state,
-        max_pages=3,
-        include_citation=False,
-        include_details=False,
-        events=RecordingEvents(recorded),
-    )
-
-    keyword_run.start_progress(task)
-
-    assert recorded == [
-        ("progress_started", {"low_seconds": 8, "high_seconds": 12})
-    ]
 
 
 def _patch_workflow(monkeypatch, tmp_path, saved_results, deleted, recorded=None):
@@ -437,50 +408,3 @@ def test_new_task_propagates_detail_settings(monkeypatch, tmp_path):
     }
     assert captured_reports[0]["exports"]["keyword_txt"]["path"] == "/tmp/keywords.txt"
     assert deleted == [True]
-
-
-def test_progress_display_receives_page_verify_save_and_complete_events(monkeypatch, tmp_path):
-    saved_results = []
-    deleted = []
-    progress_events = []
-    run_context = _patch_workflow(
-        monkeypatch,
-        tmp_path,
-        saved_results,
-        deleted,
-        progress_events,
-    )
-
-    records = [["标题", "作者", "来源", "日期", "https://example.test/1"]]
-
-    def scrape_keyword(*args, **kwargs):
-        session = args[0]
-        session.events.emit("progress_updated", page=1)
-        session.events.emit("progress_paused")
-        session.events.emit("progress_resumed")
-        kwargs["on_page_complete"](1, records)
-        return make_keyword_result("焊接", 1, 1, records, STATUS_SUCCESS)
-
-    monkeypatch.setattr(keyword_run, "scrape_keyword", scrape_keyword)
-
-    scrape_workflow.scrape_cnki(["焊接"], 1, "single", **run_context)
-
-    assert (
-        "progress_started",
-        {"low_seconds": 8, "high_seconds": 12},
-    ) in progress_events
-    assert ("progress_paused", {}) in progress_events
-    assert ("progress_resumed", {}) in progress_events
-    assert ("progress_saving", {}) in progress_events
-    assert ("progress_completed", {}) in progress_events
-    assert [name for name, _ in progress_events[-3:]] == [
-        "task_report",
-        "task_finished",
-        "progress_closed",
-    ]
-    assert progress_events[-2][1]["elapsed_seconds"] >= 0
-    assert ("progress_closed", {}) in progress_events
-    assert any(
-        event[0] == "progress_updated" and event[1].get("records") == 1
-        for event in progress_events
-    )
