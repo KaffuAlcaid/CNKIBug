@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
 
+from ..browser.session import ScrapeSession
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
 
@@ -110,6 +111,22 @@ def handle_verify_with_progress(
     events: EventSink = NULL_EVENTS,
 ) -> str:
     return handle_verify(page, settings, events)
+
+
+def verify_stop_reason(session: ScrapeSession, verify_status: str) -> str:
+    if verify_status == VERIFY_PAGE_CLOSED:
+        session.request_stop("浏览器页面已关闭")
+        return "浏览器页面已关闭"
+    if verify_status == VERIFY_TIMEOUT:
+        session.request_stop("安全验证等待超时", verify_timeout=True)
+        return "安全验证等待超时"
+    if verify_status == VERIFY_CANCELLED:
+        if not session.acknowledge_stop_request():
+            session.request_stop("用户请求停止")
+        return session.stop_reason or "用户请求停止"
+    if session.acknowledge_stop_request():
+        return session.stop_reason or "用户请求停止"
+    return ""
 
 
 def _page_closed(page: Any) -> bool:

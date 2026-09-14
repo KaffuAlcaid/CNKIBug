@@ -6,7 +6,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from cnkibug.browser.session import ScrapeSession
-from cnkibug.cnki import guard, keyword as keyword_scraper, pages, search
+from cnkibug.cnki import guard, keyword as keyword_scraper, pages, pagination, search
 from cnkibug.cnki.details import ArticleDetails
 from cnkibug.cnki.guard import (
     VERIFY_CANCELLED,
@@ -526,7 +526,7 @@ def test_scrape_keyword_marks_partial_page_failure_as_failed(monkeypatch, caplog
     monkeypatch.setattr(pages, "get_result_page_numbers", lambda page: (1, 2))
     confirm_calls = []
     monkeypatch.setattr(
-        pages,
+        pagination,
         "wait_result_page_advanced",
         lambda *args, **kwargs: confirm_calls.append(True) or False,
     )

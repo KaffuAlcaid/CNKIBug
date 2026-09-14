@@ -14,12 +14,10 @@ from ..core.settings import ScraperSettings
 from ..core.search_query import AdvancedQuery
 from ..browser.session import ScrapeSession, require_page
 from .guard import (
-    VERIFY_CANCELLED,
-    VERIFY_PAGE_CLOSED,
-    VERIFY_TIMEOUT,
     handle_verify,
     handle_verify_with_progress,
     print_page_debug,
+    verify_stop_reason,
 )
 from .selectors import (
     SELECTOR_NO_CONTENT,
@@ -73,22 +71,6 @@ def _wait_without_session(events: EventSink, seconds: float) -> bool:
     return not events.cancel_requested()
 
 
-def _verify_stop_reason(session: ScrapeSession, verify_status: str) -> str:
-    if verify_status == VERIFY_PAGE_CLOSED:
-        session.request_stop("浏览器页面已关闭")
-        return "浏览器页面已关闭"
-    if verify_status == VERIFY_TIMEOUT:
-        session.request_stop("安全验证等待超时", verify_timeout=True)
-        return "安全验证等待超时"
-    if verify_status == VERIFY_CANCELLED:
-        if not session.acknowledge_stop_request():
-            session.request_stop("用户请求停止")
-        return session.stop_reason or "用户请求停止"
-    if session.acknowledge_stop_request():
-        return session.stop_reason or "用户请求停止"
-    return ""
-
-
 def _stopped_result(session: ScrapeSession) -> SearchResult:
     session.acknowledge_stop_request()
     return SearchResult(SEARCH_STOPPED, session.stop_reason or "用户请求停止")
@@ -121,7 +103,7 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
                 return False
             _ensure_supported_site(page, "预热首页")
         _logger.info("预热首页加载完成")
-        stop_reason = _verify_stop_reason(
+        stop_reason = verify_stop_reason(
             session,
             handle_verify(page, settings, events),
         )
@@ -139,7 +121,7 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
             if session.acknowledge_stop_request():
                 return False
             _ensure_supported_site(page, "预热检索页")
-            stop_reason = _verify_stop_reason(
+            stop_reason = verify_stop_reason(
                 session,
                 handle_verify(page, settings, events),
             )
@@ -166,7 +148,7 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
                     _ensure_supported_site(page, "预热结果页")
                 if outcome != "verify":
                     break
-                stop_reason = _verify_stop_reason(
+                stop_reason = verify_stop_reason(
                     session,
                     handle_verify(page, settings, events),
                 )
@@ -176,7 +158,7 @@ def warmup(session: ScrapeSession, settings: ScraperSettings) -> bool:
             if session.acknowledge_stop_request():
                 return False
         _logger.info("预热检索完成")
-        stop_reason = _verify_stop_reason(
+        stop_reason = verify_stop_reason(
             session,
             handle_verify(page, settings, events),
         )
@@ -313,7 +295,7 @@ def run_keyword_search(
         return SearchResult(SEARCH_FAILED, "首页预热失败")
     if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
-    stop_reason = _verify_stop_reason(
+    stop_reason = verify_stop_reason(
         session,
         handle_verify_with_progress(page, settings, events),
     )
@@ -346,7 +328,7 @@ def run_keyword_search(
         return SearchResult(SEARCH_FAILED, "检索页加载失败")
     if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
-    stop_reason = _verify_stop_reason(
+    stop_reason = verify_stop_reason(
         session,
         handle_verify_with_progress(page, settings, events),
     )
@@ -373,7 +355,7 @@ def run_keyword_search(
     if session.acknowledge_stop_request() or session.acknowledge_page_closed(page):
         return _stopped_result(session)
     _logger.info("关键词检索已提交: %s", keyword_ref)
-    stop_reason = _verify_stop_reason(
+    stop_reason = verify_stop_reason(
         session,
         handle_verify_with_progress(page, settings, events),
     )
@@ -409,7 +391,7 @@ def run_keyword_search(
             return SearchResult(outcome)
 
         _logger.warning("等待检索结果期间检测到安全验证: %s", keyword_ref)
-        stop_reason = _verify_stop_reason(
+        stop_reason = verify_stop_reason(
             session,
             handle_verify_with_progress(page, settings, events),
         )

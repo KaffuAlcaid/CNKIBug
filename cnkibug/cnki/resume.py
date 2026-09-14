@@ -8,16 +8,14 @@ from playwright.sync_api import Error as PlaywrightError
 from ..browser.session import ScrapeSession, require_page
 from ..core.settings import ScraperSettings
 from .guard import (
-    VERIFY_CANCELLED,
-    VERIFY_PAGE_CLOSED,
-    VERIFY_PASSED,
     VERIFY_TIMEOUT,
     handle_verify_with_progress,
+    verify_stop_reason,
 )
 from .pagination import (
+    confirm_result_page_advanced,
     get_first_result_href,
     get_result_page_numbers,
-    wait_result_page_advanced,
 )
 from .selectors import query_first
 
@@ -56,52 +54,20 @@ def position_after_checkpoint(
             next_btn.click(timeout=settings.timeout_selector_ms)
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
-            advanced = wait_result_page_advanced(
-                page,
+            advanced, verify_status = confirm_result_page_advanced(
+                session,
+                settings,
                 old_href=old_first_href,
                 old_next_page=old_next_page,
                 old_current_page=old_current_page,
-                timeout=settings.timeout_selector_ms,
-                stop_requested=lambda: (
-                    session.acknowledge_stop_request()
-                    or session.acknowledge_page_closed(page)
-                ),
             )
-            if not advanced:
-                if session.acknowledge_stop_request(reason="用户请求停止"):
-                    return False
-                verify_status = handle_verify_with_progress(
-                    page,
-                    settings,
-                    events,
+            if verify_status == VERIFY_TIMEOUT:
+                _logger.warning(
+                    "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
+                    keyword_ref,
+                    page_number,
+                    completed_page + 1,
                 )
-                if verify_status == VERIFY_PAGE_CLOSED:
-                    session.request_stop("浏览器页面已关闭")
-                    return False
-                if verify_status == VERIFY_CANCELLED:
-                    session.request_stop("用户请求停止")
-                    return False
-                if verify_status == VERIFY_TIMEOUT:
-                    session.request_stop("安全验证等待超时", verify_timeout=True)
-                    _logger.warning(
-                        "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
-                        keyword_ref,
-                        page_number,
-                        completed_page + 1,
-                    )
-                    return False
-                if verify_status == VERIFY_PASSED:
-                    advanced = wait_result_page_advanced(
-                        page,
-                        old_href=old_first_href,
-                        old_next_page=old_next_page,
-                        old_current_page=old_current_page,
-                        timeout=settings.timeout_selector_ms,
-                        stop_requested=lambda: (
-                            session.acknowledge_stop_request()
-                            or session.acknowledge_page_closed(page)
-                        ),
-                    )
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
             if not advanced:
@@ -117,20 +83,14 @@ def position_after_checkpoint(
                 settings,
                 events,
             )
-            if verify_status == VERIFY_PAGE_CLOSED:
-                session.request_stop("浏览器页面已关闭")
-                return False
-            if verify_status == VERIFY_CANCELLED:
-                session.request_stop("用户请求停止")
-                return False
-            if verify_status == VERIFY_TIMEOUT:
-                session.request_stop("安全验证等待超时", verify_timeout=True)
-                _logger.warning(
-                    "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
-                    keyword_ref,
-                    page_number,
-                    completed_page + 1,
-                )
+            if verify_stop_reason(session, verify_status):
+                if verify_status == VERIFY_TIMEOUT:
+                    _logger.warning(
+                        "页级恢复定位因安全验证超时停止: %s current_page=%d target_page=%d",
+                        keyword_ref,
+                        page_number,
+                        completed_page + 1,
+                    )
                 return False
             if not session.wait_interruptibly(random.uniform(1, 2)):
                 return False

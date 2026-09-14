@@ -7,6 +7,14 @@ from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
 
+from ..browser.session import ScrapeSession, require_page
+from ..core.settings import ScraperSettings
+from .guard import (
+    VERIFY_NONE,
+    VERIFY_PASSED,
+    handle_verify_with_progress,
+    verify_stop_reason,
+)
 from .selectors import query_all, query_first
 
 
@@ -107,6 +115,41 @@ def wait_result_page_advanced(
         if remaining > 0:
             time.sleep(min(0.1, remaining))
     return False
+
+
+def confirm_result_page_advanced(
+    session: ScrapeSession,
+    settings: ScraperSettings,
+    *,
+    old_href: str,
+    old_next_page: str,
+    old_current_page: int | None,
+) -> tuple[bool, str]:
+    """Return page advancement and the verification outcome for one confirmation attempt."""
+    page = require_page(session)
+    wait_options = {
+        "old_href": old_href,
+        "old_next_page": old_next_page,
+        "old_current_page": old_current_page,
+        "timeout": settings.timeout_selector_ms,
+        "stop_requested": lambda: (
+            session.acknowledge_stop_request()
+            or session.acknowledge_page_closed(page)
+        ),
+    }
+    if wait_result_page_advanced(page, **wait_options):
+        return True, VERIFY_NONE
+    if session.acknowledge_stop_request():
+        return False, VERIFY_NONE
+
+    verify_status = handle_verify_with_progress(page, settings, session.events)
+    if verify_stop_reason(session, verify_status):
+        return False, verify_status
+    advanced = (
+        verify_status == VERIFY_PASSED
+        and wait_result_page_advanced(page, **wait_options)
+    )
+    return advanced, verify_status
 
 
 def _positive_int(value: Any) -> int | None:
