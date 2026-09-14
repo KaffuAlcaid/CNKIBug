@@ -1483,14 +1483,15 @@ class CNKIBugApp:
             self._append_log("已请求安全停止，请等待当前操作结束。", "warning")
 
     def _on_close(self) -> None:
-        if not self._running:
-            self.root.destroy()
-            return
         if not messagebox.askyesno(
             "退出 CNKIBug",
-            "任务仍在运行。退出前将安全停止并保存当前结果，是否继续？",
+            "任务仍在运行。退出前将安全停止并保存当前结果，是否继续？"
+            if self._running else "确定要退出 CNKIBug 吗？",
             parent=self.root,
         ):
+            return
+        if not self._running:
+            self.root.destroy()
             return
         self._close_when_done = True
         self._cancel_event.set()
