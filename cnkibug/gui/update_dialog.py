@@ -19,18 +19,23 @@ class UpdateDialog:
         self,
         parent: tk.Misc,
         data_dir: Path,
-        before_install: Callable[[tk.Misc], bool],
+        before_install: Callable[[tk.Misc], str | None],
         on_restart: Callable[[], None],
+        *,
+        source: str = "direct",
+        probe: bool = False,
     ) -> None:
         self._parent = parent
         self._data_dir = data_dir
         self._before_install = before_install
         self._on_restart = on_restart
+        self._source = source
+        self._download_source = updater.SOURCE_LABELS[source]
         self._queue: Queue = Queue()
         self._cancelled = Event()
         self._stage = "checking"
         self._release: updater.ReleaseInfo | None = None
-        self.window = ttk.Toplevel(title="检查更新", master=parent, transient=parent)
+        self.window = ttk.Toplevel(title="测试连接" if probe else "检查更新", master=parent, transient=parent)
         self.window.withdraw()
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self.window.bind("<Escape>", lambda _event: self._close())
@@ -45,7 +50,7 @@ class UpdateDialog:
         self._secondary = ttk.Button(footer, text="忽略", command=self._close,
                                      width=10, bootstyle="secondary-outline")
         ttk.Label(outer, text=f"当前版本：{APP_VERSION}").pack(anchor=tk.W)
-        self._status = tk.StringVar(master=self.window, value="正在检查 GitHub 正式发布...")
+        self._status = tk.StringVar(master=self.window, value="正在检查连接..." if probe else "正在检查正式发布...")
         ttk.Label(outer, textvariable=self._status, wraplength=width - 40,
                   justify=tk.LEFT).pack(fill=tk.X, pady=(12, 8))
         self._progress = ttk.Progressbar(outer, mode="indeterminate")
@@ -60,7 +65,17 @@ class UpdateDialog:
         self.window.position_center()
         self.window.deiconify()
         self.window.grab_set()
-        self._work(updater.check_release, "checked")
+        if probe:
+            self._notes.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+            self._work(
+                lambda: updater.probe_connections(source, self._cancelled,
+                    lambda text: self._queue.put(("probe_result", text))), "probed",
+            )
+        else:
+            self._work(
+                lambda: updater.check_release(source=source, cancelled=self._cancelled,
+                    on_source=lambda name: self._queue.put(("metadata_source", name))), "checked",
+            )
         self._poll_id = self.window.after(100, self._poll)
 
     def show(self) -> None:
@@ -88,7 +103,23 @@ class UpdateDialog:
                     if not self._cancelled.is_set():
                         received, total = value
                         self._progress.configure(value=received / total * 100)
-                        self._status.set(f"正在下载：{received / 1048576:.1f} / {total / 1048576:.1f} MB")
+                        self._status.set(f"{self._download_source}：{received / 1048576:.1f} / {total / 1048576:.1f} MB")
+                elif event == "metadata_source":
+                    self._status.set(f"正在读取更新信息：{value}")
+                elif event == "download_source":
+                    self._download_source = value
+                    self._status.set(f"正在连接：{value}")
+                elif event == "probe_result":
+                    self._notes.configure(state=tk.NORMAL)
+                    self._notes.insert(tk.END, value + "\n\n")
+                    self._notes.configure(state=tk.DISABLED)
+                    self._notes.see(tk.END)
+                elif event == "probed":
+                    self._stage = "result"
+                    self._status.set("连接检查完成。")
+                    self._progress.stop()
+                    self._progress.pack_forget()
+                    self._primary.configure(text="确定", command=self._close)
                 elif event == "checked":
                     self._show_release(value)
                 elif event == "downloaded":
@@ -164,8 +195,10 @@ class UpdateDialog:
             else:
                 self._show_message(f"无法打开浏览器，请访问：\n{release.page_url}")
             return
-        if not self._before_install(self.window):
+        source = self._before_install(self.window)
+        if source is None:
             return
+        self._source = source
         self._stage = "downloading"
         self._cancelled.clear()
         self._notes.pack_forget()
@@ -178,6 +211,8 @@ class UpdateDialog:
             lambda: updater.download_release(
                 release, self._data_dir, self._cancelled,
                 lambda received, total: self._queue.put(("progress", (received, total))),
+                source=self._source,
+                on_source=lambda name: self._queue.put(("download_source", name)),
             ),
             "downloaded",
         )

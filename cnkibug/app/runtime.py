@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.runtime import RuntimePaths
+from ..core.settings import UPDATE_SOURCES
 
 
 APP_DATA_DIR_NAME = "CNKIBug-data"
@@ -32,6 +33,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "log_scraped_records": False,
     "detail_txt_export": False,
     "gui_theme": "litera",
+    "update_source": "auto",
 }
 
 
@@ -286,7 +288,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     for key, default in DEFAULT_CONFIG.items():
         if key not in raw:
             changed = True
-            level = "INFO" if key == "gui_theme" or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
+            level = "INFO" if key in ("gui_theme", "update_source") or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
             events.append((level, f"配置项缺失，已使用默认值: {key}={default!r}"))
             continue
         config[key] = raw[key]
@@ -320,6 +322,11 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     if config.get("gui_theme") not in ("litera", "darkly"):
         events.append(("WARNING", "配置项无效，已恢复默认值: gui_theme='litera'"))
         config["gui_theme"] = DEFAULT_CONFIG["gui_theme"]
+        changed = True
+
+    if config.get("update_source") not in UPDATE_SOURCES:
+        events.append(("WARNING", "配置项无效，已恢复默认值: update_source='auto'"))
+        config["update_source"] = DEFAULT_CONFIG["update_source"]
         changed = True
 
     bool_keys = (

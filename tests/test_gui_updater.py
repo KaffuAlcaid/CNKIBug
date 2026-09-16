@@ -5,11 +5,13 @@ from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
+from urllib.error import URLError
 
 import pytest
 
 from cnkibug.gui import updater
 from cnkibug.gui.update_dialog import UpdateDialog
+from scripts.publish_update import build_manifest
 
 
 def _release(content=b"executable", **changes):
@@ -72,7 +74,8 @@ def test_cancelled_download_cannot_be_installed(monkeypatch, tmp_path):
     content = b"executable"
     monkeypatch.setattr(updater, "urlopen", lambda *args, **kwargs: io.BytesIO(content))
     with pytest.raises(updater.UpdateCancelled):
-        updater.download_release(_release(content), tmp_path, cancelled, lambda *args: cancelled.set())
+        updater.download_release(_release(content), tmp_path, cancelled,
+                                 lambda received, total: cancelled.set() if received else None)
     assert not list((tmp_path / "update").glob("pending-*"))
 
 
@@ -141,3 +144,93 @@ def test_update_result_buttons_match_release_state(monkeypatch, newer, ready, la
         dialog._secondary.pack.assert_called_once()
     else:
         dialog._secondary.pack_forget.assert_called_once()
+
+
+def test_auto_download_restarts_on_the_next_source_after_network_failure(monkeypatch, tmp_path):
+    content = b"executable"
+    calls = []
+    sources = []
+
+    def open_url(request, **kwargs):
+        calls.append(request.full_url)
+        if len(calls) == 1:
+            raise URLError("offline")
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(updater, "urlopen", open_url)
+    candidate = updater.download_release(_release(content), tmp_path, Event(), lambda *args: None,
+                                         source="auto", on_source=sources.append)
+    assert candidate.read_bytes() == content
+    assert sources == ["ghproxy.net", "ghfast.top"]
+    assert calls == ["https://ghproxy.net/https://example.test/gui.exe",
+                     "https://ghfast.top/https://example.test/gui.exe"]
+
+
+@pytest.mark.parametrize("source", ["ghfast.top", "direct"])
+def test_fixed_source_does_not_fall_back_to_other_download_routes(monkeypatch, tmp_path, source):
+    requests = []
+
+    def fail(request, **kwargs):
+        requests.append(request.full_url)
+        raise URLError("offline")
+
+    monkeypatch.setattr(updater, "urlopen", fail)
+    with pytest.raises(updater.UpdateError):
+        updater.download_release(_release(), tmp_path, Event(), lambda *args: None, source=source)
+    assert len(requests) == 1
+    if source == "direct":
+        assert requests[0] == "https://example.test/gui.exe"
+
+
+def test_checksum_failure_stops_automatic_source_selection(monkeypatch, tmp_path):
+    open_url = Mock(side_effect=lambda *args, **kwargs: io.BytesIO(b"wrong-data"))
+    monkeypatch.setattr(updater, "urlopen", open_url)
+    with pytest.raises(updater.UpdateError, match="校验失败"):
+        updater.download_release(_release(b"valid-data"), tmp_path, Event(), lambda *args: None, source="auto")
+    assert open_url.call_count == 1
+
+
+def test_published_manifest_round_trips_through_the_updater():
+    release = {
+        "tag_name": "v0.7.0", "published_at": "2026-09-16T00:00:00Z", "body": "Release notes",
+        "assets": [{"name": updater.GUI_ASSET, "state": "uploaded", "size": 10,
+                    "digest": "sha256:" + "a" * 64,
+                    "browser_download_url": f"https://github.com/{updater.REPOSITORY}/releases/download/v0.7.0/{updater.GUI_ASSET}"}],
+    }
+    manifest = build_manifest(release)
+    restored = updater.parse_release(json.loads(json.dumps(manifest)), "0.6.0")
+    assert restored.newer and restored.ready
+    assert restored.version == "0.7.0"
+    assert "/download/v0.7.0/" in restored.download_url
+
+
+def test_direct_update_check_uses_only_github_api(monkeypatch):
+    read = Mock(return_value=_release())
+    monkeypatch.setattr(updater, "_read_release", read)
+    updater.check_release(source="direct")
+    assert read.call_args.args[0] == updater.RELEASE_API
+    assert read.call_count == 1
+
+
+def test_connection_probe_reads_only_the_beginning_of_the_executable(monkeypatch):
+    monkeypatch.setattr(updater, "_read_release", lambda *args, **kwargs: _release())
+    requests = []
+    reads = []
+
+    class Response(io.BytesIO):
+        status = 206
+
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    def open_url(request, **kwargs):
+        requests.append(request)
+        return Response(b"MZ" + b"x" * 2048)
+
+    monkeypatch.setattr(updater, "urlopen", open_url)
+    results = []
+    updater.probe_connections("direct", Event(), results.append)
+    assert requests[0].get_header("Range") == "bytes=0-1023"
+    assert reads == [1024]
+    assert "文件下载）：可用" in results[-1]

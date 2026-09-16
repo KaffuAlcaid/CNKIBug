@@ -7,11 +7,16 @@
 ```bash
 pip install -e ".[gui]" -r requirements-build.txt
 python generate_version_info.py version.txt
-pyinstaller --onefile --console --version-file=version.txt --copy-metadata cnkibug --name CNKIBug run.py
 pyinstaller --onefile --windowed --icon=icon.ico --version-file=version.txt --copy-metadata cnkibug --copy-metadata ttkbootstrap --collect-all ttkbootstrap --add-data "icon.ico:." --add-data "cnkibug/gui/apply_update.ps1:cnkibug/gui" --name CNKIBug-GUI run_gui.py
 ```
 
-生成文件位于 `dist/CNKIBug.exe` 和 `dist/CNKIBug-GUI.exe`。
+生成文件位于 `dist/CNKIBug-GUI.exe`。Release 提供 Windows GUI EXE 和终端版源码包。
+
+## 更新清单
+
+`build.yml` 在 Release 附件上传完成后运行 `scripts/publish_update.py`，将最新正式发布的版本、说明、GUI 下载地址、大小和 SHA-256 写入 `updates` 分支的 `latest.json`。非最新发布不会覆盖清单。
+
+GUI 通过 `https://cdn.jsdmirror.com/gh/KaffuAlcaid/CNKIBug@updates/latest.json` 读取清单。仓库 Secret `JSDMIRROR_API_KEY` 用于请求主动缓存刷新；未配置时依赖 CDN 缓存到期。
 
 ## 项目结构
 

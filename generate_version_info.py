@@ -34,7 +34,7 @@ VSVersionInfo(
         StringStruct('FileVersion', '{version}'),
         StringStruct('InternalName', 'CNKIBug'),
         StringStruct('LegalCopyright', '©2026 Kaffu_Alcaid. All rights reserved.'),
-        StringStruct('OriginalFilename', 'CNKIBug.exe'),
+        StringStruct('OriginalFilename', 'CNKIBug-GUI.exe'),
         StringStruct('ProductName', 'CNKIBug'),
         StringStruct('ProductVersion', '{version}')])
       ]),

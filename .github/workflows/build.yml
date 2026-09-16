@@ -50,7 +50,7 @@ jobs:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ steps.get_tag.outputs.tag_name }}
+          ref: refs/tags/${{ steps.get_tag.outputs.tag_name }}
           persist-credentials: false
 
       - name: Verify release version
@@ -100,16 +100,10 @@ jobs:
         run: |
           python -m pytest tests
 
-      - name: Build TUI and GUI executables
+      - name: Build Windows GUI executable
         shell: bash
         run: |
           python generate_version_info.py version.txt
-          pyinstaller --onefile --console --icon="icon.ico" \
-            --version-file="version.txt" \
-            --copy-metadata cnkibug \
-            --add-data "pyproject.toml:." \
-            --name CNKIBug \
-            run.py
           pyinstaller --onefile --windowed --icon="icon.ico" \
             --version-file="version.txt" \
             --copy-metadata cnkibug \
@@ -137,14 +131,6 @@ jobs:
       - name: Smoke test packaged executable
         shell: pwsh
         run: |
-          $output = & .\dist\CNKIBug.exe --self-check
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged executable self-check failed"
-          }
-          $expected = python -c "from cnkibug.core.version import APP_VERSION; print(APP_VERSION)"
-          if (($output -join "`n").Trim() -ne "CNKIBug self-check OK: $expected") {
-            throw "Packaged executable version does not match project version"
-          }
           & .\dist\CNKIBug-GUI.exe --self-check
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged GUI executable self-check failed"
@@ -155,7 +141,6 @@ jobs:
         with:
           name: release-assets
           path: |
-            dist/CNKIBug.exe
             dist/CNKIBug-GUI.exe
             dist/*-source-tui.tar.gz
           if-no-files-found: error
@@ -168,6 +153,17 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/tags/${{ needs.build.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
       - name: Download release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -179,6 +175,12 @@ jobs:
         with:
           tag_name: ${{ needs.build.outputs.tag_name }}
           files: |
-            dist/CNKIBug.exe
             dist/CNKIBug-GUI.exe
             dist/*-source-tui.tar.gz
+
+      - name: Publish update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag_name }}
+          JSDMIRROR_API_KEY: ${{ secrets.JSDMIRROR_API_KEY }}
+        run: python scripts/publish_update.py "$RELEASE_TAG"

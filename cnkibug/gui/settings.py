@@ -12,6 +12,7 @@ import ttkbootstrap as ttk
 from ..app.runtime import DEFAULT_CONFIG, read_config, save_config
 from ..core.version import APP_VERSION
 from .update_dialog import UpdateDialog
+from .updater import SOURCE_LABELS
 
 
 _NUMERIC_FIELDS = (
@@ -67,10 +68,20 @@ class SettingsDialog:
             tabs[name] = tab
 
         ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}").grid(
-            row=0, column=0, sticky=tk.W, pady=(0, 16),
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 16),
+        )
+        self._update_source = tk.StringVar(master=self.window)
+        ttk.Label(tabs["更新"], text="下载线路").grid(row=1, column=0, sticky=tk.W, padx=(0, 16))
+        ttk.Combobox(tabs["更新"], textvariable=self._update_source,
+                     values=list(SOURCE_LABELS.values()), state="readonly", width=24).grid(
+            row=1, column=1, sticky=tk.EW,
         )
         ttk.Button(tabs["更新"], text="检查更新", command=self._check_updates).grid(
-            row=1, column=0, sticky=tk.W,
+            row=2, column=0, sticky=tk.W, pady=16,
+        )
+        ttk.Button(tabs["更新"], text="测试连接", command=self._test_connections,
+                   bootstyle="secondary-outline").grid(
+            row=2, column=1, sticky=tk.W, pady=16,
         )
 
         self._theme = tk.StringVar(master=self.window)
@@ -131,6 +142,7 @@ class SettingsDialog:
     def _populate(self, config: dict[str, Any]) -> None:
         self._theme.set(config["gui_theme"])
         self._log_level.set(config["log_level"])
+        self._update_source.set(SOURCE_LABELS[config["update_source"]])
         for key, _label, divisor in _NUMERIC_FIELDS:
             self._numbers[key].set(format(Decimal(config[key]) / divisor, "f"))
         for key, variable in self._flags.items():
@@ -144,6 +156,7 @@ class SettingsDialog:
         config = self._config.copy()
         config["gui_theme"] = self._theme.get()
         config["log_level"] = self._log_level.get()
+        config["update_source"] = self._selected_update_source()
         for key, label, divisor in _NUMERIC_FIELDS:
             try:
                 number = Decimal(self._numbers[key].get().strip()) * divisor
@@ -182,30 +195,40 @@ class SettingsDialog:
     def _check_updates(self) -> None:
         UpdateDialog(
             self.window, self._config_path.parent, self._prepare_update, self._on_restart,
+            source=self._selected_update_source(),
         ).show()
 
-    def _prepare_update(self, parent: tk.Misc) -> bool:
+    def _test_connections(self) -> None:
+        UpdateDialog(
+            self.window, self._config_path.parent, self._prepare_update, self._on_restart,
+            source=self._selected_update_source(), probe=True,
+        ).show()
+
+    def _selected_update_source(self) -> str:
+        return next(key for key, label in SOURCE_LABELS.items() if label == self._update_source.get())
+
+    def _prepare_update(self, parent: tk.Misc) -> str | None:
         try:
             config = self._collect()
         except ValueError as error:
             messagebox.showerror("设置无效", str(error), parent=parent)
-            return False
+            return None
         if config == self._config:
-            return True
+            return config["update_source"]
         choice = messagebox.askyesnocancel(
             "保存设置",
             "设置尚未保存。是否保存后继续更新？\n选择否将使用已保存的设置。",
             parent=parent,
         )
         if choice is None:
-            return False
+            return None
         if choice:
             try:
                 config = save_config(self._config_path, config)
             except (OSError, ValueError) as error:
                 messagebox.showerror("无法保存设置", str(error), parent=parent)
-                return False
+                return None
             self._config = config
             self._on_apply(config)
         self._populate(self._config)
-        return True
+        return self._config["update_source"]

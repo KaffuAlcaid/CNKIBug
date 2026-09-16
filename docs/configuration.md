@@ -8,7 +8,7 @@
 CNKIBug-data/config.json
 ```
 
-GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话和日志选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
+GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话、日志和更新选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
 
 手动编辑配置文件后，可在设置窗口点击重新读取配置；GUI 开始抓取前也会读取配置文件。终端版需重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
 
@@ -30,7 +30,8 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
   "log_keywords": false,
   "log_scraped_records": false,
   "detail_txt_export": false,
-  "gui_theme": "litera"
+  "gui_theme": "litera",
+  "update_source": "auto"
 }
 ```
 
@@ -51,6 +52,19 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 | `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
 | `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                 |
 | `gui_theme`                  | `"litera"` | `"litera"` / `"darkly"`          | GUI 浅色或暗色主题，随设置保存并记忆                 |
+| `update_source`              | `"auto"` | `"auto"` / `"ghproxy.net"` / `"ghfast.top"` / `"gh-proxy.org"` / `"direct"` | GUI 更新下载线路 |
+
+## GUI 更新线路
+
+- 自动：依次尝试 `ghproxy.net`、`ghfast.top`、`gh-proxy.org`，最后使用原始 GitHub 地址；网络错误时换源，每条线路一次。
+- 指定加速源：只使用选中的下载线路。
+- 无加速（系统代理）：更新信息和文件均使用 GitHub 原始地址，遵循 Python urllib 支持的系统及环境 HTTP/HTTPS 代理设置，不强制直连。
+
+加速模式优先从 JSDMirror 读取更新信息，不可用时尝试 GitHub API。下载固定到检查结果中的版本；换源时重新下载，文件校验失败会停止更新。
+
+测试连接检查当前模式下的更新信息和实际 EXE 下载地址，只读取文件开头的一小段。自动模式检查全部候选下载线路；指定模式只检查选中的线路。界面显示延迟，不代表完整文件的下载速度。
+
+Windows GUI EXE 支持下载并替换后重启；源码和 Python 包安装方式通过发布页或 pip 手动更新。
 
 ## 常见调整
 

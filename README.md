@@ -1,6 +1,6 @@
 # CNKIBug
 
-> 中国知网（CNKI）论文信息批量抓取工具。Windows 提供 GUI 和终端两个独立 `.exe`；Linux 可通过源码启动 GUI 或终端版本；macOS 可尝试通过源码运行终端版，当前不在正式支持范围。
+> 中国知网（CNKI）论文信息批量抓取工具。Windows 提供单文件 GUI `.exe`；Linux 可通过源码启动 GUI 或终端版本；macOS 可尝试通过源码运行终端版，当前不在正式支持范围。
 
 ![Python](https://img.shields.io/badge/Python-3.10--3.14-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
@@ -17,6 +17,7 @@
 - 可导出 Excel 或 CSV，也可选抓取引文、关键词和摘要
 - 自动保存配置、浏览器会话、日志和任务报告
 - 中途可安全停止，并从最近完成页继续
+- GUI 可手动检查更新、选择下载加速线路并测试连接
 
 ---
 
@@ -46,7 +47,7 @@
 
 ### 方式一：Windows 直接运行（推荐）
 
-1. 前往 [Releases](../../releases) 页面下载 `CNKIBug-GUI.exe`，喜欢终端交互也可下载 `CNKIBug.exe`
+1. 前往 [Releases](../../releases) 页面下载 `CNKIBug-GUI.exe`
 2. 确保电脑已安装 **Microsoft Edge**（Win10/11 通常已预装）
 3. 启动后输入检索项，按界面提示确认任务
 4. 手动通过知网滑块验证
@@ -103,7 +104,7 @@ macOS 当前未纳入正式测试和支持范围。Release 中单独提供的 `C
 
 | 平台            | GUI          | 终端版          |
 |---------------|--------------|--------------|
-| Windows 10/11 | `.exe` 或源码运行 | `.exe` 或源码运行 |
+| Windows 10/11 | `.exe` 或源码运行 | 源码运行 |
 | Linux         | 源码运行         | 源码运行         |
 | macOS         | 不支持          | 源码运行（非正式支持）  |
 

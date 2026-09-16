@@ -294,6 +294,7 @@ def _settings_dialog(config=None):
     dialog._on_apply = Mock()
     dialog._theme = Mock(get=lambda: "darkly")
     dialog._log_level = Mock(get=lambda: "INFO")
+    dialog._update_source = Mock(get=lambda: "自动")
     dialog._numbers = {key: Mock() for key, _label, _divisor in _NUMERIC_FIELDS}
     for key, _label, divisor in _NUMERIC_FIELDS:
         dialog._numbers[key].get.return_value = str(DEFAULT_CONFIG[key] / divisor)
@@ -355,3 +356,14 @@ def test_gui_settings_reload_applies_file_without_writing_it(tmp_path):
     dialog._populate.assert_called_once_with(config)
     assert dialog._config_path.read_bytes() == before
     dialog.window.destroy.assert_not_called()
+
+
+def test_update_uses_saved_route_when_unsaved_settings_are_discarded(monkeypatch):
+    dialog = _settings_dialog({**DEFAULT_CONFIG, "update_source": "direct"})
+    dialog._update_source.get.return_value = "ghfast.top"
+    dialog._populate = Mock()
+    monkeypatch.setattr("cnkibug.gui.settings.messagebox.askyesnocancel", lambda *args, **kwargs: False)
+
+    assert dialog._prepare_update(dialog.window) == "direct"
+    dialog._on_apply.assert_not_called()
+    dialog._populate.assert_called_once_with(dialog._config)

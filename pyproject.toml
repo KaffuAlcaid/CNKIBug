@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cnkibug"
 version = "0.6.0"
+description = "CNKI literature metadata collection with a desktop GUI"
+readme = "docs/pypi.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.10,<3.15"
 dependencies = [
   "playwright==1.60.0",
@@ -19,6 +22,16 @@ dependencies = [
 gui = [
   "ttkbootstrap==1.20.4",
 ]
+
+[project.scripts]
+cnkibug = "cnkibug.launcher:cli_main"
+
+[project.gui-scripts]
+cnkibug-gui = "cnkibug.launcher:gui_main"
+
+[project.urls]
+Repository = "https://github.com/KaffuAlcaid/CNKIBug"
+Issues = "https://github.com/KaffuAlcaid/CNKIBug/issues"
 
 [tool.setuptools.packages.find]
 include = ["cnkibug*"]

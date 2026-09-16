@@ -148,6 +148,7 @@ def test_save_config_persists_theme_and_scraper_values(tmp_path):
     ("verify_wait_timeout_sec", 1.5),
     ("session_cache_enabled", "false"),
     ("gui_theme", "unknown"),
+    ("update_source", "unknown"),
     ("log_level", ["INFO"]),
 ])
 def test_save_config_rejects_invalid_values_before_writing(tmp_path, key, value):

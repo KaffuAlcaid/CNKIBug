@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 
+UPDATE_SOURCES = ("auto", "ghproxy.net", "ghfast.top", "gh-proxy.org", "direct")
+
+
 @dataclass(frozen=True)
 class ScraperSettings:
     timeout_goto_ms: int

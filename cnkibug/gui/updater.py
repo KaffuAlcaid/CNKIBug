@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -20,12 +21,16 @@ from urllib.request import Request, urlopen
 import psutil
 
 from ..core.version import APP_VERSION
+from ..core.settings import UPDATE_SOURCES
 
 
 REPOSITORY = "KaffuAlcaid/CNKIBug"
 RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+MANIFEST_URL = f"https://cdn.jsdmirror.com/gh/{REPOSITORY}@updates/latest.json"
 GUI_ASSET = "CNKIBug-GUI.exe"
 UPDATE_SCRIPT = Path(__file__).with_name("apply_update.ps1")
+SOURCE_LABELS = {source: source for source in UPDATE_SOURCES}
+SOURCE_LABELS.update(auto="自动", direct="无加速（系统代理）")
 
 
 class UpdateError(RuntimeError):
@@ -94,25 +99,96 @@ def parse_release(payload: dict, current_version: str) -> ReleaseInfo:
     )
 
 
-def check_release(current_version: str = APP_VERSION) -> ReleaseInfo:
-    request = Request(RELEASE_API, headers={
+def _read_release(url: str, current_version: str, timeout: int) -> ReleaseInfo:
+    request = Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": f"CNKIBug-GUI/{current_version}",
     })
     try:
-        with urlopen(request, timeout=15) as response:
+        with urlopen(request, timeout=timeout) as response:
             payload = json.load(response)
         return parse_release(payload, current_version)
     except HTTPError as error:
         if error.code in (403, 429):
-            raise UpdateError("GitHub 暂时限制了更新检查，请稍后再试。") from error
+            raise UpdateError("服务暂时限制了请求，请稍后再试。") from error
         if error.code == 404:
             raise UpdateError("未找到可用的正式发布。") from error
         raise UpdateError(f"更新检查失败：HTTP {error.code}") from error
-    except (URLError, OSError) as error:
-        raise UpdateError(f"无法连接 GitHub：{error}") from error
+    except (URLError, OSError, http.client.HTTPException) as error:
+        raise UpdateError(f"连接失败：{error}") from error
     except (ValueError, TypeError) as error:
-        raise UpdateError("无法读取 GitHub 返回的发布信息。") from error
+        raise UpdateError("无法读取服务返回的发布信息。") from error
+
+
+def download_sources(source: str) -> tuple[str, ...]:
+    if source not in UPDATE_SOURCES:
+        raise UpdateError(f"未知更新线路：{source}")
+    return UPDATE_SOURCES[1:] if source == "auto" else (source,)
+
+
+def _metadata_sources(source: str) -> tuple[tuple[str, str], ...]:
+    download_sources(source)
+    direct = ("GitHub", RELEASE_API)
+    return (direct,) if source == "direct" else (("JSDMirror", MANIFEST_URL), direct)
+
+
+def check_release(
+    current_version: str = APP_VERSION,
+    *,
+    source: str = "direct",
+    cancelled: Event | None = None,
+    on_source: Callable[[str], None] | None = None,
+) -> ReleaseInfo:
+    failures = []
+    for name, url in _metadata_sources(source):
+        if cancelled is not None and cancelled.is_set():
+            raise UpdateCancelled()
+        if on_source is not None:
+            on_source(name)
+        try:
+            return _read_release(url, current_version, timeout=8)
+        except UpdateError as error:
+            failures.append(f"{name}：{error}")
+    raise UpdateError("无法取得更新信息。\n" + "\n".join(failures))
+
+
+def _download_url(original: str, source: str) -> str:
+    return original if source == "direct" else f"https://{source}/{original}"
+
+
+def probe_connections(source: str, cancelled: Event, on_result: Callable[[str], None]) -> None:
+    release = None
+    for name, url in _metadata_sources(source):
+        if cancelled.is_set():
+            raise UpdateCancelled()
+        started = time.monotonic()
+        try:
+            release = _read_release(url, APP_VERSION, timeout=5)
+        except UpdateError as error:
+            on_result(f"{name}（更新信息）：不可用，{error}")
+        else:
+            on_result(f"{name}（更新信息）：可用，延迟 {round((time.monotonic() - started) * 1000)} ms")
+            break
+    if release is None or not release.ready:
+        on_result("未取得可用的 GUI 发布文件，无法检查文件下载。")
+        return
+    for name in download_sources(source):
+        if cancelled.is_set():
+            raise UpdateCancelled()
+        request = Request(_download_url(release.download_url, name), headers={
+            "Range": "bytes=0-1023", "Accept-Encoding": "identity", "User-Agent": f"CNKIBug-GUI/{APP_VERSION}",
+        })
+        started = time.monotonic()
+        try:
+            with urlopen(request, timeout=5) as response:
+                data = response.read(1024)
+                if response.status not in (200, 206) or not data.startswith(b"MZ"):
+                    raise UpdateError("返回内容不是 EXE 文件。")
+        except (URLError, OSError, http.client.HTTPException, UpdateError) as error:
+            on_result(f"{SOURCE_LABELS[name]}（文件下载）：不可用，{error}")
+        else:
+            elapsed = round((time.monotonic() - started) * 1000)
+            on_result(f"{SOURCE_LABELS[name]}（文件下载）：可用，延迟 {elapsed} ms")
 
 
 def can_install_update() -> bool:
@@ -124,41 +200,65 @@ def download_release(
     data_dir: Path,
     cancelled: Event,
     on_progress: Callable[[int, int], None],
+    *,
+    source: str = "direct",
+    on_source: Callable[[str], None] | None = None,
 ) -> Path:
     if not release.newer or not release.ready:
         raise UpdateError("该版本的 GUI 文件或校验信息尚未就绪。")
+    sources = download_sources(source)
     update_dir = data_dir / "update"
     update_dir.mkdir(parents=True, exist_ok=True)
     job_dir = Path(tempfile.mkdtemp(prefix="pending-", dir=update_dir))
     partial = job_dir / f"{GUI_ASSET}.part"
     candidate = job_dir / GUI_ASSET
-    digest = hashlib.sha256()
-    received = 0
-    request = Request(release.download_url, headers={"User-Agent": f"CNKIBug-GUI/{APP_VERSION}"})
+    failures = []
     try:
+        for name in sources:
+            if cancelled.is_set():
+                raise UpdateCancelled()
+            if on_source is not None:
+                on_source(SOURCE_LABELS[name])
+            on_progress(0, release.size)
+            if cancelled.is_set():
+                raise UpdateCancelled()
+            digest = hashlib.sha256()
+            received = 0
+            request = Request(_download_url(release.download_url, name), headers={
+                "User-Agent": f"CNKIBug-GUI/{APP_VERSION}", "Accept-Encoding": "identity",
+            })
+            try:
+                with urlopen(request, timeout=15) as response, partial.open("wb") as output:
+                    while True:
+                        if cancelled.is_set():
+                            raise UpdateCancelled()
+                        try:
+                            chunk = response.read(256 * 1024)
+                        except (OSError, http.client.HTTPException) as error:
+                            raise URLError(error) from error
+                        if not chunk:
+                            break
+                        received += len(chunk)
+                        if received > release.size:
+                            raise UpdateError(f"{SOURCE_LABELS[name]}：文件大小与发布信息不一致。")
+                        output.write(chunk)
+                        digest.update(chunk)
+                        on_progress(received, release.size)
+            except (URLError, TimeoutError, http.client.HTTPException) as error:
+                failures.append(f"{SOURCE_LABELS[name]}：{error}")
+                partial.unlink(missing_ok=True)
+                continue
+            if cancelled.is_set():
+                raise UpdateCancelled()
+            if received != release.size or digest.hexdigest() != release.sha256:
+                raise UpdateError(f"{SOURCE_LABELS[name]}：文件校验失败，当前程序未被替换。")
+            partial.replace(candidate)
+            return candidate
         if cancelled.is_set():
             raise UpdateCancelled()
-        with urlopen(request, timeout=15) as response, partial.open("wb") as output:
-            while True:
-                if cancelled.is_set():
-                    raise UpdateCancelled()
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                received += len(chunk)
-                if received > release.size:
-                    raise UpdateError("下载文件大小与发布信息不一致。")
-                output.write(chunk)
-                digest.update(chunk)
-                on_progress(received, release.size)
-        if cancelled.is_set():
-            raise UpdateCancelled()
-        if received != release.size or digest.hexdigest() != release.sha256:
-            raise UpdateError("下载文件校验失败，当前程序未被替换。")
-        partial.replace(candidate)
-        return candidate
-    except (URLError, OSError) as error:
-        raise UpdateError(f"无法下载更新文件：{error}") from error
+        raise UpdateError("所有选定线路均下载失败。\n" + "\n".join(failures))
+    except OSError as error:
+        raise UpdateError(f"无法写入更新文件：{error}") from error
     finally:
         partial.unlink(missing_ok=True)
         if not candidate.exists():
