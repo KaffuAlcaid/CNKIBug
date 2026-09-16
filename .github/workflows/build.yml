@@ -131,8 +131,8 @@ jobs:
       - name: Smoke test packaged executable
         shell: pwsh
         run: |
-          & .\dist\CNKIBug-GUI.exe --self-check
-          if ($LASTEXITCODE -ne 0) {
+          $process = Start-Process -FilePath .\dist\CNKIBug-GUI.exe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) {
             throw "Packaged GUI executable self-check failed"
           }
 
