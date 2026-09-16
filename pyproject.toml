@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cnkibug"
-version = "0.6.0"
+version = "0.7.0"
 description = "CNKI literature metadata collection with a desktop GUI"
 readme = "docs/pypi.md"
 license = {file = "LICENSE"}
