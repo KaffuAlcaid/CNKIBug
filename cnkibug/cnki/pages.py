@@ -446,7 +446,7 @@ def _append_page_details(
             if session.acknowledge_stop_request(reason="用户请求停止"):
                 return False
 
-            append_article_details(record, details.keywords, details.abstract)
+            append_article_details(record, details.keywords, details.abstract, getattr(details, "metadata", None))
             if details.failed:
                 page_parse.detail_failed += 1
             else:

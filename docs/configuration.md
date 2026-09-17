@@ -25,6 +25,7 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
   "max_advance_fail": 2,
   "session_cache_enabled": true,
   "session_cache_ttl_hours": 12,
+  "download_auth_wait_sec": 60,
   "log_level": "INFO",
   "log_save_path": true,
   "log_keywords": false,
@@ -46,6 +47,7 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 | `max_advance_fail`           | `2`      | 正整数                                | 连续翻页失败多少次后结束当前关键词                    |
 | `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用 `CNKIBug-data/cache/cookies` 中的浏览器会话 |
 | `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存的有效期                      |
+| `download_auth_wait_sec`    | `60`     | 非负整数，秒                             | 下载前在知网首页等待机构授权的时间，可点“立即继续”提前开始 |
 | `log_level`                  | `"INFO"` | `"INFO"` / `"WARNING"` / `"ERROR"` | 日志级别                                 |
 | `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                       |
 | `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |

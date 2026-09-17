@@ -19,6 +19,43 @@ PUBLICATION_FILTERS = {
     "funded": ("基金文献", "JJWX=Y"),
 }
 
+RESOURCE_TYPES = ("学术期刊", "学位论文", "图书", "会议", "报纸", "年鉴", "专利", "标准", "法律法规", "成果", "学术辑刊", "特色期刊", "视频", "文库")
+SORT_MODES = {"FFD": "相关度", "PT": "发表时间", "CF": "被引次数", "DFR": "下载次数", "ZH": "综合"}
+LANGUAGES = {"BOTH": "全部", "CHINESE": "中文", "FOREIGN": "外文"}
+
+
+@dataclass(frozen=True)
+class SearchOptions:
+    resources: tuple[str, ...] = ("学术期刊", "学位论文", "会议")
+    sort: str = "PT"
+    language: str = "CHINESE"
+    page_size: int = 20
+
+    def __post_init__(self) -> None:
+        if not self.resources or any(value not in RESOURCE_TYPES for value in self.resources):
+            raise ValueError("请选择有效的检索范围。")
+        if self.sort not in SORT_MODES or self.language not in LANGUAGES:
+            raise ValueError("检索排序或语种无效。")
+        if isinstance(self.page_size, bool) or self.page_size not in (10, 20, 50):
+            raise ValueError("每页显示条数应为 10、20 或 50。")
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: Any) -> SearchOptions | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("检索设置格式无效。")
+        try:
+            return cls(**{**value, "resources": tuple(value["resources"])})
+        except (KeyError, TypeError) as error:
+            raise ValueError("检索设置格式无效。") from error
+
+    def summary(self) -> str:
+        return f"{'、'.join(self.resources)}；{SORT_MODES[self.sort]}；{LANGUAGES[self.language]}；每页 {self.page_size} 条"
+
 
 @dataclass(frozen=True)
 class SearchCondition:

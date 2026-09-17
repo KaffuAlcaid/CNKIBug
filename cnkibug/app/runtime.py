@@ -27,6 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_advance_fail": 2,
     "session_cache_enabled": True,
     "session_cache_ttl_hours": 12,
+    "download_auth_wait_sec": 60,
     "log_level": "INFO",
     "log_save_path": True,
     "log_keywords": False,
@@ -307,9 +308,11 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
         "verify_notice_interval_sec",
         "max_advance_fail",
         "session_cache_ttl_hours",
+        "download_auth_wait_sec",
     )
     for key in int_keys:
-        if not isinstance(config.get(key), int) or isinstance(config.get(key), bool) or config[key] <= 0:
+        minimum = 0 if key == "download_auth_wait_sec" else 1
+        if not isinstance(config.get(key), int) or isinstance(config.get(key), bool) or config[key] < minimum:
             events.append(("WARNING", f"配置项无效，已恢复默认值: {key}={DEFAULT_CONFIG[key]!r}"))
             config[key] = DEFAULT_CONFIG[key]
             changed = True

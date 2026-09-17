@@ -23,6 +23,7 @@ _NUMERIC_FIELDS = (
     ("verify_notice_interval_sec", "安全验证提醒间隔（秒）", 1),
     ("max_advance_fail", "连续翻页失败上限（次）", 1),
     ("session_cache_ttl_hours", "会话有效期（小时）", 1),
+    ("download_auth_wait_sec", "下载前首页等待（秒）", 1),
 )
 
 
@@ -94,12 +95,13 @@ class SettingsDialog:
 
         self._numbers: dict[str, tk.StringVar] = {}
         for row, (key, label, divisor) in enumerate(_NUMERIC_FIELDS):
-            tab = tabs["会话"] if key == "session_cache_ttl_hours" else tabs["抓取"]
-            row = 1 if key == "session_cache_ttl_hours" else row
+            session_rows = {"session_cache_ttl_hours": 1, "download_auth_wait_sec": 2}
+            tab = tabs["会话"] if key in session_rows else tabs["抓取"]
+            row = session_rows.get(key, row)
             variable = tk.StringVar(master=self.window)
             self._numbers[key] = variable
             ttk.Label(tab, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 24), pady=8)
-            spinbox = ttk.Spinbox(tab, textvariable=variable, from_=1 / divisor, to=2147483647 / divisor,
+            spinbox = ttk.Spinbox(tab, textvariable=variable, from_=0 if key == "download_auth_wait_sec" else 1 / divisor, to=2147483647 / divisor,
                                  increment=1, width=12)
             spinbox.grid(row=row, column=1, sticky=tk.EW, pady=8)
             if key == "session_cache_ttl_hours":
@@ -162,8 +164,9 @@ class SettingsDialog:
                 number = Decimal(self._numbers[key].get().strip()) * divisor
             except InvalidOperation as error:
                 raise ValueError(f"{label}必须是有效数值。") from error
-            if not number.is_finite() or number <= 0 or number != number.to_integral_value():
-                requirement = "正数，精确到毫秒" if divisor == 1000 else "正整数"
+            minimum = 0 if key == "download_auth_wait_sec" else 1
+            if not number.is_finite() or number < minimum or number != number.to_integral_value():
+                requirement = "非负整数" if minimum == 0 else "正数，精确到毫秒" if divisor == 1000 else "正整数"
                 raise ValueError(f"{label}必须为{requirement}。")
             config[key] = int(number)
         for key, variable in self._flags.items():

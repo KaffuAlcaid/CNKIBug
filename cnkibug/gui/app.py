@@ -17,6 +17,7 @@ from typing import Any
 
 import ttkbootstrap as ttk
 from PIL import Image
+from ttkbootstrap.dialogs import Messagebox
 
 from ..app.runtime import cleanup_runtime_history, init_runtime, read_config
 from ..cnki.models import (
@@ -24,6 +25,8 @@ from ..cnki.models import (
     STATUS_FAILED,
     STATUS_STOPPED,
     STATUS_SUCCESS,
+    Paper,
+    papers_from_results,
 )
 from ..core.estimate import (
     LONG_TASK_WARNING_SECONDS,
@@ -35,7 +38,7 @@ from ..core.estimate import (
 )
 from ..core.memory import MemorySampler, format_memory
 from ..core.settings import ScraperSettings, get_scraper_settings
-from ..core.search_query import AdvancedQuery, load_advanced_queries
+from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
 from ..core.version import APP_VERSION
 from ..fileio.keyword_input import (
     KeywordImportError,
@@ -55,6 +58,7 @@ from ..workflow.state import (
 from .events import GuiEvent, GuiEventSink
 from .advanced import AdvancedSearchDialog, confirm_advanced_task
 from .settings import SettingsDialog
+from .search_options import SearchOptionsDialog
 
 
 _logger = logging.getLogger("cnkibug.gui")
@@ -76,6 +80,7 @@ class GuiTaskRequest:
     detail_txt_export: bool
     output_dir: Path | None
     advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
+    search_options: SearchOptions | None = None
 
 
 def _format_duration(seconds: float) -> str:
@@ -186,6 +191,12 @@ class CNKIBugApp:
         self._log_line_count = 0
         self._keywords: list[str] = []
         self._advanced_queries: dict[str, AdvancedQuery] = {}
+        self._search_options: SearchOptions | None = None
+        self._current_results: list[Paper] = []
+        self._results_window = None
+        self._active_include_citation = False
+        self._active_output_dir: Path | None = None
+        self._result_prompt_pending = False
 
         self._build_ui()
         self._apply_config(self.runtime.config)
@@ -260,6 +271,9 @@ class CNKIBugApp:
         )
         for tag, color in log_colors.items():
             self._log.tag_configure(tag, foreground=color)
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None:
+            viewer.settings = self.settings
 
     def _open_log_directory(self) -> None:
         try:
@@ -326,6 +340,7 @@ class CNKIBugApp:
             toolbar, text="设置", command=self._open_settings, bootstyle="secondary-outline",
         )
         self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="primary").pack(side=tk.RIGHT, padx=(0, 8))
         self._maintenance_actions = ttk.Frame(header_actions)
         self._maintenance_actions.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(
@@ -468,6 +483,9 @@ class CNKIBugApp:
         settings_row.columnconfigure(1, weight=1)
 
         scope = ttk.Labelframe(settings_row, text="任务范围", padding=10)
+        scope.columnconfigure(0, weight=1)
+        self._search_options_button = ttk.Button(scope, text="检索设置", command=self._open_search_options, bootstyle="secondary-outline")
+        self._search_options_button.grid(row=0, column=1, rowspan=2, sticky="ne", padx=(8, 0))
         scope.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         ttk.Label(scope, text="每个检索项抓取页数").grid(row=0, column=0, sticky=tk.W)
         self._pages_var = tk.StringVar(value="1")
@@ -475,7 +493,7 @@ class CNKIBugApp:
         self._pages_entry.grid(row=1, column=0, sticky=tk.W, pady=(3, 10))
         ttk.Label(scope, text="保存位置").grid(row=2, column=0, sticky=tk.W)
         output_row = ttk.Frame(scope)
-        output_row.grid(row=3, column=0, sticky="ew", pady=(3, 0))
+        output_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(3, 0))
         output_row.columnconfigure(0, weight=1)
         self._output_var = tk.StringVar(value=get_real_desktop_path())
         self._output_entry = ttk.Entry(output_row, textvariable=self._output_var)
@@ -911,6 +929,7 @@ class CNKIBugApp:
             len(request.keywords),
             include_citation=request.include_citation,
             include_details=request.include_details,
+            page_size=request.search_options.page_size if request.search_options else 20,
         )
         preview = "、".join(request.keywords[:8])
         if len(request.keywords) > 8:
@@ -920,7 +939,7 @@ class CNKIBugApp:
             "single_csv": "一个 CSV 文件",
             "multi_split": f"{len(request.keywords)} 个独立 Excel 文件",
             "multi_merge": "一个 Excel 文件，每个检索项一个 Sheet",
-            "multi_csv": "一个 CSV 文件，包含 keyword 列",
+            "multi_csv": "一个 CSV 文件，包含命中检索项列",
         }[request.save_mode]
         extras = []
         if request.include_citation:
@@ -938,6 +957,8 @@ class CNKIBugApp:
             f"预计耗时：{format_eta(low, high)}\n"
             f"保存位置：{request.output_dir}\n\n"
         )
+        if request.search_options:
+            summary += f"检索设置：{request.search_options.summary()}\n\n"
         summary += _long_task_warning(high)
         summary += "确认无误后才会启动浏览器和抓取任务。"
         confirmed = (
@@ -996,6 +1017,7 @@ class CNKIBugApp:
             detail_txt_export=self._txt_var.get(),
             output_dir=output_dir,
             advanced_queries=dict(self._advanced_queries),
+            search_options=getattr(self, "_search_options", None),
         )
 
     def _offer_resume(self) -> None:
@@ -1028,6 +1050,7 @@ class CNKIBugApp:
                 pending_keywords,
                 include_citation=bool(state.get("include_citation", False)),
                 include_details=bool(state.get("include_details", False)),
+                page_size=(SearchOptions.from_dict(state.get("search_options")) or SearchOptions()).page_size,
             )
             choice = messagebox.askyesnocancel(
                 "继续或忽略断点",
@@ -1057,6 +1080,7 @@ class CNKIBugApp:
             )
 
     def _populate_resume_form(self, state: dict[str, Any]) -> None:
+        self._search_options = SearchOptions.from_dict(state.get("search_options"))
         keywords = state.get("keywords", [])
         self._advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
         self._set_keywords([str(item) for item in keywords])
@@ -1080,6 +1104,9 @@ class CNKIBugApp:
     ) -> None:
         if self._running:
             return
+        if self._downloads_running():
+            messagebox.showinfo("下载正在运行", "请在论文下载结束后开始抓取。", parent=self.root)
+            return
         if resume_state is not None:
             stored_output_dir = resume_state.get("output_dir")
             request = GuiTaskRequest(
@@ -1095,6 +1122,7 @@ class CNKIBugApp:
                     else None
                 ),
                 advanced_queries=load_advanced_queries(resume_state.get("advanced_queries", {}), resume_state["keywords"]),
+                search_options=SearchOptions.from_dict(resume_state.get("search_options")),
             )
         assert request is not None
 
@@ -1109,6 +1137,10 @@ class CNKIBugApp:
             )
             return
         request = replace(request, output_dir=output_dir)
+        self._active_include_citation = request.include_citation
+        self._active_output_dir = output_dir
+        self._current_results = []
+        self._result_prompt_pending = False
 
         try:
             config = read_config(self.runtime.paths.config_path)
@@ -1146,6 +1178,7 @@ class CNKIBugApp:
                     output_dir=request.output_dir,
                     cancel_event=self._cancel_event,
                     **({"advanced_queries": request.advanced_queries} if request.advanced_queries else {}),
+                    **({"search_options": request.search_options} if request.search_options is not None else {}),
                 )
             except Exception as error:
                 _logger.exception("GUI 任务线程异常")
@@ -1159,6 +1192,8 @@ class CNKIBugApp:
     # 运行状态集中控制表单、停止按钮和格式相关控件，避免各事件分支各自切换。
     def _set_running(self, running: bool) -> None:
         self._running = running
+        if hasattr(self, "_search_options_button"):
+            self._search_options_button.configure(state=tk.DISABLED if running else tk.NORMAL)
         for control in self._form_controls:
             control.configure(state=tk.DISABLED if running else tk.NORMAL)
         self._stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
@@ -1228,11 +1263,31 @@ class CNKIBugApp:
             messagebox.showerror("浏览器启动失败", error, parent=self.root)
         elif name == "verify_required":
             self._status_var.set("等待手动完成安全验证")
-            messagebox.showwarning(
-                "需要手动验证",
-                "请切换到浏览器窗口完成知网滑块或安全验证。\n验证通过后程序会自动继续。",
-                parent=self.root,
-            )
+            response_queue = payload.get("response_queue")
+            if response_queue is not None:
+                self._pending_confirms.append(response_queue)
+            try:
+                if not self._close_when_done:
+                    self.root.deiconify()
+                    self.root.attributes("-topmost", True)
+                    self.root.after_idle(self.root.attributes, "-topmost", False)
+                    self.root.lift()
+                    self.root.focus_force()
+                answer = False if self._close_when_done else Messagebox.show_question(
+                    title="需要手动验证",
+                    message="请在浏览器中完成安全验证后点击继续，恢复抓取论文结果。\n点击取消将停止任务并保存已抓取的结果。",
+                    buttons=["继续:primary", "取消:secondary"],
+                    default="继续",
+                    parent=self.root,
+                    localize=False,
+                ) == "继续"
+                if response_queue is not None:
+                    response_queue.put(answer)
+                if not answer:
+                    self._cancel_event.set()
+            finally:
+                if response_queue is not None:
+                    self._pending_confirms.remove(response_queue)
         elif name == "verify_waiting":
             self._status_var.set(f"等待安全验证，剩余约 {payload.get('remaining', 0)} 秒")
         elif name == "verify_timeout":
@@ -1286,6 +1341,9 @@ class CNKIBugApp:
             self._time_var.set(f"实际用时：{_format_duration(self._actual_seconds)}")
         elif name == "task_report":
             report = payload["report"]
+            if "all_results" in payload and not getattr(self, "_result_prompt_pending", False):
+                self._current_results = papers_from_results(payload["all_results"], getattr(self, "_active_include_citation", False))
+                self._result_prompt_pending = True
             total_records = sum(
                 len(records)
                 for records in payload.get("all_results", {}).values()
@@ -1308,6 +1366,9 @@ class CNKIBugApp:
                 )
         elif name == "export_finished":
             result = payload["result"]
+            if "all_results" in payload:
+                self._current_results = papers_from_results(payload["all_results"], getattr(self, "_active_include_citation", False))
+                self._result_prompt_pending = True
             if result.failed:
                 self._append_log(
                     f"本轮有 {result.failed} 个结果文件未能成功保存。",
@@ -1345,7 +1406,43 @@ class CNKIBugApp:
             self._set_running(False)
             self._new_task_button.configure(state=tk.NORMAL)
             if self._close_when_done:
-                self.root.destroy()
+                self._close_application()
+            elif getattr(self, "_result_prompt_pending", False):
+                self._result_prompt_pending = False
+                completed = self._progress_mode == "completed"
+                title = "抓取完成" if completed else "任务已结束"
+                count = len(self._current_results)
+                if count and messagebox.askyesno(title, f"已取得 {count} 篇论文。\n\n是否展示论文详情？", parent=self.root, default=messagebox.NO):
+                    self._show_results(refresh=True)
+                elif not count and completed:
+                    messagebox.showinfo(title, "未取得论文结果。", parent=self.root)
+
+    def _downloads_running(self) -> bool:
+        result = getattr(self, "_results_window", None)
+        return bool(result is not None and result.busy)
+
+    def _open_search_options(self) -> None:
+        if self._running:
+            return
+        dialog = SearchOptionsDialog(self.root, self._search_options)
+        self._search_options = dialog.result
+
+    def _show_results(self, refresh: bool = False) -> None:
+        from .results import ResultsWindow
+
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None and viewer.window.winfo_exists():
+            if refresh:
+                viewer.set_papers(self._current_results)
+            viewer.window.deiconify()
+            viewer.window.lift()
+            return
+        self._results_window = ResultsWindow(
+            self.root, self._current_results, settings=self.settings, paths=self.runtime.paths,
+            get_output_dir=lambda: Path(self._output_var.get().strip() or get_real_desktop_path()),
+            initial_format="csv" if self._format_var.get() == "csv" else "xlsx",
+            can_download=lambda: not self._running,
+        )
 
     def _show_form(self) -> None:
         if self._running:
@@ -1406,6 +1503,7 @@ class CNKIBugApp:
                 len(request.keywords),
                 include_citation=request.include_citation,
                 include_details=request.include_details,
+                page_size=request.search_options.page_size if request.search_options else 20,
             )
         else:
             remaining_pages, pending_keywords = remaining_workload(
@@ -1418,6 +1516,7 @@ class CNKIBugApp:
                 pending_keywords,
                 include_citation=request.include_citation,
                 include_details=request.include_details,
+                page_size=request.search_options.page_size if request.search_options else 20,
             )
         self._total_eta_var.set(
             f"预计总耗时：{format_eta(self._total_eta_low, self._total_eta_high, compact=True)}"
@@ -1483,6 +1582,10 @@ class CNKIBugApp:
             self._append_log("已请求安全停止，请等待当前操作结束。", "warning")
 
     def _on_close(self) -> None:
+        if self._downloads_running():
+            if messagebox.askyesno("停止下载并退出", "停止当前论文下载并退出 CNKIBug？", parent=self.root):
+                self._close_application()
+            return
         if not messagebox.askyesno(
             "退出 CNKIBug",
             "任务仍在运行。退出前将安全停止并保存当前结果，是否继续？"
@@ -1491,7 +1594,7 @@ class CNKIBugApp:
         ):
             return
         if not self._running:
-            self.root.destroy()
+            self._close_application()
             return
         self._close_when_done = True
         self._cancel_event.set()
@@ -1500,6 +1603,21 @@ class CNKIBugApp:
         for response_queue in list(self._pending_confirms):
             if response_queue.empty():
                 response_queue.put(False)
+
+    def _close_application(self) -> None:
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None and viewer._download_session.alive:
+            viewer.shutdown()
+            self.root.after(200, self._exit_after_download)
+        else:
+            self.root.destroy()
+
+    def _exit_after_download(self) -> None:
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None and viewer._download_session.alive:
+            self.root.after(200, self._exit_after_download)
+        else:
+            self.root.destroy()
 
 
 def main(program_dir: Path, icon_path: Path | None = None) -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .search_query import SearchOptions
+
 
 UPDATE_SOURCES = ("auto", "ghproxy.net", "ghfast.top", "gh-proxy.org", "direct")
 
@@ -21,6 +23,8 @@ class ScraperSettings:
     log_keywords: bool
     log_scraped_records: bool
     detail_txt_export: bool = False
+    search_options: SearchOptions | None = None
+    download_auth_wait_sec: int = 60
 
 
 def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
@@ -37,4 +41,5 @@ def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
         log_keywords=bool(config["log_keywords"]),
         log_scraped_records=bool(config["log_scraped_records"]),
         detail_txt_export=bool(config["detail_txt_export"]),
+        download_auth_wait_sec=int(config.get("download_auth_wait_sec", 60)),
     )

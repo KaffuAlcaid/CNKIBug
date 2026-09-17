@@ -193,6 +193,7 @@ def build_task_report(
         "created_at": str(task_state.get("created_at", "")),
         "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "request": {
+            "search_options": task_state.get("search_options"),
             "keyword_count": len(keywords),
             "max_pages_per_keyword": max_pages,
             "theoretical_max_pages": len(keywords) * max_pages,

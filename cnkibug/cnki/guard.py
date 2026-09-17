@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from queue import Empty, Queue
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -65,7 +66,9 @@ def handle_verify(
 
     _logger.warning("检测到安全验证，等待用户手动完成")
     events.emit("progress_paused")
-    events.emit("verify_required")
+    answers: Queue[bool] | None = Queue() if events.verify_confirmation_required else None
+    events.emit("verify_required", response_queue=answers)
+    confirmed = answers is None
 
     started_at = time.monotonic()
     waited = 0.0
@@ -76,7 +79,15 @@ def handle_verify(
             _logger.info("安全验证等待因浏览器页面关闭而停止")
             events.emit("progress_resumed")
             return VERIFY_PAGE_CLOSED
-        if not _is_verify_page(page):
+        if answers is not None and not confirmed:
+            try:
+                confirmed = answers.get_nowait()
+                if not confirmed:
+                    events.emit("progress_resumed")
+                    return VERIFY_CANCELLED
+            except Empty:
+                pass
+        if confirmed and not _is_verify_page(page):
             waited = max(0.0, time.monotonic() - started_at)
             break
         if events.cancel_requested():

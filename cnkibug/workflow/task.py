@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from threading import Event
@@ -13,7 +13,7 @@ from ..cnki.models import STATUS_FAILED, make_keyword_result
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
-from ..core.search_query import AdvancedQuery, load_advanced_queries
+from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
 from .report import TaskReport
 from .state import (
     completed_results,
@@ -69,6 +69,7 @@ def initialize_task(
     output_dir: Path | None = None,
     cancel_event: Event | None = None,
     advanced_queries: dict[str, AdvancedQuery] | None = None,
+    search_options: SearchOptions | None = None,
 ) -> TaskContext:
     if resume_state is not None:
         keywords = list(resume_state["keywords"])
@@ -82,6 +83,7 @@ def initialize_task(
         ts = str(resume_state["ts"])
         state = resume_state
         advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
+        search_options = SearchOptions.from_dict(state.get("search_options"))
         all_results = stored_results(state)
         terminal_results = completed_results(state)
         events.emit(
@@ -120,6 +122,7 @@ def initialize_task(
             detail_txt_export=detail_txt_export,
             output_dir=output_dir,
             advanced_queries=advanced_queries,
+            search_options=search_options,
         )
         persist_task_state(state, "创建新任务", paths, events)
 
@@ -155,7 +158,7 @@ def initialize_task(
         all_results=all_results,
         terminal_results=terminal_results,
         report=report,
-        settings=settings,
+        settings=replace(settings, search_options=search_options),
         paths=paths,
         events=events,
         session=ScrapeSession(events, cancel_event),

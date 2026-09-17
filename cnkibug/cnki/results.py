@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -127,6 +128,24 @@ def parse_result_rows(
                     result.citation_success += 1
                 else:
                     result.citation_failed += 1
+
+            extra = {}
+            for name, selector in (
+                ("document_type", "td.data"),
+                ("citation_count", "td.quote"),
+                ("download_count", "td.download"),
+            ):
+                element = row.query_selector(selector)
+                if element is not None:
+                    value = " ".join((element.text_content() or "").split())
+                    if value:
+                        extra[name] = value
+            if include_citation and record[5]:
+                match = re.search(r"\b10\.\d{4,9}/[^\s]+", record[5], re.I)
+                if match:
+                    extra["doi"] = match.group().rstrip(".;；。")
+            if extra:
+                record.append(extra)
 
             if _stop_requested(stop_requested):
                 result.cancelled = True

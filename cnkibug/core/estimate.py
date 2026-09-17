@@ -25,6 +25,7 @@ def estimate_active_seconds(
     keyword_count: int = 1,
     include_citation: bool = False,
     include_details: bool = False,
+    page_size: int = _RESULTS_PER_PAGE,
 ) -> tuple[int, int]:
     effective_keyword_count = max(keyword_count, 1)
     page_units = pages * effective_keyword_count
@@ -33,6 +34,7 @@ def estimate_active_seconds(
         effective_keyword_count,
         include_citation=include_citation,
         include_details=include_details,
+        page_size=page_size,
     )
 
 
@@ -41,6 +43,7 @@ def estimate_active_work_seconds(
     keyword_count: int,
     include_citation: bool = False,
     include_details: bool = False,
+    page_size: int = _RESULTS_PER_PAGE,
 ) -> tuple[int, int]:
     page_units = max(page_units, 0)
     effective_keyword_count = max(keyword_count, 0)
@@ -48,11 +51,11 @@ def estimate_active_work_seconds(
     low = page_units * _SEC_PER_PAGE_LOW + transition_count * _INTER_KEYWORD_LOW
     high = page_units * _SEC_PER_PAGE_HIGH + transition_count * _INTER_KEYWORD_HIGH
     if include_citation:
-        expected_records = page_units * _RESULTS_PER_PAGE
+        expected_records = page_units * page_size
         low += ceil(expected_records * _SEC_PER_CITATION_LOW)
         high += ceil(expected_records * _SEC_PER_CITATION_HIGH)
     if include_details:
-        expected_records = page_units * _RESULTS_PER_PAGE
+        expected_records = page_units * page_size
         low += expected_records * _SEC_PER_DETAIL_LOW
         high += expected_records * _SEC_PER_DETAIL_HIGH
     return low, high
@@ -63,12 +66,14 @@ def estimate_seconds(
     keyword_count: int = 1,
     include_citation: bool = False,
     include_details: bool = False,
+    page_size: int = _RESULTS_PER_PAGE,
 ) -> tuple[int, int]:
     low, high = estimate_active_seconds(
         pages,
         keyword_count,
         include_citation=include_citation,
         include_details=include_details,
+        page_size=page_size,
     )
     return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
 
@@ -78,12 +83,14 @@ def estimate_work_seconds(
     keyword_count: int,
     include_citation: bool = False,
     include_details: bool = False,
+    page_size: int = _RESULTS_PER_PAGE,
 ) -> tuple[int, int]:
     low, high = estimate_active_work_seconds(
         page_units,
         keyword_count,
         include_citation=include_citation,
         include_details=include_details,
+        page_size=page_size,
     )
     return low + _STARTUP_OVERHEAD_LOW, high + _STARTUP_OVERHEAD_HIGH
 

@@ -9,12 +9,12 @@ from typing import Any
 from ..cnki.models import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
-from ..core.search_query import AdvancedQuery, load_advanced_queries
+from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 6
-_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3, 4, 5}
+TASK_STATE_VERSION = 7
+_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3, 4, 5, 6}
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -54,6 +54,7 @@ def make_task_state(
     detail_txt_export: bool = False,
     output_dir: Path | None = None,
     advanced_queries: dict[str, AdvancedQuery] | None = None,
+    search_options: SearchOptions | None = None,
 ) -> dict[str, Any]:
     if any(key not in keywords for key in (advanced_queries or {})):
         raise ValueError("高级检索与任务列表不一致。")
@@ -69,6 +70,7 @@ def make_task_state(
         "output_dir": str(output_dir) if output_dir is not None else None,
         "keywords": list(keywords),
         "advanced_queries": {key: query.to_dict() for key, query in (advanced_queries or {}).items()},
+        "search_options": search_options.to_dict() if search_options else None,
         "completed": {},
     }
 
@@ -304,6 +306,7 @@ def _is_valid_task_state(raw: Any) -> bool:
         return False
     try:
         load_advanced_queries(raw.get("advanced_queries", {}), keywords)
+        SearchOptions.from_dict(raw.get("search_options"))
     except ValueError:
         return False
     if version == TASK_STATE_VERSION and "advanced_queries" not in raw:

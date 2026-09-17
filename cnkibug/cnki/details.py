@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
@@ -33,6 +34,7 @@ class ArticleDetails:
     failed: bool = False
     verify_timeout: bool = False
     page_closed: bool = False
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 class ArticleDetailFetcher:
@@ -128,7 +130,7 @@ class ArticleDetailFetcher:
                 return ArticleDetails([], "", failed=True)
             if self._page_closed():
                 return ArticleDetails([], "", failed=True, page_closed=True)
-            return ArticleDetails(keywords, abstract)
+            return ArticleDetails(keywords, abstract, metadata=self._extract_metadata(page))
         except PlaywrightError as error:
             if self._cancel_requested():
                 return ArticleDetails([], "", failed=True)
@@ -148,6 +150,32 @@ class ArticleDetailFetcher:
 
     def _cancel_requested(self) -> bool:
         return self._events.cancel_requested()
+
+    @staticmethod
+    def _extract_metadata(page: Any) -> dict[str, str]:
+        metadata = page.evaluate(r"""() => {
+            const text = selector => (document.querySelector(selector)?.textContent || '').trim();
+            const meta = name => document.querySelector(`meta[name="${name}"]`)?.content?.trim() || '';
+            const labeled = label => Array.from(document.querySelectorAll('.rowtit'))
+                .find(el => el.textContent.replace(/[：:\s]/g, '') === label)
+                ?.parentElement?.querySelector('p')?.textContent?.trim() || '';
+            return {
+                institutions: text('.wx-tit h3.author:not(#authorpart)'),
+                funds: text('p.funds'), classification: text('p.clc-code'),
+                doi: meta('citation_doi') || labeled('DOI') || text('p.doi') || text('.doi a'),
+                volume: meta('citation_volume'), issue: meta('citation_issue'),
+                first_page: meta('citation_firstpage'), last_page: meta('citation_lastpage'),
+                identifiers: Array.from(document.querySelectorAll('.rowtit, .top-tip, .doc-top'))
+                    .map(el => el.textContent || '').filter(t => /doi/i.test(t)).join(' ')
+            };
+        }""")
+        match = re.search(r"\b10\.\d{4,9}/[^\s<>]+", metadata.get("doi", "") or metadata.get("identifiers", ""), re.I)
+        metadata["doi"] = match.group().rstrip(".;；。") if match else ""
+        metadata.pop("identifiers", None)
+        first, last = metadata.pop("first_page", ""), metadata.pop("last_page", "")
+        if first:
+            metadata["pages"] = f"{first}-{last}" if last and last != first else first
+        return {key: " ".join(value.split()) for key, value in metadata.items() if value}
 
     @staticmethod
     def _extract_keywords(page: Any) -> list[str]:

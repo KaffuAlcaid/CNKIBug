@@ -46,6 +46,7 @@ def start_progress(task: TaskContext) -> None:
         pending_count,
         include_citation=task.include_citation,
         include_details=task.include_details,
+        page_size=task.settings.search_options.page_size if task.settings.search_options else 20,
     )
     task.events.emit(
         "progress_started",
@@ -354,11 +355,17 @@ def _merge_historical_records(
 
 def _merge_record_fields(previous: list, current: list) -> list:
     merged = list(previous)
-    if len(merged) < len(current):
-        merged.extend([""] * (len(current) - len(merged)))
-    for index, value in enumerate(current):
+    incoming = list(current)
+    metadata = merged.pop() if merged and isinstance(merged[-1], dict) else {}
+    new_metadata = incoming.pop() if incoming and isinstance(incoming[-1], dict) else {}
+    metadata = {**metadata, **{key: value for key, value in new_metadata.items() if value}}
+    if len(merged) < len(incoming):
+        merged.extend([""] * (len(incoming) - len(merged)))
+    for index, value in enumerate(incoming):
         if value is not None and str(value).strip():
             merged[index] = value
+    if metadata:
+        merged.append(metadata)
     return merged
 
 

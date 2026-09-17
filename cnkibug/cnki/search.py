@@ -342,6 +342,9 @@ def run_keyword_search(
         page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if settings.search_options is not None:
+            from .search_options import apply_search_options
+            apply_search_options(page, settings.search_options, settings, events)
         if advanced_query is None:
             submit_search(page, keyword, settings, events)
         else:
@@ -388,6 +391,9 @@ def run_keyword_search(
         if outcome == SEARCH_OVERSEA:
             _ensure_supported_site(page, "关键词结果页")
         if outcome != "verify":
+            if outcome == "has_results" and settings.search_options is not None:
+                from .search_options import apply_page_size
+                apply_page_size(page, settings.search_options, settings)
             return SearchResult(outcome)
 
         _logger.warning("等待检索结果期间检测到安全验证: %s", keyword_ref)

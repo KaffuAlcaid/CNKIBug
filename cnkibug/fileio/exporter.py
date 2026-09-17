@@ -1,4 +1,3 @@
-import csv
 import logging
 import os
 import re
@@ -8,10 +7,10 @@ from dataclasses import dataclass, field
 
 import openpyxl
 
-from ..cnki.models import record_article_details, record_citation
+from ..cnki.models import paper_from_record, papers_from_results, record_article_details
+from .papers import append_papers, paper_columns, paper_values, paper_workbook, write_csv
 from .paths import get_real_desktop_path
 
-_CSV_HEADERS = ["keyword", "title", "authors", "source", "publication_date", "detail_url"]
 _logger = logging.getLogger("cnkibug.exporter")
 
 
@@ -130,13 +129,7 @@ def _export_headers(
     include_citation: bool,
     include_details: bool = False,
 ) -> list[str]:
-    headers = ["论文标题", "作者", "来源", "发表日期"]
-    if include_details:
-        headers.extend(("论文关键词", "摘要"))
-    if include_citation:
-        headers.append("引用格式")
-    headers.append("详情链接")
-    return headers
+    return [label for _, label in paper_columns(include_citation, include_details)]
 
 
 def _export_record(
@@ -144,19 +137,7 @@ def _export_record(
     include_citation: bool,
     include_details: bool = False,
 ) -> list:
-    values = list(record[:5])
-    values.extend([""] * (5 - len(values)))
-    exported = list(values[:4])
-    if include_details:
-        keywords, abstract = record_article_details(record, include_citation)
-        exported.extend((
-            "；".join(item.strip() for item in keywords.splitlines() if item.strip()),
-            _clean_cell_text(abstract),
-        ))
-    if include_citation:
-        exported.append(record_citation(record, include_citation))
-    exported.append(values[4])
-    return exported
+    return paper_values(paper_from_record(record, include_citation), paper_columns(include_citation, include_details))
 
 
 def _clean_cell_text(value: str) -> str:
@@ -171,15 +152,10 @@ def _build_single_sheet_workbook(
     results: list,
     include_citation: bool = False,
     include_details: bool = False,
+    keyword: str = "",
 ):
     """构建单 Sheet 工作簿（single / multi_split 共用）。"""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    assert ws is not None
-    ws.title = "论文标题"
-    ws.append(_export_headers(include_citation, include_details))
-    _append_records(ws, results, include_citation, include_details)
-    return wb
+    return paper_workbook(papers_from_results({keyword: results}, include_citation), include_citation, include_details)
 
 
 def _append_records(
@@ -191,7 +167,7 @@ def _append_records(
     for row in results:
         ws.append(_export_record(row, include_citation, include_details))
         if len(row) > 4 and str(row[4]).strip():
-            link_column = len(_export_headers(include_citation, include_details))
+            link_column = _export_headers(include_citation, include_details).index("详情链接") + 1
             link_cell = ws.cell(row=ws.max_row, column=link_column)
             link_cell.hyperlink = str(row[4]).strip()
             link_cell.style = "Hyperlink"
@@ -214,7 +190,7 @@ def _save_single(
 
     clean_keyword = _sanitize_name(keyword)
     filepath = _get_output_path(f"cnki_titles_{clean_keyword}_{ts}.xlsx", output_dir)
-    wb = _build_single_sheet_workbook(results, include_citation, include_details)
+    wb = _build_single_sheet_workbook(results, include_citation, include_details, keyword)
 
     saved_path = _try_save_workbook(
         wb,
@@ -222,7 +198,7 @@ def _save_single(
         log_save_path=log_save_path,
         save_type=save_type,
     )
-    save_result.record(saved_path, keyword=keyword, record_count=len(results))
+    save_result.record(saved_path, keyword=keyword, record_count=len(papers_from_results({keyword: results}, include_citation)))
     return save_result
 
 
@@ -259,14 +235,14 @@ def _save_multi_split(
             f"cnki_titles_{clean_keyword}_{ts}.xlsx",
             output_dir,
         )
-        wb = _build_single_sheet_workbook(results, include_citation, include_details)
+        wb = _build_single_sheet_workbook(results, include_citation, include_details, keyword)
         saved_path = _try_save_workbook(
             wb,
             filepath,
             log_save_path=log_save_path,
             save_type=save_type,
         )
-        save_result.record(saved_path, keyword=keyword, record_count=len(results))
+        save_result.record(saved_path, keyword=keyword, record_count=len(papers_from_results({keyword: results}, include_citation)))
     return save_result
 
 
@@ -305,9 +281,9 @@ def _save_multi_merge(
         used_sheet_names.add(sheet_name)
 
         ws = wb.create_sheet(title=sheet_name)
-        ws.append(_export_headers(include_citation, include_details))
-        _append_records(ws, results, include_citation, include_details)
-        total += len(results)
+        papers = papers_from_results({keyword: results}, include_citation)
+        append_papers(ws, papers, include_citation, include_details)
+        total += len(papers)
 
     saved_path = _try_save_workbook(
         wb,
@@ -325,18 +301,7 @@ def _write_multi_csv(
     include_citation: bool = False,
     include_details: bool = False,
 ) -> None:
-    with open(filepath, "w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.writer(file)
-        headers = list(_CSV_HEADERS)
-        if include_details:
-            headers[5:5] = ["paper_keywords", "abstract"]
-        if include_citation:
-            headers.insert(7 if include_details else 5, "citation")
-        writer.writerow(headers)
-        for keyword, records in all_results.items():
-            for record in records:
-                values = _export_record(record, include_citation, include_details)
-                writer.writerow([keyword, *values])
+    write_csv(filepath, papers_from_results(all_results, include_citation), include_citation, include_details)
 
 
 def _try_save_csv(
@@ -379,7 +344,7 @@ def _save_multi_csv(
     save_type: str = "final",
 ) -> SaveResult:
     save_result = SaveResult()
-    total = sum(len(records) for records in all_results.values())
+    total = len(papers_from_results(all_results, include_citation))
     if total == 0:
         return save_result
 
@@ -421,7 +386,7 @@ def _save_single_csv(
         log_save_path=log_save_path,
         save_type=save_type,
     )
-    save_result.record(saved_path, keyword=keyword, record_count=len(results))
+    save_result.record(saved_path, keyword=keyword, record_count=len(papers_from_results({keyword: results}, include_citation)))
     return save_result
 
 

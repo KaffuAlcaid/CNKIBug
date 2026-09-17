@@ -11,6 +11,9 @@ from cnkibug.fileio.exporter import (
     save_all,
 )
 
+BASE_HEADERS = ["论文标题", "作者", "来源", "发表日期", "文献类型", "DOI", "被引次数", "下载次数"]
+DETAIL_HEADERS = ["论文关键词", "摘要", "作者单位", "基金", "分类号", "卷", "期", "页码"]
+
 
 def test_build_workbook_inserts_details_before_citation_and_detail_url():
     detail_url = "https://kns.cnki.net/detail/1"
@@ -31,27 +34,21 @@ def test_build_workbook_inserts_details_before_citation_and_detail_url():
     )
     ws = wb.active
 
-    assert [cell.value for cell in ws[1]] == [
-        "论文标题",
-        "作者",
-        "来源",
-        "发表日期",
-        "论文关键词",
-        "摘要",
-        "引用格式",
-        "详情链接",
-    ]
+    assert [cell.value for cell in ws[1]] == BASE_HEADERS + DETAIL_HEADERS + ["引用格式", "详情链接", "命中检索项"]
     assert [cell.value for cell in ws[2]] == [
         "标题",
         "作者",
         "来源",
         "2026-01-01",
+        "", "", "", "",
         "铝合金；晶粒组织",
         "完整摘要内容",
+        "", "", "", "", "", "",
         citation,
         detail_url,
+        "",
     ]
-    assert ws["H2"].hyperlink.target == detail_url
+    assert ws["R2"].hyperlink.target == detail_url
 
 
 # ============ helpers ============
@@ -76,7 +73,7 @@ def test_save_all_single_writes_file(monkeypatch, tmp_path):
     assert result.failed == 0
     assert result.saved_paths == [str(files[0].resolve())]
     ws = _load(files[0]).active
-    assert [c.value for c in ws[1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
+    assert [c.value for c in ws[1]] == BASE_HEADERS + ["详情链接", "命中检索项"]
     assert ws.max_row == 3  # 表头 + 2 行数据
 
 
@@ -100,8 +97,8 @@ def test_save_all_single_csv_writes_keyword_column(monkeypatch, tmp_path):
     with path.open(encoding="utf-8-sig", newline="") as file:
         rows = list(csv.reader(file))
     assert rows == [
-        ["keyword", "title", "authors", "source", "publication_date", "detail_url"],
-        ["焊接", "标题", "作者", "来源", "2026-01-01", "https://example.test/1"],
+        BASE_HEADERS + ["详情链接", "命中检索项"],
+        ["标题", "作者", "来源", "2026-01-01", "", "", "", "", "https://example.test/1", "焊接"],
     ]
 
 
@@ -128,23 +125,16 @@ def test_save_all_single_csv_inserts_citation_before_detail_url(monkeypatch, tmp
     with path.open(encoding="utf-8-sig", newline="") as file:
         rows = list(csv.reader(file))
     assert rows == [
+        BASE_HEADERS + ["引用格式", "详情链接", "命中检索项"],
         [
-            "keyword",
-            "title",
-            "authors",
-            "source",
-            "publication_date",
-            "citation",
-            "detail_url",
-        ],
-        [
-            "焊接",
             "标题",
             "作者",
             "来源",
             "2026-01-01",
+            "", "", "", "",
             "[1] 示例引文",
             "https://example.test/1",
+            "焊接",
         ],
     ]
 
@@ -174,22 +164,14 @@ def test_save_all_single_csv_writes_details_before_citation(monkeypatch, tmp_pat
     path = tmp_path / "cnki_titles_焊接_TS.csv"
     with path.open(encoding="utf-8-sig", newline="") as file:
         rows = list(csv.reader(file))
-    assert rows[0] == [
-        "keyword",
-        "title",
-        "authors",
-        "source",
-        "publication_date",
-        "paper_keywords",
-        "abstract",
-        "citation",
-        "detail_url",
-    ]
-    assert rows[1][5:] == [
+    assert rows[0] == BASE_HEADERS + DETAIL_HEADERS + ["引用格式", "详情链接", "命中检索项"]
+    assert rows[1][8:] == [
         "关键词一；关键词二",
         "完整摘要",
+        "", "", "", "", "", "",
         "[1] 示例引文",
         "https://example.test/1",
+        "焊接",
     ]
 
 
@@ -312,7 +294,7 @@ def test_save_all_multi_merge_one_file_multi_sheet(monkeypatch, tmp_path):
     assert len(files) == 1
     wb = _load(files[0])
     assert wb.sheetnames == ["焊接", "增材"]
-    assert [c.value for c in wb["焊接"][1]] == ["论文标题", "作者", "来源", "发表日期", "详情链接"]
+    assert [c.value for c in wb["焊接"][1]] == BASE_HEADERS + ["详情链接", "命中检索项"]
 
 
 def test_multi_merge_sheet_name_truncated_and_deduped(monkeypatch, tmp_path):
@@ -345,9 +327,9 @@ def test_save_all_multi_csv_writes_flat_utf8_file(monkeypatch, tmp_path):
     with path.open(encoding="utf-8-sig", newline="") as file:
         rows = list(csv.reader(file))
     assert rows == [
-        ["keyword", "title", "authors", "source", "publication_date", "detail_url"],
-        ["焊接", "标题一", "作者甲", "来源甲", "2026-01-01", "https://example.test/1"],
-        ["增材", "标题,二", "作者乙", "来源乙", "", ""],
+        BASE_HEADERS + ["详情链接", "命中检索项"],
+        ["标题一", "作者甲", "来源甲", "2026-01-01", "", "", "", "", "https://example.test/1", "焊接"],
+        ["标题,二", "作者乙", "来源乙", "", "", "", "", "", "", "增材"],
     ]
 
 

@@ -16,6 +16,8 @@ class GuiEvent:
 
 
 class GuiEventSink(EventSink):
+    verify_confirmation_required = True
+
     def __init__(self, event_queue: Queue[GuiEvent], cancel_event: Event) -> None:
         self._event_queue = event_queue
         self._cancel_event = cancel_event

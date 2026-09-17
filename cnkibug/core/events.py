@@ -7,6 +7,8 @@ from typing import Any, Iterator
 class EventSink:
     """Receives workflow events without tying core code to a UI toolkit."""
 
+    verify_confirmation_required = False
+
     def emit(self, name: str, **payload: Any) -> None:
         pass
 
