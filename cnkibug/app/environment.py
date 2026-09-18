@@ -3,21 +3,13 @@
 
 import sys
 import os
-import shutil
 
 from .ui import _console
-
-_EDGE_PATHS = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
-]
+from ..browser.environment import edge_executable
 
 
 def _edge_installed() -> bool:
-    if any(os.path.isfile(p) for p in _EDGE_PATHS):
-        return True
-    return shutil.which("msedge") is not None # noqa
+    return edge_executable() is not None
 
 
 def check_env():

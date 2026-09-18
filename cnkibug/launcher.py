@@ -24,6 +24,10 @@ def cli_main() -> None:
 
 
 def gui_main() -> None:
+    if sys.argv[1:] == ["--install-system-deps"]:
+        from .browser.environment import run_system_dependency_installer
+
+        raise SystemExit(run_system_dependency_installer())
     try:
         from .gui.app import main
     except ImportError as error:

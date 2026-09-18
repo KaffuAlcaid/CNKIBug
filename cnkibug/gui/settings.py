@@ -13,6 +13,8 @@ from ..app.runtime import DEFAULT_CONFIG, read_config, save_config
 from ..core.version import APP_VERSION
 from .update_dialog import UpdateDialog
 from .updater import SOURCE_LABELS
+from .environment import EnvironmentPanel
+from ..fileio.paths import get_real_desktop_path
 
 
 _NUMERIC_FIELDS = (
@@ -36,15 +38,19 @@ class SettingsDialog:
         on_apply: Callable[[dict[str, Any]], None],
         *,
         on_restart: Callable[[], None],
+        get_output_dir: Callable[[], Path] | None = None,
+        can_check_environment: Callable[[], bool] = lambda: True,
+        selected_tab: str | None = None,
     ) -> None:
         self._config = config.copy()
         self._config_path = config_path
         self._on_apply = on_apply
         self._on_restart = on_restart
+        self._closing = False
         self.window = ttk.Toplevel(title="设置", transient=parent, master=parent)
         self.window.withdraw()
-        self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
-        self.window.bind("<Escape>", lambda _event: self.window.destroy())
+        self.window.protocol("WM_DELETE_WINDOW", self._close)
+        self.window.bind("<Escape>", lambda _event: self._close())
 
         outer = ttk.Frame(self.window, padding=18)
         outer.pack(fill=tk.BOTH, expand=True)
@@ -55,18 +61,29 @@ class SettingsDialog:
             side=tk.LEFT, padx=8,
         )
         ttk.Button(footer, text="保存", command=self._save, width=8, bootstyle="primary").pack(side=tk.RIGHT)
-        ttk.Button(footer, text="取消", command=self.window.destroy, width=8, bootstyle="secondary-outline").pack(
+        ttk.Button(footer, text="取消", command=self._close, width=8, bootstyle="secondary-outline").pack(
             side=tk.RIGHT, padx=8,
         )
 
         notebook = ttk.Notebook(outer)
         notebook.pack(fill=tk.BOTH, expand=True)
         tabs = {}
-        for name in ("外观", "抓取", "会话", "日志", "更新"):
+        for name in ("外观", "抓取", "会话", "日志", "运行环境", "更新"):
             tab = ttk.Frame(notebook, padding=18)
             tab.columnconfigure(1, weight=1)
             notebook.add(tab, text=name)
             tabs[name] = tab
+
+        self.environment = EnvironmentPanel(
+            tabs["运行环境"], config_path.parent,
+            get_output_dir or (lambda: Path(config.get("output_dir") or get_real_desktop_path())),
+            can_run=can_check_environment,
+            on_change=self._environment_changed,
+        )
+        self.environment.grid(row=0, column=0, columnspan=2, sticky=tk.NSEW)
+        tabs["运行环境"].rowconfigure(0, weight=1)
+        if selected_tab in tabs:
+            notebook.select(tabs[selected_tab])
 
         ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}").grid(
             row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 16),
@@ -141,6 +158,17 @@ class SettingsDialog:
     def show(self) -> None:
         self.window.wait_window()
 
+    def _close(self) -> None:
+        if self.environment.busy:
+            self._closing = True
+            self.environment.cancel()
+        else:
+            self.window.destroy()
+
+    def _environment_changed(self) -> None:
+        if self._closing and not self.environment.busy:
+            self.window.destroy()
+
     def _populate(self, config: dict[str, Any]) -> None:
         self._theme.set(config["gui_theme"])
         self._log_level.set(config["log_level"])
@@ -180,7 +208,7 @@ class SettingsDialog:
             messagebox.showerror("无法保存设置", str(error), parent=self.window)
             return
         self._on_apply(config)
-        self.window.destroy()
+        self._close()
 
     def _reload(self) -> None:
         try:
@@ -211,6 +239,9 @@ class SettingsDialog:
         return next(key for key, label in SOURCE_LABELS.items() if label == self._update_source.get())
 
     def _prepare_update(self, parent: tk.Misc) -> str | None:
+        if self.environment.busy:
+            messagebox.showinfo("运行环境正在处理", "请在环境检查或浏览器安装完成后更新程序。", parent=parent)
+            return None
         try:
             config = self._collect()
         except ValueError as error:

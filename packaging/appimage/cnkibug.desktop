@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CNKIBug
+Comment=CNKI paper metadata and reference manager
+Exec=CNKIBug-GUI
+Icon=cnkibug
+Terminal=false
+Categories=Office;Education;
+StartupNotify=true

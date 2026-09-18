@@ -290,6 +290,8 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
 def _settings_dialog(config=None):
     dialog = SettingsDialog.__new__(SettingsDialog)
     dialog._config = (config or DEFAULT_CONFIG).copy()
+    dialog._closing = False
+    dialog.environment = Mock(busy=False)
     dialog.window = Mock()
     dialog._on_apply = Mock()
     dialog._theme = Mock(get=lambda: "darkly")
@@ -315,6 +317,19 @@ def test_gui_settings_converts_seconds_without_changing_task_output_option():
     assert config["timeout_selector_ms"] == 30001
     assert config["gui_theme"] == "darkly"
     assert config["detail_txt_export"] is True
+
+
+def test_settings_close_waits_for_environment_worker():
+    dialog = _settings_dialog()
+    dialog.environment.busy = True
+
+    dialog._close()
+
+    dialog.environment.cancel.assert_called_once()
+    dialog.window.destroy.assert_not_called()
+    dialog.environment.busy = False
+    dialog._environment_changed()
+    dialog.window.destroy.assert_called_once()
 
 
 @pytest.mark.parametrize("value", ["", "abc", "0", "-1", "NaN", "Infinity", "1.0001"])

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+app_dir=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}
+exec "$app_dir/usr/bin/CNKIBug-GUI" "$@"

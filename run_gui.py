@@ -85,7 +85,8 @@ def _run_self_check() -> int:
     if not _resource_path("icon.ico").is_file():
         _write_message("CNKIBug GUI self-check failed: icon.ico missing")
         return 1
-    if not _resource_path("cnkibug/gui/apply_update.ps1").is_file():
+    update_script = "apply_update.ps1" if sys.platform == "win32" else "apply_update.sh"
+    if not _resource_path(f"cnkibug/gui/{update_script}").is_file():
         _write_message("CNKIBug GUI self-check failed: update script missing")
         return 1
     _write_message(f"CNKIBug GUI self-check OK: {APP_VERSION}")
@@ -102,6 +103,12 @@ def _run() -> None:
 
 
 def _entry_directory() -> Path:
+    from cnkibug.core.runtime import appimage_path
+
+    if appimage_path():
+        from cnkibug.launcher import user_program_dir
+
+        return user_program_dir()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
@@ -115,6 +122,10 @@ def _resource_path(filename: str) -> Path:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--install-system-deps"]:
+        from cnkibug.browser.environment import run_system_dependency_installer
+
+        raise SystemExit(run_system_dependency_installer())
     if sys.argv[1:] == ["--self-check"]:
         raise SystemExit(_run_self_check())
     _run()

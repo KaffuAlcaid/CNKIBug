@@ -10,6 +10,7 @@ from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
 from .cache import discard_cookie_state, prepare_cookie_state
+from .environment import browser_channels, browser_launch_options
 
 
 _logger = logging.getLogger("cnkibug.browser_runtime")
@@ -29,39 +30,28 @@ def launch_browser(
     p: Any,
     events: EventSink = NULL_EVENTS,
 ) -> BrowserLaunchResult:
-    try:
-        _logger.info("浏览器启动开始: channel=msedge")
-        with events.activity("少女祈祷中..."):
-            browser = p.chromium.launch(
-                channel="msedge",
-                headless=False,
-                args=["--start-maximized"],
-            )
-        events.emit("browser_launched", channel="msedge")
-        _logger.info("浏览器启动成功: channel=msedge")
-        return BrowserLaunchResult(browser, "msedge")
-    except PlaywrightError as edge_err:
-        _logger.warning("Edge 启动失败，尝试备用 Chromium: %s", edge_err)
-        events.emit("browser_edge_failed", error=str(edge_err))
+    for channel in browser_channels():
+        name = channel or "chromium"
         try:
-            _logger.info("浏览器启动开始: channel=chromium")
+            _logger.info("浏览器启动开始: channel=%s", name)
             with events.activity("少女祈祷中..."):
                 browser = p.chromium.launch(
-                    headless=False,
-                    args=["--start-maximized"],
+                    args=["--start-maximized"], **browser_launch_options(channel),
                 )
-            events.emit("browser_launched", channel="chromium")
-            _logger.info("浏览器启动成功: channel=chromium")
-            return BrowserLaunchResult(browser, "chromium")
-        except PlaywrightError as chromium_err:
-            _logger.error("备用 Chromium 启动失败: %s", chromium_err)
-            raise BrowserLaunchError(f"浏览器启动彻底失败: {chromium_err}") from chromium_err
+            events.emit("browser_launched", channel=name)
+            _logger.info("浏览器启动成功: channel=%s", name)
+            return BrowserLaunchResult(browser, name)
+        except PlaywrightError as error:
+            if channel == "msedge":
+                _logger.warning("Edge 启动失败，尝试 Chromium: %s", error)
+                events.emit("browser_edge_failed", error=str(error))
+                continue
+            _logger.error("Chromium 启动失败: %s", error)
+            raise BrowserLaunchError(f"浏览器启动彻底失败: {error}") from error
         except Exception:
-            _logger.exception("备用 Chromium 启动出现非预期异常")
+            _logger.exception("浏览器启动出现非预期异常")
             raise
-    except Exception:
-        _logger.exception("Edge 启动出现非预期异常")
-        raise
+    raise BrowserLaunchError("没有可用的浏览器")
 
 
 def create_browser_context(

@@ -1,6 +1,6 @@
 # CNKIBug
 
-> 中国知网（CNKI）论文信息批量抓取工具。Windows 提供单文件 GUI `.exe`；Linux 可通过源码启动 GUI 或终端版本；macOS 可尝试通过源码运行终端版，当前不在正式支持范围。
+> 中国知网（CNKI）论文信息批量抓取工具。Windows 使用单文件 GUI `.exe`；Linux GUI 支持 AppImage 和源码运行，也可运行终端版；macOS 可尝试通过源码运行终端版，当前不在正式支持范围。
 
 ![Python](https://img.shields.io/badge/Python-3.10--3.14-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
@@ -84,7 +84,22 @@ PDF 保存在主窗口设置的目录，每篇论文的下载结果可在论文�
 
 使用学校 WebVPN 时，在下载确认框点击“使用机构 WebVPN 登录”，填入学校提供的完整知网 WebVPN 网址。完成网页登录后，回到论文结果窗口点击“登录完成，继续”。
 
-### 方式二：源码运行（Linux / macOS 用户或开发者）
+### 方式二：Linux AppImage（x86-64）
+
+在 [Releases](../../releases) 中选择附带 `CNKIBug-GUI-x86_64.AppImage` 的版本，下载后在文件所在目录运行：
+
+```bash
+chmod +x CNKIBug-GUI-x86_64.AppImage
+./CNKIBug-GUI-x86_64.AppImage
+```
+
+首次启动时，在初始化设置中选择论文保存目录，按提示安装 Chromium。若检查发现缺少系统组件，请在终端执行页面给出的安装命令，再点击“开始检查”。检查通过后点击“开始使用”。完成初始化后，后续启动直接进入主窗口。
+
+AppImage 自带 Python 运行环境。配置、登录状态和任务记录保存在 `~/.local/share/CNKIBug-data/`，浏览器保存在 `~/.cache/ms-playwright/`；论文文件保存在主窗口设置的目录。
+
+Windows 和 Linux 都可通过“设置 → 运行环境 → 开始检查”查看浏览器、程序组件和保存目录的检查结果。
+
+### 方式三：源码运行（Linux / macOS 用户或开发者）
 
 先取得完整源码并进入项目根目录：
 
@@ -136,12 +151,12 @@ macOS 当前未纳入正式测试和支持范围。Release 中单独提供的 `C
 | 平台            | GUI          | 终端版          |
 |---------------|--------------|--------------|
 | Windows 10/11 | `.exe` 或源码运行 | 源码运行 |
-| Linux         | 源码运行         | 源码运行         |
+| Linux         | x86-64 AppImage 或源码运行 | 源码运行 |
 | macOS         | 不支持          | 源码运行（非正式支持）  |
 
 | 项目     | 要求                                                                                      |
 |--------|-----------------------------------------------------------------------------------------|
-| 浏览器    | Windows：Microsoft Edge（已预装或手动安装）；Linux / macOS：`playwright install chromium` 的 Chromium |
+| 浏览器    | Windows：Microsoft Edge；Linux AppImage：在初始化设置中安装 Chromium；源码运行：`playwright install chromium` |
 | Python | 3.10–3.14（仅源码运行需要）                                                                      |
 | 图形桌面   | 所有抓取方式均需要人工通过知网滑块验证，无法在纯无头服务器运行                                                         |
 

@@ -13,9 +13,12 @@ def build_manifest(release: dict) -> dict:
     tag = release["tag_name"]
     if release.get("draft") or release.get("prerelease") or not re.fullmatch(r"v?\d+\.\d+\.\d+", tag):
         raise ValueError("Update manifests require a stable release tag")
-    asset = next(item for item in release["assets"] if item["name"] == "CNKIBug-GUI.exe")
-    if asset["state"] != "uploaded" or asset["size"] <= 0 or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", asset.get("digest") or ""):
-        raise ValueError("The GUI executable or its digest is not ready")
+    assets = [item for item in release["assets"] if item["name"] in ("CNKIBug-GUI.exe", "CNKIBug-GUI-x86_64.AppImage")]
+    if not assets:
+        raise ValueError("No GUI release assets are available")
+    for asset in assets:
+        if asset["state"] != "uploaded" or asset["size"] <= 0 or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", asset.get("digest") or ""):
+            raise ValueError("A GUI release asset or its digest is not ready")
     return {
         "schema_version": 1,
         "tag_name": tag,
@@ -23,7 +26,7 @@ def build_manifest(release: dict) -> dict:
         "body": release.get("body") or "",
         "draft": False,
         "prerelease": False,
-        "assets": [{key: asset[key] for key in ("name", "state", "size", "digest", "browser_download_url")}],
+        "assets": [{key: asset[key] for key in ("name", "state", "size", "digest", "browser_download_url")} for asset in assets],
     }
 
 

@@ -22,7 +22,8 @@ from .download_dialog import DownloadDialog
 
 class ResultsWindow:
     def __init__(self, parent, papers: list[Paper], *, settings, paths, output_dir: Path | None = None,
-                 get_output_dir=None, initial_format="xlsx", can_download=lambda: True):
+                 get_output_dir=None, initial_format="xlsx", can_download=lambda: True,
+                 prepare_browser=lambda: True):
         self.window = ttk.Toplevel(parent)
         self.window.title("CNKIBug - 论文结果")
         width = min(1200, parent.winfo_screenwidth() - 70)
@@ -35,6 +36,7 @@ class ResultsWindow:
         self.get_output_dir = get_output_dir or (lambda: self.output_dir or Path(get_real_desktop_path()))
         self._initial_format = initial_format
         self.can_download = can_download
+        self.prepare_browser = prepare_browser
         self.busy = False
         self._closing = False
         self._queue: Queue[GuiEvent] = Queue()
@@ -322,6 +324,8 @@ class ResultsWindow:
             return
         if not self.can_download():
             messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后下载论文。", parent=self.window)
+            return
+        if not self.prepare_browser():
             return
         dialog = DownloadDialog(self.window, self.settings.download_auth_wait_sec, self._webvpn_url)
         if not dialog.show():

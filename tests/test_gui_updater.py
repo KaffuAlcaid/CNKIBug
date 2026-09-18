@@ -32,7 +32,7 @@ def test_release_comparison_uses_versions_and_selects_only_gui(tag, current, new
              "digest": "sha256:" + "a" * 64, "browser_download_url": url}
     release = updater.parse_release({"tag_name": tag, "assets": [
         {**asset, "name": "CNKIBug.exe"}, asset,
-    ]}, current)
+    ]}, current, asset_name=updater.GUI_ASSET)
     assert release.newer is newer
     assert release.ready
     assert release.download_url == url
@@ -46,14 +46,38 @@ def test_release_without_gui_asset_is_not_ready_and_unknown_versions_fail():
         updater.parse_release({"tag_name": "v0.6.0", "assets": []}, "0+unknown")
 
 
-def test_download_finishes_only_after_matching_release_digest(monkeypatch, tmp_path):
+@pytest.mark.parametrize("platform_name,machine,expected", [
+    ("win32", "AMD64", updater.GUI_ASSET),
+    ("linux", "x86_64", updater.LINUX_GUI_ASSET),
+    ("linux", "aarch64", ""),
+])
+def test_update_selects_asset_for_current_platform(monkeypatch, platform_name, machine, expected):
+    monkeypatch.setattr(updater.sys, "platform", platform_name)
+    monkeypatch.setattr(updater.platform, "machine", lambda: machine)
+    assets = [
+        {"name": name, "state": "uploaded", "size": 10, "digest": "sha256:" + "a" * 64,
+         "browser_download_url": f"https://github.com/{updater.REPOSITORY}/releases/download/v0.7.0/{name}"}
+        for name in (updater.GUI_ASSET, updater.LINUX_GUI_ASSET)
+    ]
+
+    manifest = build_manifest({"tag_name": "v0.7.0", "published_at": "2026-09-18T00:00:00Z", "assets": assets})
+    release = updater.parse_release(manifest, "0.6.0")
+
+    assert release.asset_name == expected
+    assert release.ready is bool(expected)
+    if expected:
+        assert release.download_url.endswith("/" + expected)
+
+
+@pytest.mark.parametrize("asset_name", [updater.GUI_ASSET, updater.LINUX_GUI_ASSET])
+def test_download_finishes_only_after_matching_release_digest(monkeypatch, tmp_path, asset_name):
     content = b"downloaded executable"
     monkeypatch.setattr(updater, "urlopen", lambda *args, **kwargs: io.BytesIO(content))
     progress = []
-    candidate = updater.download_release(_release(content), tmp_path, Event(),
+    candidate = updater.download_release(_release(content, asset_name=asset_name), tmp_path, Event(),
                                          lambda *counts: progress.append(counts))
     assert candidate.read_bytes() == content
-    assert candidate.name == updater.GUI_ASSET
+    assert candidate.name == asset_name
     assert progress[-1] == (len(content), len(content))
     assert not list(candidate.parent.glob("*.part"))
 
@@ -198,10 +222,28 @@ def test_published_manifest_round_trips_through_the_updater():
                     "browser_download_url": f"https://github.com/{updater.REPOSITORY}/releases/download/v0.7.0/{updater.GUI_ASSET}"}],
     }
     manifest = build_manifest(release)
-    restored = updater.parse_release(json.loads(json.dumps(manifest)), "0.6.0")
+    restored = updater.parse_release(json.loads(json.dumps(manifest)), "0.6.0", asset_name=updater.GUI_ASSET)
     assert restored.newer and restored.ready
     assert restored.version == "0.7.0"
     assert "/download/v0.7.0/" in restored.download_url
+
+    linux_release = updater.parse_release(manifest, "0.6.0", asset_name=updater.LINUX_GUI_ASSET)
+    assert not linux_release.ready
+
+
+def test_appimage_save_preserves_existing_user_data(tmp_path):
+    candidate = tmp_path / "download" / updater.LINUX_GUI_ASSET
+    candidate.parent.mkdir()
+    candidate.write_bytes(b"new version")
+    config = tmp_path / "config.json"
+    config.write_bytes(b"user configuration")
+    destination = tmp_path / "CNKIBug.AppImage"
+
+    assert updater.save_appimage(candidate, destination) == destination
+    assert destination.read_bytes() == b"new version"
+    assert config.read_bytes() == b"user configuration"
+    assert not candidate.exists()
+    assert not list(tmp_path.glob(".cnkibug-update-*"))
 
 
 def test_direct_update_check_uses_only_github_api(monkeypatch):

@@ -133,7 +133,8 @@ def test_load_or_create_config_backs_up_broken_json(tmp_path):
 
 def test_save_config_persists_theme_and_scraper_values(tmp_path):
     path = tmp_path / "config.json"
-    config = {**runtime.DEFAULT_CONFIG, "gui_theme": "darkly", "timeout_selector_ms": 30500}
+    config = {**runtime.DEFAULT_CONFIG, "gui_theme": "darkly", "timeout_selector_ms": 30500,
+              "linux_setup_completed": True, "output_dir": str(tmp_path / "papers")}
 
     saved = runtime.save_config(path, config)
 
@@ -150,6 +151,9 @@ def test_save_config_persists_theme_and_scraper_values(tmp_path):
     ("gui_theme", "unknown"),
     ("update_source", "unknown"),
     ("log_level", ["INFO"]),
+    ("linux_setup_completed", "false"),
+    ("output_dir", None),
+    ("output_dir", "invalid\x00path"),
 ])
 def test_save_config_rejects_invalid_values_before_writing(tmp_path, key, value):
     path = tmp_path / "config.json"

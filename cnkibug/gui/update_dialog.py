@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
+from tkinter import filedialog
 from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
@@ -35,6 +36,7 @@ class UpdateDialog:
         self._cancelled = Event()
         self._stage = "checking"
         self._release: updater.ReleaseInfo | None = None
+        self._save_destination: Path | None = None
         self.window = ttk.Toplevel(title="测试连接" if probe else "检查更新", master=parent, transient=parent)
         self.window.withdraw()
         self.window.protocol("WM_DELETE_WINDOW", self._close)
@@ -131,6 +133,11 @@ class UpdateDialog:
                             self._show_message(f"下载已取消。临时文件未能删除：\n{value}")
                         else:
                             self._show_message("下载已取消。")
+                    elif self._save_destination is not None:
+                        self._stage = "saving"
+                        self._status.set("正在保存新版本...")
+                        self._primary.configure(state=tk.DISABLED)
+                        self._work(lambda candidate=value: updater.save_appimage(candidate, self._save_destination), "saved")
                     else:
                         self._stage = "installing"
                         self._status.set("正在准备重启...")
@@ -142,6 +149,8 @@ class UpdateDialog:
                 elif event == "ready":
                     self._on_restart()
                     return
+                elif event == "saved":
+                    self._show_message(f"新版本已保存：\n{value}\n\n运行该文件即可使用新版本，原有用户数据继续保留。")
                 elif event == "cancelled":
                     self._show_message("下载已取消。")
                 elif event == "error":
@@ -171,6 +180,10 @@ class UpdateDialog:
             text += "\n更新完成后将重启程序，尚未开始的检索项不会保留。"
             if not release.ready:
                 text += "\n该版本的 GUI 文件或校验信息尚未就绪。"
+        elif updater.appimage_path() is not None:
+            text += "\n当前程序文件无法直接替换，更新文件将另存到你选择的位置。"
+            if not release.ready:
+                text += "\n该版本的 AppImage 文件尚未就绪。"
         else:
             text += "\n当前运行方式需手动更新，将打开发布页面。"
         self._status.set(text)
@@ -181,7 +194,7 @@ class UpdateDialog:
         self._notes.configure(state=tk.DISABLED)
         self._notes.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         self._secondary.pack(side=tk.RIGHT, padx=(0, 8))
-        available = release.ready or not updater.can_install_update()
+        available = release.ready or (not updater.can_install_update() and updater.appimage_path() is None)
         self._primary.configure(text="更新", command=self._update,
                                 state=tk.NORMAL if available else tk.DISABLED)
 
@@ -189,7 +202,7 @@ class UpdateDialog:
         release = self._release
         if release is None:
             return
-        if not updater.can_install_update():
+        if not updater.can_install_update() and updater.appimage_path() is None:
             if webbrowser.open(release.page_url):
                 self._close()
             else:
@@ -198,6 +211,15 @@ class UpdateDialog:
         source = self._before_install(self.window)
         if source is None:
             return
+        if updater.appimage_path() is not None and not updater.can_install_update():
+            destination = filedialog.asksaveasfilename(
+                parent=self.window, title="保存新版本", initialdir=str(Path.home()),
+                initialfile=release.asset_name, defaultextension=".AppImage",
+                filetypes=[("AppImage", "*.AppImage")],
+            )
+            if not destination:
+                return
+            self._save_destination = Path(destination)
         self._source = source
         self._stage = "downloading"
         self._cancelled.clear()
@@ -218,7 +240,7 @@ class UpdateDialog:
         )
 
     def _close(self) -> None:
-        if self._stage == "installing":
+        if self._stage in ("installing", "saving"):
             return
         self._cancelled.set()
         if self._stage == "downloading":

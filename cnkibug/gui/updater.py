@@ -5,7 +5,9 @@ import hashlib
 import http.client
 import json
 import os
+import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,12 +24,15 @@ import psutil
 
 from ..core.version import APP_VERSION
 from ..core.settings import UPDATE_SOURCES
+from ..core.runtime import appimage_path
+from ..browser.environment import system_process_environment
 
 
 REPOSITORY = "KaffuAlcaid/CNKIBug"
 RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 MANIFEST_URL = f"https://cdn.jsdmirror.com/gh/{REPOSITORY}@updates/latest.json"
 GUI_ASSET = "CNKIBug-GUI.exe"
+LINUX_GUI_ASSET = "CNKIBug-GUI-x86_64.AppImage"
 UPDATE_SCRIPT = Path(__file__).with_name("apply_update.ps1")
 SOURCE_LABELS = {source: source for source in UPDATE_SOURCES}
 SOURCE_LABELS.update(auto="自动", direct="无加速（系统代理）")
@@ -51,6 +56,7 @@ class ReleaseInfo:
     download_url: str = ""
     size: int = 0
     sha256: str = ""
+    asset_name: str = GUI_ASSET
 
     @property
     def ready(self) -> bool:
@@ -64,7 +70,13 @@ def version_numbers(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
-def parse_release(payload: dict, current_version: str) -> ReleaseInfo:
+def gui_asset_name() -> str:
+    if sys.platform == "linux":
+        return LINUX_GUI_ASSET if platform.machine().lower() in ("x86_64", "amd64") else ""
+    return GUI_ASSET
+
+
+def parse_release(payload: dict, current_version: str, *, asset_name: str | None = None) -> ReleaseInfo:
     if not isinstance(payload, dict) or payload.get("draft") or payload.get("prerelease"):
         raise UpdateError("未找到可用的正式发布。")
     tag = payload.get("tag_name")
@@ -72,12 +84,13 @@ def parse_release(payload: dict, current_version: str) -> ReleaseInfo:
         raise UpdateError("发布信息缺少版本号。")
     newer = version_numbers(tag) > version_numbers(current_version)
     release_root = f"https://github.com/{REPOSITORY}/releases"
-    download_url = f"{release_root}/download/{quote(tag, safe='')}/{GUI_ASSET}"
+    selected_asset = gui_asset_name() if asset_name is None else asset_name
+    download_url = f"{release_root}/download/{quote(tag, safe='')}/{selected_asset}"
     assets = payload.get("assets")
     if not isinstance(assets, list):
         raise UpdateError("发布信息缺少附件列表。")
     asset = next((item for item in assets
-                  if isinstance(item, dict) and item.get("name") == GUI_ASSET), {})
+                  if isinstance(item, dict) and item.get("name") == selected_asset), {})
     size = asset.get("size", 0)
     digest = asset.get("digest", "")
     ready = (
@@ -96,6 +109,7 @@ def parse_release(payload: dict, current_version: str) -> ReleaseInfo:
         download_url=download_url if ready else "",
         size=size if ready else 0,
         sha256=digest[7:].lower() if ready else "",
+        asset_name=selected_asset,
     )
 
 
@@ -182,8 +196,9 @@ def probe_connections(source: str, cancelled: Event, on_result: Callable[[str], 
         try:
             with urlopen(request, timeout=5) as response:
                 data = response.read(1024)
-                if response.status not in (200, 206) or not data.startswith(b"MZ"):
-                    raise UpdateError("返回内容不是 EXE 文件。")
+                expected_type = (data.startswith(b"\x7fELF") and data[8:11] == b"AI\x02") if release.asset_name.endswith(".AppImage") else data.startswith(b"MZ")
+                if response.status not in (200, 206) or not expected_type:
+                    raise UpdateError("返回文件与当前平台不匹配。")
         except (URLError, OSError, http.client.HTTPException, UpdateError) as error:
             on_result(f"{SOURCE_LABELS[name]}（文件下载）：不可用，{error}")
         else:
@@ -192,7 +207,10 @@ def probe_connections(source: str, cancelled: Event, on_result: Callable[[str], 
 
 
 def can_install_update() -> bool:
-    return sys.platform == "win32" and bool(getattr(sys, "frozen", False))
+    if sys.platform == "win32":
+        return bool(getattr(sys, "frozen", False))
+    image = appimage_path()
+    return bool(image and gui_asset_name() and image.is_file() and os.access(image.parent, os.W_OK))
 
 
 def download_release(
@@ -210,8 +228,8 @@ def download_release(
     update_dir = data_dir / "update"
     update_dir.mkdir(parents=True, exist_ok=True)
     job_dir = Path(tempfile.mkdtemp(prefix="pending-", dir=update_dir))
-    partial = job_dir / f"{GUI_ASSET}.part"
-    candidate = job_dir / GUI_ASSET
+    partial = job_dir / f"{release.asset_name}.part"
+    candidate = job_dir / release.asset_name
     failures = []
     try:
         for name in sources:
@@ -267,7 +285,10 @@ def download_release(
 
 def start_installer(candidate: Path, release: ReleaseInfo) -> None:
     if not can_install_update():
-        raise UpdateError("自动替换仅适用于 Windows GUI 可执行文件。")
+        raise UpdateError("当前运行方式或程序所在目录不支持自动替换。")
+    if appimage_path() is not None:
+        _start_appimage_installer(candidate, release)
+        return
     target = Path(sys.executable).resolve()
     job_dir = candidate.parent.resolve()
     update_dir = job_dir.parent
@@ -312,3 +333,63 @@ def start_installer(candidate: Path, release: ReleaseInfo) -> None:
     process.terminate()
     process.wait(timeout=5)
     raise UpdateError("更新脚本启动超时，当前程序仍在运行。")
+
+
+def save_appimage(candidate: Path, destination: Path) -> Path:
+    destination = destination.expanduser().resolve()
+    descriptor, temporary = tempfile.mkstemp(prefix=".cnkibug-update-", suffix=".AppImage", dir=destination.parent)
+    os.close(descriptor)
+    staged = Path(temporary)
+    try:
+        shutil.copyfile(candidate, staged)
+        staged.chmod(0o755)
+        staged.replace(destination)
+        candidate.unlink()
+        return destination
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _start_appimage_installer(candidate: Path, release: ReleaseInfo) -> None:
+    target = appimage_path()
+    assert target is not None
+    job_dir = candidate.parent.resolve()
+    script_path = job_dir / "apply_update.sh"
+    script_path.write_bytes(Path(__file__).with_name("apply_update.sh").read_bytes())
+    descriptor, temporary = tempfile.mkstemp(prefix=".cnkibug-update-", suffix=".AppImage", dir=target.parent)
+    os.close(descriptor)
+    staged = Path(temporary)
+    process = None
+    handed_off = False
+    try:
+        shutil.copyfile(candidate, staged)
+        staged.chmod((target.stat().st_mode & 0o777) | 0o100)
+        process_ids = [os.getpid()]
+        parent = psutil.Process().parent()
+        if parent is not None and Path(parent.exe()).resolve() == Path(sys.executable).resolve():
+            process_ids.append(parent.pid)
+        process = subprocess.Popen(
+            ["/bin/sh", str(script_path), str(target), str(staged), str(candidate.resolve()),
+             str(job_dir.parent / f"{target.name}.bak"), " ".join(map(str, process_ids)),
+             str(release.size), release.sha256],
+            env=system_process_environment(), cwd=target.parent,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                error_file = job_dir / "error.log"
+                details = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
+                raise UpdateError(f"更新脚本未能启动，当前程序仍在运行。\n{details}".strip())
+            if (job_dir / "ready").is_file():
+                handed_off = True
+                return
+            time.sleep(0.1)
+        raise UpdateError("更新脚本启动超时，当前程序仍在运行。")
+    finally:
+        if not handed_off:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+            staged.unlink(missing_ok=True)

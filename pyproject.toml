@@ -37,4 +37,4 @@ Issues = "https://github.com/KaffuAlcaid/CNKIBug/issues"
 include = ["cnkibug*"]
 
 [tool.setuptools.package-data]
-"cnkibug.gui" = ["apply_update.ps1"]
+"cnkibug.gui" = ["apply_update.ps1", "apply_update.sh"]

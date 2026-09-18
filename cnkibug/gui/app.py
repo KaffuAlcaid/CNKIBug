@@ -19,7 +19,8 @@ import ttkbootstrap as ttk
 from PIL import Image
 from ttkbootstrap.dialogs import Messagebox
 
-from ..app.runtime import cleanup_runtime_history, init_runtime, read_config
+from ..app.runtime import cleanup_runtime_history, init_runtime, read_config, save_config
+from ..core.runtime import appimage_path
 from ..cnki.models import (
     STATUS_EMPTY,
     STATUS_FAILED,
@@ -203,7 +204,7 @@ class CNKIBugApp:
         self._update_memory_status()
         self.root.after(100, self._drain_events)
         self.root.after(250, self._tick)
-        self.root.after(200, self._offer_resume)
+        self.root.after(200, self._finish_startup)
 
     # 窗口生命周期与固定界面结构。
     def _set_window_icon(self, icon_path: Path | None) -> None:
@@ -243,15 +244,48 @@ class CNKIBugApp:
             parent=self.root,
         )
 
-    def _open_settings(self) -> None:
-        if self._running or not self._form_view.winfo_ismapped():
+    def _finish_startup(self) -> None:
+        if appimage_path() and not self.runtime.config.get("linux_setup_completed", False):
+            from .environment import InitializationDialog
+
+            InitializationDialog(self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config).show()
+        try:
+            if self.root.winfo_exists():
+                self._offer_resume()
+        except tk.TclError:
+            pass
+
+    def _ensure_browser_ready(self) -> bool:
+        if not appimage_path():
+            return True
+        from ..browser.environment import chromium_available
+
+        try:
+            if chromium_available():
+                return True
+        except Exception as error:
+            _logger.warning("浏览器准备检查失败: %s", error)
+        messagebox.showinfo("浏览器尚未准备好", "请在设置的运行环境中安装 Chromium，然后继续。", parent=self.root)
+        self._open_settings(selected_tab="运行环境")
+        try:
+            return chromium_available()
+        except Exception:
+            return False
+
+    def _open_settings(self, *, selected_tab: str | None = None) -> None:
+        if self._running or self._downloads_running() or (selected_tab is None and not self._form_view.winfo_ismapped()):
             return
         SettingsDialog(
             self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config,
             on_restart=self.root.destroy,
+            get_output_dir=lambda: Path(self._output_var.get().strip() or get_real_desktop_path()),
+            can_check_environment=lambda: not (self._running or self._downloads_running()),
+            selected_tab=selected_tab,
         ).show()
 
     def _apply_config(self, config: dict[str, Any]) -> None:
+        if config.get("output_dir") and config.get("output_dir") != self.runtime.config.get("output_dir"):
+            self._output_var.set(config["output_dir"])
         self.settings = get_scraper_settings(config)
         self.runtime = replace(self.runtime, config=config.copy())
         logging.getLogger().setLevel(config["log_level"])
@@ -495,7 +529,7 @@ class CNKIBugApp:
         output_row = ttk.Frame(scope)
         output_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(3, 0))
         output_row.columnconfigure(0, weight=1)
-        self._output_var = tk.StringVar(value=get_real_desktop_path())
+        self._output_var = tk.StringVar(value=self.runtime.config.get("output_dir") or get_real_desktop_path())
         self._output_entry = ttk.Entry(output_row, textvariable=self._output_var)
         self._output_entry.grid(row=0, column=0, sticky="ew")
         self._browse_button = ttk.Button(
@@ -1107,6 +1141,8 @@ class CNKIBugApp:
         if self._downloads_running():
             messagebox.showinfo("下载正在运行", "请在论文下载结束后开始抓取。", parent=self.root)
             return
+        if not self._ensure_browser_ready():
+            return
         if resume_state is not None:
             stored_output_dir = resume_state.get("output_dir")
             request = GuiTaskRequest(
@@ -1144,6 +1180,8 @@ class CNKIBugApp:
 
         try:
             config = read_config(self.runtime.paths.config_path)
+            if config.get("output_dir") != str(output_dir):
+                config = save_config(self.runtime.paths.config_path, {**config, "output_dir": str(output_dir)})
         except (OSError, ValueError) as error:
             messagebox.showerror("无法读取配置", str(error), parent=self.root)
             return
@@ -1442,6 +1480,7 @@ class CNKIBugApp:
             get_output_dir=lambda: Path(self._output_var.get().strip() or get_real_desktop_path()),
             initial_format="csv" if self._format_var.get() == "csv" else "xlsx",
             can_download=lambda: not self._running,
+            prepare_browser=self._ensure_browser_ready,
         )
 
     def _show_form(self) -> None:

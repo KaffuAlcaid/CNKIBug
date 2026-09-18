@@ -146,8 +146,54 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  publish:
+  build_linux:
     needs: build
+    runs-on: ubuntu-22.04
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/tags/${{ needs.build.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk libfuse2 squashfs-tools desktop-file-utils xvfb
+          python -m pip install ".[gui]" -r requirements-build.txt
+
+      - name: Download appimagetool
+        run: |
+          curl -fL https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage -o "$RUNNER_TEMP/appimagetool"
+          chmod +x "$RUNNER_TEMP/appimagetool"
+
+      - name: Build Linux AppImage
+        env:
+          APPIMAGETOOL: ${{ runner.temp }}/appimagetool
+        run: bash scripts/build_appimage.sh
+
+      - name: Check packaged entry point
+        run: |
+          desktop-file-validate packaging/appimage/cnkibug.desktop
+          xvfb-run -a env APPIMAGE_EXTRACT_AND_RUN=1 ./dist/CNKIBug-GUI-x86_64.AppImage --self-check
+
+      - name: Store Linux release asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-release-assets
+          path: dist/CNKIBug-GUI-x86_64.AppImage
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [build, build_linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -170,12 +216,19 @@ jobs:
           name: release-assets
           path: dist
 
+      - name: Download Linux release asset
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-release-assets
+          path: dist
+
       - name: Upload assets to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.build.outputs.tag_name }}
           files: |
             dist/CNKIBug-GUI.exe
+            dist/CNKIBug-GUI-x86_64.AppImage
             dist/*-source-tui.tar.gz
 
       - name: Publish update manifest

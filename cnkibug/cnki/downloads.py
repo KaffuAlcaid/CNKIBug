@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from ..browser.cache import prepare_cookie_state
+from ..browser.environment import browser_channels, browser_launch_options
 from ..cnki.models import Paper
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
@@ -95,13 +96,16 @@ class DownloadSession:
                                 },
                                 "download_bubble": {"partial_view_enabled": False},
                             }), encoding="utf-8")
-                            options = {"headless": False, "accept_downloads": True, "no_viewport": True}
-                            try:
-                                context = await playwright.chromium.launch_persistent_context(
-                                    profile.name, channel="msedge", **options,
-                                )
-                            except PlaywrightError:
-                                context = await playwright.chromium.launch_persistent_context(profile.name, **options)
+                            options = {"accept_downloads": True, "no_viewport": True}
+                            for channel in browser_channels():
+                                try:
+                                    context = await playwright.chromium.launch_persistent_context(
+                                        profile.name, **options, **browser_launch_options(channel),
+                                    )
+                                    break
+                                except PlaywrightError:
+                                    if channel != "msedge":
+                                        raise
                             browser = context.browser
                             state_path = prepare_cookie_state(settings.session_cache_enabled, settings.session_cache_ttl_hours, self.paths)
                             if state_path:

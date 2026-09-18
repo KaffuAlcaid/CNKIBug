@@ -2,15 +2,19 @@
 
 [返回首页](../README.md)
 
-首次运行后，程序会在启动文件所在目录创建：
+配置文件名为 `config.json`，位置取决于运行方式：
 
-```text
-CNKIBug-data/config.json
-```
+| 运行方式 | 配置文件位置 |
+|---|---|
+| Windows EXE、直接运行源码 | 启动文件所在目录的 `CNKIBug-data/config.json` |
+| Linux AppImage、Linux 的 Python 包安装 | `~/.local/share/CNKIBug-data/config.json` |
+| Windows 的 Python 包安装 | `%LOCALAPPDATA%/CNKIBug-data/config.json` |
 
-GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话、日志和更新选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
+Linux 设置了 `XDG_DATA_HOME` 时，用户数据保存在该目录下的 `CNKIBug-data/`。日志、登录状态、断点和任务报告与配置文件保存在同一用户数据目录中。
 
-手动编辑配置文件后，可在设置窗口点击重新读取配置；GUI 开始抓取前也会读取配置文件。终端版需重新启动程序。`config.json` 是标准 JSON 文件，不支持 `//` 或 `#` 注释。
+GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话、日志、运行环境和更新选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
+
+手动编辑配置文件后，可在设置窗口点击重新读取配置；GUI 开始抓取前也会读取配置文件。终端版需重新启动程序。
 
 恢复默认只填写设置窗口中的选项，点击保存后才会写入文件。重新读取配置会立即应用文件中的设置；读取失败时保留当前设置。
 
@@ -32,7 +36,9 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
   "log_scraped_records": false,
   "detail_txt_export": false,
   "gui_theme": "litera",
-  "update_source": "auto"
+  "update_source": "auto",
+  "linux_setup_completed": false,
+  "output_dir": ""
 }
 ```
 
@@ -55,8 +61,18 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 | `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                 |
 | `gui_theme`                  | `"litera"` | `"litera"` / `"darkly"`          | GUI 浅色或暗色主题，随设置保存并记忆                 |
 | `update_source`              | `"auto"` | `"auto"` / `"ghproxy.net"` / `"ghfast.top"` / `"gh-proxy.org"` / `"direct"` | GUI 更新下载线路 |
+| `linux_setup_completed`      | `false` | `true` / `false` | Linux AppImage 是否已完成初始化，由初始化设置保存 |
+| `output_dir`                 | `""` | 目录路径或空字符串 | GUI 论文保存目录；空字符串使用默认桌面目录 |
 
-## GUI 更新线路
+## 初始化与运行环境
+
+Linux AppImage 在初始化完成前显示初始化设置，可选择论文保存目录并检查运行环境。需要 Chromium 时，点击“安装 Chromium”；缺少系统组件时，页面列出缺失项和安装命令，在终端执行后再检查。检查通过后点击“开始使用”保存设置。点击“稍后设置”时，下次启动仍会显示初始化设置。
+
+Windows 直接进入主窗口。Windows 和 Linux 都可在“设置 → 运行环境”中手动检查程序组件、系统组件、浏览器和目录写入权限。浏览器检查会短暂打开一个空白窗口。
+
+Chromium 默认保存在 Linux 的 `~/.cache/ms-playwright/`，设置 `XDG_CACHE_HOME` 时使用该目录下的 `ms-playwright/`；`PLAYWRIGHT_BROWSERS_PATH` 可指定浏览器安装位置。程序会检查当前所需版本，已安装时可以直接使用。完成初始化后，浏览器检查和安装仍可从设置中操作。
+
+## GUI 更新
 
 - 自动：依次尝试 `ghproxy.net`、`ghfast.top`、`gh-proxy.org`，最后使用原始 GitHub 地址；网络错误时换源，每条线路一次。
 - 指定加速源：只使用选中的下载线路。
@@ -64,9 +80,11 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 
 加速模式优先从 JSDMirror 读取更新信息，不可用时尝试 GitHub API。下载固定到检查结果中的版本；换源时重新下载，文件校验失败会停止更新。
 
-测试连接检查当前模式下的更新信息和实际 EXE 下载地址，只读取文件开头的一小段。自动模式检查全部候选下载线路；指定模式只检查选中的线路。界面显示延迟，不代表完整文件的下载速度。
+测试连接检查当前模式下的更新信息和对应平台的下载地址，只读取文件开头的一小段。自动模式检查全部候选下载线路。
 
-Windows GUI EXE 支持下载并替换后重启；源码和 Python 包安装方式通过发布页或 pip 手动更新。
+Windows GUI EXE 和 Linux x86-64 AppImage 支持下载并替换后重启。AppImage 原文件所在目录可写时，更新保留原文件名和位置；无法直接替换时，可选择位置保存新版本。配置、登录状态和论文文件继续保留。
+
+源码和 Python 包安装方式通过发布页或 pip 手动更新。
 
 ## 常见调整
 

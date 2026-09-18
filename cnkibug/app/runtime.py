@@ -35,6 +35,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "detail_txt_export": False,
     "gui_theme": "litera",
     "update_source": "auto",
+    "linux_setup_completed": False,
+    "output_dir": "",
 }
 
 
@@ -289,7 +291,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     for key, default in DEFAULT_CONFIG.items():
         if key not in raw:
             changed = True
-            level = "INFO" if key in ("gui_theme", "update_source") or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
+            level = "INFO" if key in ("gui_theme", "update_source", "linux_setup_completed", "output_dir") or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
             events.append((level, f"配置项缺失，已使用默认值: {key}={default!r}"))
             continue
         config[key] = raw[key]
@@ -333,6 +335,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
         changed = True
 
     bool_keys = (
+        "linux_setup_completed",
         "session_cache_enabled",
         "log_save_path",
         "log_keywords",
@@ -344,6 +347,11 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
             events.append(("WARNING", f"配置项无效，已恢复默认值: {key}={DEFAULT_CONFIG[key]!r}"))
             config[key] = DEFAULT_CONFIG[key]
             changed = True
+
+    if not isinstance(config.get("output_dir"), str) or "\x00" in config["output_dir"]:
+        config["output_dir"] = DEFAULT_CONFIG["output_dir"]
+        changed = True
+        events.append(("WARNING", "保存目录配置无效，已恢复默认值"))
 
     unknown_keys = sorted(set(raw) - set(DEFAULT_CONFIG))
     if unknown_keys:
