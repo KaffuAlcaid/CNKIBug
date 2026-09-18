@@ -29,6 +29,11 @@ _logger = logging.getLogger("cnkibug.cnki.downloads")
 DOWNLOAD_PAGE_CHECK_INTERVAL_SEC = 5.0
 
 
+def _check_webvpn_path(path: str) -> None:
+    if re.match(r"/https?/[0-9a-fA-F]{32,}(?:/|$)", path):
+        raise ValueError("暂不支持路径加密型 WebVPN")
+
+
 def validate_webvpn_url(value: str) -> None:
     try:
         parts = urlsplit(value)
@@ -36,6 +41,7 @@ def validate_webvpn_url(value: str) -> None:
             raise ValueError()
     except ValueError as error:
         raise ValueError("请填写学校提供的完整知网 WebVPN 网址。") from error
+    _check_webvpn_path(parts.path)
     prefix, separator, school_domain = parts.hostname.partition(".")
     if not separator or not school_domain or prefix not in {"www-cnki-net-443", "kns-cnki-net-443"}:
         raise ValueError(
@@ -141,12 +147,14 @@ class DownloadSession:
                         await home_page.bring_to_front()
                         await _await_or_cancel(home_page.goto(home_url, wait_until="domcontentloaded", timeout=settings.timeout_goto_ms), self.cancel)
                         if webvpn_url:
+                            _check_webvpn_path(urlsplit(home_page.url).path)
                             self.events.emit("download_webvpn_login")
                             while not self.continue_event.is_set():
                                 if self.cancel.is_set() or self._closed.is_set():
                                     raise RuntimeError("已停止")
                                 if home_page.is_closed():
                                     raise RuntimeError("机构 WebVPN 页面已关闭")
+                                _check_webvpn_path(urlsplit(home_page.url).path)
                                 await asyncio.sleep(0.2)
                             webvpn_url = home_page.url
                             validate_webvpn_url(webvpn_url)
