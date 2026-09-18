@@ -176,6 +176,7 @@ class ResultsWindow:
     def set_papers(self, papers: list[Paper]) -> None:
         if self.busy:
             return
+        self.window.title("CNKIBug - 论文结果")
         self._papers = deduplicate_papers(copy.deepcopy(papers))
         self._checked.clear()
         self._statuses.clear()

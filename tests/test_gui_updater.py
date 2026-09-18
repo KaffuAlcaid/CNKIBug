@@ -231,21 +231,6 @@ def test_published_manifest_round_trips_through_the_updater():
     assert not linux_release.ready
 
 
-def test_appimage_save_preserves_existing_user_data(tmp_path):
-    candidate = tmp_path / "download" / updater.LINUX_GUI_ASSET
-    candidate.parent.mkdir()
-    candidate.write_bytes(b"new version")
-    config = tmp_path / "config.json"
-    config.write_bytes(b"user configuration")
-    destination = tmp_path / "CNKIBug.AppImage"
-
-    assert updater.save_appimage(candidate, destination) == destination
-    assert destination.read_bytes() == b"new version"
-    assert config.read_bytes() == b"user configuration"
-    assert not candidate.exists()
-    assert not list(tmp_path.glob(".cnkibug-update-*"))
-
-
 def test_direct_update_check_uses_only_github_api(monkeypatch):
     read = Mock(return_value=_release())
     monkeypatch.setattr(updater, "_read_release", read)

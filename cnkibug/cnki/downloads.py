@@ -14,7 +14,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
-from ..browser.cache import prepare_cookie_state
+from ..browser.cache import (
+    DOWNLOAD_COOKIE_STATE_FILENAME, get_cookie_state_path, prepare_cookie_state, write_cookie_state,
+)
 from ..browser.environment import browser_channels, browser_launch_options
 from ..cnki.models import Paper
 from ..core.events import EventSink
@@ -25,6 +27,22 @@ from .search import CNKI_HOME_URL
 
 _logger = logging.getLogger("cnkibug.cnki.downloads")
 DOWNLOAD_PAGE_CHECK_INTERVAL_SEC = 5.0
+
+
+def validate_webvpn_url(value: str) -> None:
+    try:
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password or parts.port == 0:
+            raise ValueError()
+    except ValueError as error:
+        raise ValueError("请填写学校提供的完整知网 WebVPN 网址。") from error
+    prefix, separator, school_domain = parts.hostname.partition(".")
+    if not separator or not school_domain or prefix not in {"www-cnki-net-443", "kns-cnki-net-443"}:
+        raise ValueError(
+            "当前支持网址以 www-cnki-net-443. 或 kns-cnki-net-443. 开头的知网 WebVPN 入口，"
+            "后面需包含完整学校域名。\n\n"
+            "对于其他门户及地址中含 /https/编码/ 的入口，请在学校 WebVPN 浏览器页面中手动下载 PDF。"
+        )
 
 
 class DownloadSession:
@@ -107,7 +125,12 @@ class DownloadSession:
                                     if channel != "msedge":
                                         raise
                             browser = context.browser
-                            state_path = prepare_cookie_state(settings.session_cache_enabled, settings.session_cache_ttl_hours, self.paths)
+                            state_path = prepare_cookie_state(
+                                settings.session_cache_enabled, settings.session_cache_ttl_hours, self.paths,
+                                filename=DOWNLOAD_COOKIE_STATE_FILENAME,
+                            )
+                            if state_path is None and settings.session_cache_enabled:
+                                state_path = prepare_cookie_state(True, settings.session_cache_ttl_hours, self.paths)
                             if state_path:
                                 await context.set_storage_state(state_path)
                             home_page = context.pages[0] if context.pages else None
@@ -126,6 +149,7 @@ class DownloadSession:
                                     raise RuntimeError("机构 WebVPN 页面已关闭")
                                 await asyncio.sleep(0.2)
                             webvpn_url = home_page.url
+                            validate_webvpn_url(webvpn_url)
                         else:
                             deadline = asyncio.get_running_loop().time() + settings.download_auth_wait_sec
                             last_remaining = None
@@ -167,10 +191,12 @@ class DownloadSession:
                     finally:
                         if context is not None and settings.session_cache_enabled:
                             try:
-                                self.paths.cache_dir.mkdir(parents=True, exist_ok=True)
-                                await context.storage_state(path=str(self.paths.cache_dir / "cookies"))
-                            except PlaywrightError:
-                                pass
+                                write_cookie_state(
+                                    await context.storage_state(),
+                                    get_cookie_state_path(self.paths, DOWNLOAD_COOKIE_STATE_FILENAME),
+                                )
+                            except (PlaywrightError, OSError) as error:
+                                _logger.warning("下载会话缓存保存失败: %s", error)
                         self.events.emit("download_finished", stopped=self.cancel.is_set())
             finally:
                 try:
@@ -250,6 +276,7 @@ async def _download_one(home_page, paper, destination, settings, cancel, events,
     detail_authority = portal.netloc if portal else ""
     detail_host = portal.hostname if portal else ""
     if portal:
+        validate_webvpn_url(webvpn_url)
         prefix, separator, school_domain = (portal.hostname or "").partition(".")
         if separator and prefix in {"www-cnki-net-443", "kns-cnki-net-443"}:
             detail_host = f"kns-cnki-net-443.{school_domain}"

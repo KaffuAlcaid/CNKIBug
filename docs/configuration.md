@@ -51,7 +51,7 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 | `verify_wait_timeout_sec`    | `180`    | 正整数，秒                              | 等待用户完成滑块或安全验证的最长时间                   |
 | `verify_notice_interval_sec` | `15`     | 正整数，秒                              | 验证等待期间的提醒间隔                          |
 | `max_advance_fail`           | `2`      | 正整数                                | 连续翻页失败多少次后结束当前关键词                    |
-| `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用 `CNKIBug-data/cache/cookies` 中的浏览器会话 |
+| `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用抓取和 PDF 下载各自保存的浏览器会话 |
 | `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存的有效期                      |
 | `download_auth_wait_sec`    | `60`     | 非负整数，秒                             | 下载前在知网首页等待机构授权的时间，可点“立即继续”提前开始 |
 | `log_level`                  | `"INFO"` | `"INFO"` / `"WARNING"` / `"ERROR"` | 日志级别                                 |
@@ -63,6 +63,8 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 | `update_source`              | `"auto"` | `"auto"` / `"ghproxy.net"` / `"ghfast.top"` / `"gh-proxy.org"` / `"direct"` | GUI 更新下载线路 |
 | `linux_setup_completed`      | `false` | `true` / `false` | Linux AppImage 是否已完成初始化，由初始化设置保存 |
 | `output_dir`                 | `""` | 目录路径或空字符串 | GUI 论文保存目录；空字符串使用默认桌面目录 |
+
+抓取会话保存在用户数据目录的 `cache/cookies`，PDF 下载会话保存在 `cache/download_cookies`，两者使用相同的有效期设置。下载缓存为空时可读取有效的抓取会话，下载后的状态单独保存。
 
 ## 初始化与运行环境
 
@@ -90,6 +92,6 @@ Windows GUI EXE 和 Linux x86-64 AppImage 支持下载并替换后重启。AppIm
 
 - 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大
 - 验证码来不及处理：把 `verify_wait_timeout_sec` 调大
-- 会话状态异常：删除 `CNKIBug-data/cache/cookies`，或在 GUI 设置中关闭复用浏览器会话；终端版将 `session_cache_enabled` 改为 `false` 后重启
+- 会话状态异常：抓取会话可删除用户数据目录中的 `cache/cookies`，PDF 下载会话可删除 `cache/download_cookies`；也可在 GUI 设置中关闭复用浏览器会话。终端版将 `session_cache_enabled` 改为 `false` 后重启
 - 不想日志记录本机路径：把 `log_save_path` 改为 `false`
 - 需要把论文关键词重新导入软件：把 `detail_txt_export` 改为 `true` 后重启

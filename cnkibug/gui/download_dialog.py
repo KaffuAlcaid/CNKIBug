@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, simpledialog
-from urllib.parse import urlsplit
 
 import ttkbootstrap as ttk
+
+from ..cnki.downloads import validate_webvpn_url
 
 class DownloadDialog:
     def __init__(self, parent, wait_seconds: int, webvpn_url: str = "") -> None:
@@ -50,11 +51,9 @@ class DownloadDialog:
                 return
             self._last_url = value
             try:
-                parts = urlsplit(value.strip())
-                if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password or parts.port == 0:
-                    raise ValueError("请填写学校提供的完整知网 WebVPN 网址。")
-            except ValueError:
-                messagebox.showerror("WebVPN 网址", "请填写学校提供的完整知网 WebVPN 网址。", parent=self.window)
+                validate_webvpn_url(value.strip())
+            except ValueError as error:
+                messagebox.showerror("WebVPN 网址", str(error), parent=self.window)
                 continue
             self.webvpn_url = value.strip()
             self.accepted = True

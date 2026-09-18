@@ -1173,11 +1173,6 @@ class CNKIBugApp:
             )
             return
         request = replace(request, output_dir=output_dir)
-        self._active_include_citation = request.include_citation
-        self._active_output_dir = output_dir
-        self._current_results = []
-        self._result_prompt_pending = False
-
         try:
             config = read_config(self.runtime.paths.config_path)
             if config.get("output_dir") != str(output_dir):
@@ -1187,6 +1182,13 @@ class CNKIBugApp:
             return
         self._apply_config(config)
         task_settings = self.settings
+        self._active_include_citation = request.include_citation
+        self._active_output_dir = output_dir
+        self._current_results = []
+        self._result_prompt_pending = False
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None and viewer.window.winfo_exists():
+            viewer.set_papers(self._current_results)
         self._cancel_event.clear()
         self._set_running(True)
         self._reset_progress()
@@ -1441,6 +1443,9 @@ class CNKIBugApp:
             if self._actual_seconds is None and self._task_started_at is not None:
                 self._actual_seconds = time.monotonic() - self._task_started_at
                 self._time_var.set(f"实际用时：{_format_duration(self._actual_seconds)}")
+            viewer = getattr(self, "_results_window", None)
+            if viewer is not None and viewer.window.winfo_exists():
+                viewer.set_papers(self._current_results)
             self._set_running(False)
             self._new_task_button.configure(state=tk.NORMAL)
             if self._close_when_done:
@@ -1451,7 +1456,7 @@ class CNKIBugApp:
                 title = "抓取完成" if completed else "任务已结束"
                 count = len(self._current_results)
                 if count and messagebox.askyesno(title, f"已取得 {count} 篇论文。\n\n是否展示论文详情？", parent=self.root, default=messagebox.NO):
-                    self._show_results(refresh=True)
+                    self._show_results()
                 elif not count and completed:
                     messagebox.showinfo(title, "未取得论文结果。", parent=self.root)
 
@@ -1465,13 +1470,11 @@ class CNKIBugApp:
         dialog = SearchOptionsDialog(self.root, self._search_options)
         self._search_options = dialog.result
 
-    def _show_results(self, refresh: bool = False) -> None:
+    def _show_results(self) -> None:
         from .results import ResultsWindow
 
         viewer = getattr(self, "_results_window", None)
         if viewer is not None and viewer.window.winfo_exists():
-            if refresh:
-                viewer.set_papers(self._current_results)
             viewer.window.deiconify()
             viewer.window.lift()
             return

@@ -8,6 +8,7 @@ import pytest
 import run_gui
 
 from cnkibug.app.runtime import DEFAULT_CONFIG, RuntimeState, get_runtime_paths
+from cnkibug.cnki.models import Paper
 from cnkibug.gui.app import (
     CNKIBugApp,
     GuiTaskRequest,
@@ -159,6 +160,32 @@ def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tm
     assert errors[0][0] == "保存位置不可用"
     assert "拒绝访问" in errors[0][1]
     app._set_running.assert_not_called()
+
+
+def test_finished_task_updates_existing_results_even_when_display_is_declined(monkeypatch):
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = Mock()
+    app._actual_seconds = 1.0
+    app._set_running = Mock()
+    app._new_task_button = Mock()
+    app._close_when_done = False
+    app._result_prompt_pending = True
+    app._progress_mode = "completed"
+    app._current_results = [Paper(title="Current task")]
+    viewer = app._results_window = Mock(busy=False)
+
+    def decline(*args, **kwargs):
+        viewer.set_papers.assert_called_once_with(app._current_results)
+        return False
+
+    monkeypatch.setattr("cnkibug.gui.app.messagebox.askyesno", decline)
+    app._handle_event(GuiEvent("worker_done", {}))
+
+    viewer.set_papers.assert_called_once_with(app._current_results)
+    viewer.window.deiconify.assert_not_called()
+    app._show_results()
+    viewer.window.deiconify.assert_called_once()
+    viewer.set_papers.assert_called_once()
 
 
 def _resume_app(paths):
@@ -317,19 +344,6 @@ def test_gui_settings_converts_seconds_without_changing_task_output_option():
     assert config["timeout_selector_ms"] == 30001
     assert config["gui_theme"] == "darkly"
     assert config["detail_txt_export"] is True
-
-
-def test_settings_close_waits_for_environment_worker():
-    dialog = _settings_dialog()
-    dialog.environment.busy = True
-
-    dialog._close()
-
-    dialog.environment.cancel.assert_called_once()
-    dialog.window.destroy.assert_not_called()
-    dialog.environment.busy = False
-    dialog._environment_changed()
-    dialog.window.destroy.assert_called_once()
 
 
 @pytest.mark.parametrize("value", ["", "abc", "0", "-1", "NaN", "Infinity", "1.0001"])

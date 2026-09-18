@@ -11,12 +11,13 @@ from ..core.runtime import RuntimePaths
 
 
 COOKIE_STATE_FILENAME = "cookies"
+DOWNLOAD_COOKIE_STATE_FILENAME = "download_cookies"
 
 _logger = logging.getLogger("cnkibug.session_cache")
 
 
-def get_cookie_state_path(paths: RuntimePaths) -> Path:
-    return paths.cache_dir / COOKIE_STATE_FILENAME
+def get_cookie_state_path(paths: RuntimePaths, filename: str = COOKIE_STATE_FILENAME) -> Path:
+    return paths.cache_dir / filename
 
 
 def prepare_cookie_state(
@@ -24,12 +25,14 @@ def prepare_cookie_state(
     ttl_hours: int,
     paths: RuntimePaths,
     now: float | None = None,
+    *,
+    filename: str = COOKIE_STATE_FILENAME,
 ) -> Path | None:
     if not enabled:
         _logger.info("cookies 会话缓存未启用")
         return None
 
-    path = get_cookie_state_path(paths)
+    path = get_cookie_state_path(paths, filename)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -70,12 +73,19 @@ def save_cookie_state(
     if not enabled:
         return None
 
-    path = get_cookie_state_path(paths)
+    try:
+        state = context.storage_state()
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("cookies 会话缓存读取失败: error=%s", exc)
+        return None
+    return write_cookie_state(state, get_cookie_state_path(paths))
 
+
+def write_cookie_state(state: dict[str, Any], path: Path) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _secure_cookie_permissions(path)
     try:
-        context.storage_state(path=str(path))
+        path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8", newline="\n")
     except Exception as exc:  # noqa: BLE001
         _logger.warning("cookies 会话缓存保存失败: path=%s error=%s", path, exc)
         return None

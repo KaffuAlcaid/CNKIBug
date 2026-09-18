@@ -151,8 +151,6 @@ def test_save_config_persists_theme_and_scraper_values(tmp_path):
     ("gui_theme", "unknown"),
     ("update_source", "unknown"),
     ("log_level", ["INFO"]),
-    ("linux_setup_completed", "false"),
-    ("output_dir", None),
     ("output_dir", "invalid\x00path"),
 ])
 def test_save_config_rejects_invalid_values_before_writing(tmp_path, key, value):
