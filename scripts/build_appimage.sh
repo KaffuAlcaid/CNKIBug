@@ -36,7 +36,7 @@ if find "$app_dir" -type d \( -name .local-browsers -o -name ms-playwright \) -p
 fi
 du -ah "$app_dir/usr/bin" | sort -h | tail -20
 output="$project_dir/dist/CNKIBug-GUI-x86_64.AppImage"
-ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" --comp xz "$app_dir" "$output"
+ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" --comp zstd "$app_dir" "$output"
 chmod +x "$output"
 size=$(stat -c %s "$output")
 printf 'AppImage size: %s bytes\n' "$size"

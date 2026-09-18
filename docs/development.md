@@ -24,7 +24,7 @@ chmod +x /tmp/cnkibug-appimagetool
 APPIMAGETOOL=/tmp/cnkibug-appimagetool bash scripts/build_appimage.sh
 ```
 
-生成文件位于 `dist/CNKIBug-GUI-x86_64.AppImage`。包内包含 Python、Tk、程序依赖和 Playwright 安装器；Chromium 在初始化设置中下载到用户缓存。使用 PyInstaller 目录模式、移除调试符号和 xz 压缩，脚本输出主要目录大小及最终体积，超过 100 MiB 时给出提示。
+生成文件位于 `dist/CNKIBug-GUI-x86_64.AppImage`。包内包含 Python、Tk、程序依赖和 Playwright 安装器；Chromium 在初始化设置中下载到用户缓存。使用 PyInstaller 目录模式、移除调试符号和 zstd 压缩，脚本输出主要目录大小及最终体积，超过 100 MiB 时给出提示。
 
 AppImage 通过 `APPIMAGE` 确定原文件位置，用户数据使用 `XDG_DATA_HOME` 或 `~/.local/share/CNKIBug-data/`。`--install-system-deps` 调用包内 Playwright 的系统组件安装器，由用户在终端执行。
 
