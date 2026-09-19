@@ -245,6 +245,9 @@ class CNKIBugApp:
         )
 
     def _finish_startup(self) -> None:
+        from .updater import cleanup_completed_updates
+
+        cleanup_completed_updates(self.runtime.paths.data_dir)
         if appimage_path() and not self.runtime.config.get("linux_setup_completed", False):
             from .environment import InitializationDialog
 
@@ -258,17 +261,17 @@ class CNKIBugApp:
     def _ensure_browser_ready(self) -> bool:
         if not appimage_path():
             return True
-        from ..browser.environment import chromium_available
+        from ..browser.environment import browser_installed
 
         try:
-            if chromium_available():
+            if browser_installed():
                 return True
         except Exception as error:
             _logger.warning("浏览器准备检查失败: %s", error)
-        messagebox.showinfo("浏览器尚未准备好", "请在设置的运行环境中安装 Chromium，然后继续。", parent=self.root)
+        messagebox.showinfo("浏览器尚未准备好", "请在设置的运行环境中检查或安装浏览器，然后继续。", parent=self.root)
         self._open_settings(selected_tab="运行环境")
         try:
-            return chromium_available()
+            return browser_installed()
         except Exception:
             return False
 
@@ -1291,7 +1294,7 @@ class CNKIBugApp:
         elif name == "browser_edge_failed":
             self._append_log("Edge 启动失败，正在尝试备用 Chromium。", "warning")
         elif name == "browser_launched":
-            browser = "Microsoft Edge" if payload.get("channel") == "msedge" else "备用 Chromium"
+            browser = payload.get("browser_name") or ("Microsoft Edge" if payload.get("channel") == "msedge" else "Chromium")
             self._append_log(f"已启动 {browser}。", "success")
         elif name == "browser_ready":
             self._status_var.set("浏览器已就绪")

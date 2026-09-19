@@ -8,17 +8,17 @@ Python 3.10 至 3.14，需要图形桌面和浏览器完成知网的人工验证
 
 ```bash
 python -m pip install "cnkibug[gui]"
-python -m playwright install chromium
 cnkibug-gui
 ```
 
-Linux 需要 Python Tk 支持。Debian/Ubuntu 可通过系统包管理器安装 `python3-tk`；建议在虚拟环境中安装 Python 依赖。Playwright 的系统依赖按其官方安装说明准备。
+Windows 优先使用 Microsoft Edge，Linux 优先使用系统 Chrome、Chromium。需要下载浏览器时，可在设置的运行环境中操作，或运行 `python -m playwright install chromium`。
+
+Linux 需要 Python Tk 支持。Debian/Ubuntu 可通过系统包管理器安装 `python3-tk`；建议在虚拟环境中安装 Python 依赖。Fedora 可通过 `sudo dnf install chromium` 安装系统浏览器及其组件。
 
 终端入口：
 
 ```bash
 python -m pip install cnkibug
-python -m playwright install chromium
 cnkibug
 ```
 

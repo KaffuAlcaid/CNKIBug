@@ -4,6 +4,7 @@ import ctypes
 import hashlib
 import http.client
 import json
+import logging
 import os
 import platform
 import re
@@ -213,6 +214,49 @@ def can_install_update() -> bool:
     return bool(image and gui_asset_name() and image.is_file() and os.access(image.parent, os.W_OK))
 
 
+def cleanup_completed_updates(data_dir: Path) -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    target = appimage_path() or Path(sys.executable).resolve()
+    update_dir = (data_dir / "update").resolve()
+    try:
+        jobs = list(update_dir.glob("pending-*"))
+        for job in jobs:
+            if not job.is_dir() or job.resolve().parent != update_dir:
+                continue
+            try:
+                entries = list(job.iterdir())
+                if not (job / "ready").is_file():
+                    continue
+                if any(path.name in {GUI_ASSET, LINUX_GUI_ASSET} or path.suffix == ".part" for path in entries):
+                    continue
+                plan_path = job / "install.json"
+                if plan_path.is_file():
+                    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                    if Path(plan["target"]).resolve() != target:
+                        continue
+                    backup = Path(plan["backup"]).resolve()
+                    if backup.parent != update_dir or backup.name != f"{target.name}.bak":
+                        continue
+                elif appimage_path() and (job / "apply_update.sh").is_file():
+                    backup = update_dir / f"{target.name}.bak"
+                else:
+                    continue
+                backup.unlink(missing_ok=True)
+                if sys.platform == "win32":
+                    (update_dir / "apply_update.ps1").unlink(missing_ok=True)
+                for name in ("apply_update.sh", "error.log", "install.json", "ready"):
+                    (job / name).unlink(missing_ok=True)
+                if not any(job.iterdir()):
+                    job.rmdir()
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                logging.getLogger("cnkibug.updater").warning("更新临时文件清理失败: path=%s error=%s", job, error)
+        if update_dir.is_dir() and not any(update_dir.iterdir()):
+            update_dir.rmdir()
+    except OSError as error:
+        logging.getLogger("cnkibug.updater").warning("更新目录清理失败: %s", error)
+
+
 def download_release(
     release: ReleaseInfo,
     data_dir: Path,
@@ -345,6 +389,10 @@ def save_appimage(candidate: Path, destination: Path) -> Path:
         staged.chmod(0o755)
         staged.replace(destination)
         candidate.unlink()
+        try:
+            candidate.parent.rmdir()
+        except OSError:
+            pass
         return destination
     finally:
         staged.unlink(missing_ok=True)
@@ -356,6 +404,9 @@ def _start_appimage_installer(candidate: Path, release: ReleaseInfo) -> None:
     job_dir = candidate.parent.resolve()
     script_path = job_dir / "apply_update.sh"
     script_path.write_bytes(Path(__file__).with_name("apply_update.sh").read_bytes())
+    (job_dir / "install.json").write_text(json.dumps({
+        "target": str(target), "backup": str(job_dir.parent / f"{target.name}.bak"),
+    }), encoding="utf-8", newline="\n")
     descriptor, temporary = tempfile.mkstemp(prefix=".cnkibug-update-", suffix=".AppImage", dir=target.parent)
     os.close(descriptor)
     staged = Path(temporary)

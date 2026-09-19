@@ -51,7 +51,7 @@ class ConsoleEventSink(EventSink):
                 "warning",
             )
         elif name == "browser_launched":
-            channel = "Microsoft Edge" if payload.get("channel") == "msedge" else "备用 Chromium 浏览器"
+            channel = payload.get("browser_name") or ("Microsoft Edge" if payload.get("channel") == "msedge" else "Chromium")
             self._message(f"[*] 已启动 {channel}", "dim")
         elif name == "browser_ready":
             print_browser_banner()

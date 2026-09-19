@@ -71,7 +71,7 @@ def _report_startup_import_error(error: BaseException) -> None:
     _show_startup_error_dialog(f"{failure}\n\n{log_message}")
 
 
-def _run_self_check() -> int:
+def _run_self_check(*, check_browser: bool = False) -> int:
     try:
         import ttkbootstrap
         import cnkibug.core.memory
@@ -89,6 +89,29 @@ def _run_self_check() -> int:
     if not _resource_path(f"cnkibug/gui/{update_script}").is_file():
         _write_message("CNKIBug GUI self-check failed: update script missing")
         return 1
+    if check_browser:
+        from threading import Event
+        from cnkibug.browser.environment import check_environment
+
+        root = None
+        try:
+            root = ttkbootstrap.Window(themename="litera", iconphoto=None)
+            root.withdraw()
+            root.update()
+            with tempfile.TemporaryDirectory(prefix="cnkibug-browser-check-") as output_dir:
+                results = check_environment(
+                    _entry_directory() / "CNKIBug-data", Path(output_dir), Event(),
+                    lambda item: _write_message(f"{item.label}: {item.status}\n{item.detail}"),
+                )
+            if not results or any(item.status != "ready" for item in results):
+                return 1
+        except Exception as error:
+            _write_message(f"CNKIBug browser check failed: {error}")
+            return 1
+        finally:
+            if root is not None:
+                root.destroy()
+        _write_message(f"CNKIBug browser startup OK: {APP_VERSION}")
     _write_message(f"CNKIBug GUI self-check OK: {APP_VERSION}")
     return 0
 
@@ -128,4 +151,16 @@ if __name__ == "__main__":
         raise SystemExit(run_system_dependency_installer())
     if sys.argv[1:] == ["--self-check"]:
         raise SystemExit(_run_self_check())
+    if sys.argv[1:] == ["--self-check-browser"]:
+        raise SystemExit(_run_self_check(check_browser=True))
+    if sys.argv[1:] == ["--install-browser"]:
+        from threading import Event
+        from cnkibug.browser.environment import install_chromium
+
+        try:
+            install_chromium(Event(), _write_message)
+        except Exception as error:
+            _write_message(str(error))
+            raise SystemExit(1) from error
+        raise SystemExit(0)
     _run()

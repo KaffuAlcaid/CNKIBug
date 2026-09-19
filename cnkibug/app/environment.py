@@ -5,7 +5,7 @@ import sys
 import os
 
 from .ui import _console
-from ..browser.environment import edge_executable
+from ..browser.environment import browser_installed, edge_executable
 
 
 def _edge_installed() -> bool:
@@ -13,6 +13,11 @@ def _edge_installed() -> bool:
 
 
 def check_env():
+    if sys.platform == "linux":
+        if not browser_installed():
+            _console.print("\n[yellow][环境缺失] 请安装系统 Chrome、Chromium，或运行 playwright install chromium。[/yellow]\n")
+            sys.exit(1)
+        return
     if sys.platform != "win32":
         _home = os.path.expanduser("~")
         if sys.platform == "darwin":

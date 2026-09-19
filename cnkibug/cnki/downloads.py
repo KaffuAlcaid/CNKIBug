@@ -7,7 +7,6 @@ import random
 import re
 from math import ceil
 from pathlib import Path
-from queue import Empty, Queue
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 from urllib.parse import urlsplit, urlunsplit
@@ -17,7 +16,7 @@ from playwright.async_api import Error as PlaywrightError, async_playwright
 from ..browser.cache import (
     DOWNLOAD_COOKIE_STATE_FILENAME, get_cookie_state_path, prepare_cookie_state, write_cookie_state,
 )
-from ..browser.environment import browser_channels, browser_launch_options
+from ..browser.environment import browser_candidates, browser_launch_options
 from ..cnki.models import Paper
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
@@ -52,13 +51,11 @@ def validate_webvpn_url(value: str) -> None:
 
 
 class DownloadSession:
-    """Keep one download browser and context on their owning worker thread."""
+    """Run one download batch and release its browser before reporting completion."""
 
     def __init__(self, paths: RuntimePaths, events: EventSink, cancel: Event, continue_event: Event):
         self.paths, self.events = paths, events
         self.cancel, self.continue_event = cancel, continue_event
-        self._jobs: Queue = Queue()
-        self._closed = Event()
         self._thread: Thread | None = None
 
     @property
@@ -67,136 +64,122 @@ class DownloadSession:
 
     def submit(self, items: list[tuple[int, Paper]], destination: Path, settings: ScraperSettings,
                webvpn_url: str = "") -> None:
-        self._closed.clear()
+        if self.alive:
+            raise RuntimeError("已有下载任务正在运行")
+        if webvpn_url:
+            validate_webvpn_url(webvpn_url)
         self.cancel.clear()
         self.continue_event.clear()
-        self._jobs.put((items, destination, settings, webvpn_url))
-        if not self.alive:
-            self._thread = Thread(target=self._run, name="cnkibug-download", daemon=True)
-            self._thread.start()
+        self._thread = Thread(target=self._run, args=(items, destination, settings, webvpn_url),
+                              name="cnkibug-download", daemon=True)
+        self._thread.start()
 
     def close(self) -> None:
         self.cancel.set()
-        self._closed.set()
 
-    def _run(self) -> None:
+    def _run(self, items, destination, settings, webvpn_url) -> None:
         try:
-            asyncio.run(self._serve())
+            asyncio.run(self._serve(items, destination, settings, webvpn_url))
         except Exception as error:
-            _logger.exception("下载浏览器运行失败")
-            self.events.emit("download_error", error=str(error))
+            if not self.cancel.is_set():
+                _logger.exception("下载浏览器运行失败")
+                self.events.emit("download_error", error=str(error))
         finally:
-            while True:
-                try:
-                    self._jobs.get_nowait()
-                except Empty:
-                    break
             self._thread = None
-            self.events.emit("download_session_closed")
+            self.events.emit("download_finished", stopped=self.cancel.is_set())
 
-    async def _serve(self) -> None:
-        browser = context = home_page = None
-        profile = None
+    async def _serve(self, items, destination, settings, webvpn_url="") -> None:
+        if webvpn_url:
+            validate_webvpn_url(webvpn_url)
+        if self.cancel.is_set():
+            return
+        destination.mkdir(parents=True, exist_ok=True)
         async with async_playwright() as playwright:
-            try:
-                while not self._closed.is_set():
-                    try:
-                        items, destination, settings, webvpn_url = self._jobs.get_nowait()
-                    except Empty:
-                        await asyncio.sleep(0.1)
-                        continue
-                    try:
-                        destination.mkdir(parents=True, exist_ok=True)
-                        if browser is None or not browser.is_connected():
-                            if profile is not None:
-                                profile.cleanup()
-                            profile = TemporaryDirectory(prefix="cnkibug-download-")
-                            preferences = Path(profile.name) / "Default" / "Preferences"
-                            preferences.parent.mkdir(parents=True)
-                            preferences.write_text(json.dumps({
-                                "browser": {
-                                    "show_hub_popup_on_download_start": False,
-                                    "show_hub_popup_on_downloads_completed": False,
-                                },
-                                "download_bubble": {"partial_view_enabled": False},
-                            }), encoding="utf-8")
-                            options = {"accept_downloads": True, "no_viewport": True}
-                            for channel in browser_channels():
-                                try:
-                                    context = await playwright.chromium.launch_persistent_context(
-                                        profile.name, **options, **browser_launch_options(channel),
-                                    )
-                                    break
-                                except PlaywrightError:
-                                    if channel != "msedge":
-                                        raise
-                            browser = context.browser
-                            state_path = prepare_cookie_state(
-                                settings.session_cache_enabled, settings.session_cache_ttl_hours, self.paths,
-                                filename=DOWNLOAD_COOKIE_STATE_FILENAME,
+            with TemporaryDirectory(prefix="cnkibug-download-") as profile:
+                browser = context = None
+                try:
+                    preferences = Path(profile) / "Default" / "Preferences"
+                    preferences.parent.mkdir(parents=True)
+                    preferences.write_text(json.dumps({
+                        "browser": {"show_hub_popup_on_download_start": False,
+                                    "show_hub_popup_on_downloads_completed": False},
+                        "download_bubble": {"partial_view_enabled": False},
+                    }), encoding="utf-8")
+                    failures = []
+                    for candidate in browser_candidates(playwright):
+                        if self.cancel.is_set():
+                            return
+                        try:
+                            context = await playwright.chromium.launch_persistent_context(
+                                profile, accept_downloads=True, no_viewport=True, **browser_launch_options(candidate),
                             )
-                            if state_path is None and settings.session_cache_enabled:
-                                state_path = prepare_cookie_state(True, settings.session_cache_ttl_hours, self.paths)
-                            if state_path:
-                                await context.set_storage_state(state_path)
-                            home_page = context.pages[0] if context.pages else None
-                        if home_page is None or home_page.is_closed():
-                            home_page = await context.new_page()
-                        self.events.emit("download_preparing", remaining=None, webvpn=bool(webvpn_url))
-                        home_url = webvpn_url or CNKI_HOME_URL
-                        await home_page.bring_to_front()
-                        await _await_or_cancel(home_page.goto(home_url, wait_until="domcontentloaded", timeout=settings.timeout_goto_ms), self.cancel)
-                        if webvpn_url:
+                            break
+                        except PlaywrightError as error:
+                            failures.append(f"{candidate.name}：{error}")
+                    if context is None:
+                        raise RuntimeError("没有可用的浏览器：\n" + "\n".join(failures))
+                    browser = context.browser
+                    state_path = prepare_cookie_state(
+                        settings.session_cache_enabled, settings.session_cache_ttl_hours, self.paths,
+                        filename=DOWNLOAD_COOKIE_STATE_FILENAME,
+                    )
+                    if state_path is None and settings.session_cache_enabled:
+                        state_path = prepare_cookie_state(True, settings.session_cache_ttl_hours, self.paths)
+                    if state_path:
+                        await context.set_storage_state(state_path)
+                    home_page = context.pages[0] if context.pages else await context.new_page()
+                    self.events.emit("download_preparing", remaining=None, webvpn=bool(webvpn_url))
+                    await home_page.bring_to_front()
+                    await _await_or_cancel(home_page.goto(webvpn_url or CNKI_HOME_URL, wait_until="domcontentloaded",
+                                                         timeout=settings.timeout_goto_ms), self.cancel)
+                    if webvpn_url:
+                        _check_webvpn_path(urlsplit(home_page.url).path)
+                        self.events.emit("download_webvpn_login")
+                        while not self.continue_event.is_set():
+                            if self.cancel.is_set():
+                                raise RuntimeError("已停止")
+                            if home_page.is_closed():
+                                raise RuntimeError("机构 WebVPN 页面已关闭")
                             _check_webvpn_path(urlsplit(home_page.url).path)
-                            self.events.emit("download_webvpn_login")
-                            while not self.continue_event.is_set():
-                                if self.cancel.is_set() or self._closed.is_set():
-                                    raise RuntimeError("已停止")
-                                if home_page.is_closed():
-                                    raise RuntimeError("机构 WebVPN 页面已关闭")
-                                _check_webvpn_path(urlsplit(home_page.url).path)
-                                await asyncio.sleep(0.2)
-                            webvpn_url = home_page.url
-                            validate_webvpn_url(webvpn_url)
-                        else:
-                            deadline = asyncio.get_running_loop().time() + settings.download_auth_wait_sec
-                            last_remaining = None
-                            while not self.continue_event.is_set():
-                                if self.cancel.is_set() or self._closed.is_set():
-                                    raise RuntimeError("已停止")
-                                if home_page.is_closed():
-                                    raise RuntimeError("知网首页已关闭")
-                                remaining = max(0, ceil(deadline - asyncio.get_running_loop().time()))
-                                if remaining != last_remaining:
-                                    self.events.emit("download_preparing", remaining=remaining)
-                                    last_remaining = remaining
-                                if remaining == 0:
-                                    break
-                                await asyncio.sleep(0.2)
-                        await _wait_for_manual_access(
-                            home_page, self.cancel, self.events, self.continue_event,
-                            asyncio.get_running_loop().time() + settings.verify_wait_timeout_sec,
-                        )
-                        self.events.emit("download_prepared")
-                        for position, (index, paper) in enumerate(items, start=1):
-                            if self.cancel.is_set() or self._closed.is_set():
+                            await asyncio.sleep(0.2)
+                        webvpn_url = home_page.url
+                        validate_webvpn_url(webvpn_url)
+                    else:
+                        deadline = asyncio.get_running_loop().time() + settings.download_auth_wait_sec
+                        last_remaining = None
+                        while not self.continue_event.is_set():
+                            if self.cancel.is_set():
+                                raise RuntimeError("已停止")
+                            if home_page.is_closed():
+                                raise RuntimeError("知网首页已关闭")
+                            remaining = max(0, ceil(deadline - asyncio.get_running_loop().time()))
+                            if remaining != last_remaining:
+                                self.events.emit("download_preparing", remaining=remaining)
+                                last_remaining = remaining
+                            if remaining == 0:
                                 break
-                            if not browser.is_connected():
-                                raise RuntimeError("下载浏览器已关闭")
-                            _logger.info("PDF 下载开始: paper=%d/%d", position, len(items))
-                            self.events.emit("paper_download", index=index, status="下载中", path="")
-                            try:
-                                path = await _download_one(home_page, paper, destination, settings, self.cancel, self.events, self.continue_event, webvpn_url)
-                                _logger.info("PDF 下载完成: paper=%d/%d", position, len(items))
-                                self.events.emit("paper_download", index=index, status="已下载", path=str(path))
-                            except Exception as error:
-                                _logger.warning("PDF 下载结束: paper=%d/%d error=%s", position, len(items), error)
-                                self.events.emit("paper_download", index=index, status=str(error), path="")
-                    except Exception as error:
-                        if not self.cancel.is_set():
-                            _logger.exception("PDF 下载任务失败")
-                            self.events.emit("download_error", error=str(error))
-                    finally:
+                            await asyncio.sleep(0.2)
+                    await _wait_for_manual_access(
+                        home_page, self.cancel, self.events, self.continue_event,
+                        asyncio.get_running_loop().time() + settings.verify_wait_timeout_sec,
+                    )
+                    self.events.emit("download_prepared")
+                    for position, (index, paper) in enumerate(items, start=1):
+                        if self.cancel.is_set():
+                            break
+                        if not browser.is_connected():
+                            raise RuntimeError("下载浏览器已关闭")
+                        _logger.info("PDF 下载开始: paper=%d/%d", position, len(items))
+                        self.events.emit("paper_download", index=index, status="下载中", path="")
+                        try:
+                            path = await _download_one(home_page, paper, destination, settings, self.cancel, self.events, self.continue_event, webvpn_url)
+                            _logger.info("PDF 下载完成: paper=%d/%d", position, len(items))
+                            self.events.emit("paper_download", index=index, status="已下载", path=str(path))
+                        except Exception as error:
+                            _logger.warning("PDF 下载结束: paper=%d/%d error=%s", position, len(items), error)
+                            self.events.emit("paper_download", index=index, status=str(error), path="")
+                finally:
+                    try:
                         if context is not None and settings.session_cache_enabled:
                             try:
                                 write_cookie_state(
@@ -205,18 +188,13 @@ class DownloadSession:
                                 )
                             except (PlaywrightError, OSError) as error:
                                 _logger.warning("下载会话缓存保存失败: %s", error)
-                        self.events.emit("download_finished", stopped=self.cancel.is_set())
-            finally:
-                try:
-                    if context is not None:
-                        await context.close()
-                finally:
-                    try:
-                        if browser is not None and browser.is_connected():
-                            await browser.close()
                     finally:
-                        if profile is not None:
-                            profile.cleanup()
+                        try:
+                            if context is not None:
+                                await context.close()
+                        finally:
+                            if browser is not None and browser.is_connected():
+                                await browser.close()
 
 
 async def _requires_manual_access(page) -> bool:

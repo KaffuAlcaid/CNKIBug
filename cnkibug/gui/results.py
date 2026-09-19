@@ -383,17 +383,11 @@ class ResultsWindow:
                 elif event.name == "download_error" and not self._closing:
                     messagebox.showerror("下载任务结束", payload["error"], parent=self.window)
                 elif event.name == "download_finished":
-                    self.busy = self._closing
-                    self._continue_button.pack_forget()
-                    self._stop_button.configure(state=tk.DISABLED)
-                    self._open_button.configure(state=tk.NORMAL)
-                    self._operation_status.set("下载已停止" if payload.get("stopped") else "本批下载结束")
-                    self._update_summary()
-                elif event.name == "download_session_closed":
                     self.busy = False
                     self._continue_button.pack_forget()
                     self._stop_button.configure(state=tk.DISABLED)
                     self._open_button.configure(state=tk.NORMAL)
+                    self._operation_status.set("下载已停止" if payload.get("stopped") else "本批下载结束")
                     self._update_summary()
                     if self._closing:
                         self.window.destroy()

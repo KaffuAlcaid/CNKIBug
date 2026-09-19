@@ -68,11 +68,11 @@ GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会�
 
 ## 初始化与运行环境
 
-Linux AppImage 在初始化完成前显示初始化设置，可选择论文保存目录并检查运行环境。需要 Chromium 时，点击“安装 Chromium”；缺少系统组件时，页面列出缺失项和安装命令，在终端执行后再检查。检查通过后点击“开始使用”保存设置。点击“稍后设置”时，下次启动仍会显示初始化设置。
+Linux AppImage 在初始化完成前显示初始化设置，可选择论文保存目录并检查运行环境。程序依次尝试系统 Chrome、系统 Chromium 和已下载的 Chromium；需要下载时，点击“安装 Chromium”。缺少系统组件时，页面列出缺失项和安装指引；Ubuntu/Debian 使用适用的 Playwright 安装命令，Fedora 可通过 `sudo dnf install chromium` 安装系统浏览器及其组件。检查通过后点击“开始使用”保存设置。点击“稍后设置”时，下次启动仍会显示初始化设置。
 
 Windows 直接进入主窗口。Windows 和 Linux 都可在“设置 → 运行环境”中手动检查程序组件、系统组件、浏览器和目录写入权限。浏览器检查会短暂打开一个空白窗口。
 
-Chromium 默认保存在 Linux 的 `~/.cache/ms-playwright/`，设置 `XDG_CACHE_HOME` 时使用该目录下的 `ms-playwright/`；`PLAYWRIGHT_BROWSERS_PATH` 可指定浏览器安装位置。程序会检查当前所需版本，已安装时可以直接使用。完成初始化后，浏览器检查和安装仍可从设置中操作。
+通过程序下载的 Chromium 默认保存在 Linux 的 `~/.cache/ms-playwright/`，设置 `XDG_CACHE_HOME` 时使用该目录下的 `ms-playwright/`；`PLAYWRIGHT_BROWSERS_PATH` 可指定下载位置。系统浏览器沿用原安装位置。完成初始化后，浏览器检查和安装仍可从设置中操作。
 
 ## GUI 更新
 
@@ -84,7 +84,7 @@ Chromium 默认保存在 Linux 的 `~/.cache/ms-playwright/`，设置 `XDG_CACHE
 
 测试连接检查当前模式下的更新信息和对应平台的下载地址，只读取文件开头的一小段。自动模式检查全部候选下载线路。
 
-Windows GUI EXE 和 Linux x86-64 AppImage 支持下载并替换后重启。AppImage 原文件所在目录可写时，更新保留原文件名和位置；无法直接替换时，可选择位置保存新版本。配置、登录状态和论文文件继续保留。
+Windows GUI EXE 和 Linux x86-64 AppImage 支持下载并替换后重启。AppImage 原文件所在目录可写时，更新保留原文件名和位置；无法直接替换时，可选择位置保存新版本。更新后主窗口成功启动时，会清理旧版本备份和本次更新临时文件。配置、登录状态和论文文件继续保留。
 
 源码和 Python 包安装方式通过发布页或 pip 手动更新。
 

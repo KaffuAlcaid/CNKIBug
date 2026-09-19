@@ -31,14 +31,35 @@ class EnvironmentCancelled(Exception):
     pass
 
 
-def browser_channels() -> tuple[str | None, ...]:
-    return (None,) if sys.platform == "linux" else ("msedge", None)
+@dataclass(frozen=True)
+class BrowserCandidate:
+    name: str
+    executable: Path | None
+    channel: str | None = None
 
 
-def browser_launch_options(channel: str | None) -> dict:
+def browser_candidates(playwright) -> tuple[BrowserCandidate, ...]:
+    candidates = []
+    if sys.platform == "linux":
+        found = set()
+        for command, name in (("google-chrome", "Google Chrome"), ("google-chrome-stable", "Google Chrome"),
+                              ("chromium", "系统 Chromium"), ("chromium-browser", "系统 Chromium")):
+            executable = shutil.which(command)
+            if executable and Path(executable).resolve() not in found:
+                found.add(Path(executable).resolve())
+                candidates.append(BrowserCandidate(name, Path(executable)))
+    else:
+        candidates.append(BrowserCandidate("Microsoft Edge", edge_executable(), "msedge"))
+    candidates.append(BrowserCandidate("Playwright Chromium", Path(playwright.chromium.executable_path)))
+    return tuple(candidates)
+
+
+def browser_launch_options(candidate: BrowserCandidate) -> dict:
     options = {"headless": False}
-    if channel:
-        options["channel"] = channel
+    if candidate.channel:
+        options["channel"] = candidate.channel
+    elif candidate.executable:
+        options["executable_path"] = str(candidate.executable)
     if sys.platform == "linux" and getattr(sys, "frozen", False):
         options["env"] = system_process_environment()
     return options
@@ -102,7 +123,20 @@ def playwright_install_command(*, system_dependencies: bool = False) -> tuple[li
     return command, env
 
 
-def system_dependency_command() -> str:
+def linux_distribution() -> set[str]:
+    try:
+        release = platform.freedesktop_os_release()
+    except OSError:
+        return set()
+    return {release.get("ID", ""), *release.get("ID_LIKE", "").split()}
+
+
+def system_dependency_command() -> str | None:
+    distribution = linux_distribution()
+    if "fedora" in distribution:
+        return "sudo dnf install chromium"
+    if not distribution.intersection({"debian", "ubuntu"}):
+        return None
     image = appimage_path()
     if image:
         return shlex.join([str(image), "--install-system-deps"])
@@ -114,15 +148,32 @@ def system_dependency_command() -> str:
 def run_system_dependency_installer() -> int:
     if sys.platform != "linux":
         raise RuntimeError("系统组件安装入口适用于 Linux。")
+    if not linux_distribution().intersection({"debian", "ubuntu"}):
+        command = system_dependency_command()
+        print(f"请在终端执行：{command}" if command else "请通过系统软件包管理器安装 Chromium 及其运行组件。")
+        return 1
     command, env = playwright_install_command(system_dependencies=True)
     return subprocess.call(command, env=env)
 
 
-def chromium_available() -> bool:
+def browser_installed() -> bool:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
-        return Path(playwright.chromium.executable_path).is_file()
+        return any(candidate.executable and candidate.executable.is_file() for candidate in browser_candidates(playwright))
+
+
+def _missing_shared_libraries(executable: Path) -> list[str]:
+    command = shutil.which("ldd")
+    if not command:
+        return []
+    with executable.open("rb") as stream:
+        if stream.read(4) != b"\x7fELF":
+            return []
+    env = system_process_environment()
+    env["LC_ALL"] = "C"
+    libraries = subprocess.run([command, str(executable)], capture_output=True, text=True, timeout=15, env=env)
+    return re.findall(r"^\s*(\S+)\s+=>\s+not found", libraries.stdout, re.MULTILINE)
 
 
 def check_environment(data_dir: Path, output_dir: Path, cancelled: Event,
@@ -162,50 +213,45 @@ def check_environment(data_dir: Path, output_dir: Path, cancelled: Event,
 
     try:
         with sync_playwright() as playwright:
-            edge = edge_executable() if sys.platform == "win32" else None
-            executable = edge or Path(playwright.chromium.executable_path)
-            if not executable.is_file():
-                record("system", "系统组件", "pending", "浏览器安装后检查" if sys.platform == "linux" else platform.platform())
-                record("browser", "浏览器", "missing", "需要安装 Chromium" if sys.platform == "linux" else "请安装 Microsoft Edge 或 Playwright Chromium")
-                return results
-            if sys.platform == "linux":
-                command = shutil.which("ldd")
-                if command is None:
-                    record("system", "系统组件", "error", "未找到 ldd，无法检查浏览器共享库")
-                    record("browser", "浏览器", "pending", "系统组件检查完成后启动")
-                    return results
-                env = system_process_environment()
-                env["LC_ALL"] = "C"
-                libraries = subprocess.run([command, str(executable)], capture_output=True, text=True, timeout=15, env=env)
-                missing = re.findall(r"^\s*(\S+)\s+=>\s+not found", libraries.stdout, re.MULTILINE)
-                if missing:
-                    record("system", "系统组件", "error", "缺少：" + "、".join(missing) + "\n安装命令：\n" + system_dependency_command())
-                    record("browser", "浏览器", "error", "Chromium 已安装，等待补齐系统组件")
-                    return results
-                if libraries.returncode:
-                    record("system", "系统组件", "error", libraries.stderr.strip() or libraries.stdout.strip())
-                    record("browser", "浏览器", "pending", "系统组件检查完成后启动")
-                    return results
-            record("system", "系统组件", "ready", platform.platform())
-            if launch_browser:
-                for channel in browser_channels():
-                    try:
-                        browser = playwright.chromium.launch(
-                            timeout=15000, **browser_launch_options(channel),
-                        )
-                        edge = edge if channel == "msedge" else None
-                        executable = edge or Path(playwright.chromium.executable_path)
-                        break
-                    except PlaywrightError:
-                        if channel != "msedge":
-                            raise
+            installed = [candidate for candidate in browser_candidates(playwright)
+                         if candidate.executable and candidate.executable.is_file()]
+            failures, missing = [], []
+            for candidate in installed:
+                if cancelled.is_set():
+                    raise EnvironmentCancelled()
                 try:
-                    page = browser.new_page()
-                    page.goto("about:blank", timeout=15000)
-                finally:
-                    browser.close()
-            record("browser", "浏览器", "ready", ("Microsoft Edge" if edge else "Chromium") + "\n" + str(executable))
-    except (OSError, PlaywrightError, subprocess.TimeoutExpired) as error:
+                    if launch_browser:
+                        browser = playwright.chromium.launch(timeout=15000, **browser_launch_options(candidate))
+                        try:
+                            page = browser.new_page()
+                            page.goto("about:blank", timeout=15000)
+                            page.set_content("<title>CNKIBug</title>")
+                            if page.title() != "CNKIBug":
+                                raise RuntimeError("浏览器页面检查失败")
+                        finally:
+                            browser.close()
+                    record("system", "系统组件", "ready" if launch_browser else "pending", platform.platform())
+                    record("browser", "浏览器", "ready" if launch_browser else "pending",
+                           candidate.name + "\n" + str(candidate.executable))
+                    return results
+                except (OSError, PlaywrightError, RuntimeError) as error:
+                    failures.append(f"{candidate.name}：{error}")
+                    if sys.platform == "linux":
+                        try:
+                            missing.extend(_missing_shared_libraries(candidate.executable))
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+            guidance = "请安装 Microsoft Edge 或 Playwright Chromium。"
+            if sys.platform == "linux":
+                command = system_dependency_command()
+                guidance = "请安装系统 Chrome、Chromium，或点击安装 Chromium。"
+                guidance += f"\n系统安装命令：\n{command}" if command else "\n系统组件可通过软件包管理器安装。"
+            record("system", "系统组件", "error" if installed else "pending",
+                   "缺少：" + "、".join(dict.fromkeys(missing)) if missing else "浏览器启动后确认")
+            cached = Path(playwright.chromium.executable_path).is_file()
+            record("browser", "浏览器", "error" if cached else "missing", "\n\n".join([*failures, guidance]))
+    except (OSError, PlaywrightError) as error:
+        record("system", "系统组件", "pending", "浏览器启动后确认")
         record("browser", "浏览器", "error", str(error))
     return results
 

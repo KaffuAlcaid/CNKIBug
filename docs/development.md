@@ -24,11 +24,13 @@ chmod +x /tmp/cnkibug-appimagetool
 APPIMAGETOOL=/tmp/cnkibug-appimagetool bash scripts/build_appimage.sh
 ```
 
-生成文件位于 `dist/CNKIBug-GUI-x86_64.AppImage`。包内包含 Python、Tk、程序依赖和 Playwright 安装器；Chromium 在初始化设置中下载到用户缓存。使用 PyInstaller 目录模式、移除调试符号和 zstd 压缩，脚本输出主要目录大小及最终体积，超过 100 MiB 时给出提示。
+生成文件位于 `dist/CNKIBug-GUI-x86_64.AppImage`。包内包含 Python、Tk、程序依赖和 Playwright 安装器；浏览器优先使用系统 Chrome/Chromium，也可在初始化设置中下载到用户缓存。使用 PyInstaller 目录模式、移除调试符号和 zstd 压缩，脚本输出主要目录大小及最终体积，超过 100 MiB 时给出提示。
 
-AppImage 通过 `APPIMAGE` 确定原文件位置，用户数据使用 `XDG_DATA_HOME` 或 `~/.local/share/CNKIBug-data/`。`--install-system-deps` 调用包内 Playwright 的系统组件安装器，由用户在终端执行。
+AppImage 通过 `APPIMAGE` 确定原文件位置，用户数据使用 `XDG_DATA_HOME` 或 `~/.local/share/CNKIBug-data/`。`--install-system-deps` 在 Ubuntu/Debian 上调用包内 Playwright 的系统组件安装器；Fedora 返回系统浏览器安装指引。
 
-`.github/workflows/build.yml` 构建 Windows GUI EXE、Linux AppImage 和终端版源码包，完成入口检查后上传到对应 Release。Linux 在 Ubuntu 22.04 上构建。
+`.github/workflows/build.yml` 构建 Windows GUI EXE、Linux AppImage 和终端版源码包。Linux 在 Ubuntu 22.04 上构建，发布任务检查包内导入和资源。
+
+`--self-check` 检查导入和资源；`--self-check-browser` 还创建 Tk 窗口并实际启动浏览器、打开本地页面、退出；`--install-browser` 调用包内 Chromium 安装器。成品浏览器启动验证使用普通用户、新的用户数据和浏览器缓存目录，分别覆盖 Ubuntu、Fedora 的系统浏览器和下载浏览器。
 
 ## 更新清单
 

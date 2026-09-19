@@ -10,7 +10,7 @@ from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
 from .cache import discard_cookie_state, prepare_cookie_state
-from .environment import browser_channels, browser_launch_options
+from .environment import browser_candidates, browser_launch_options
 
 
 _logger = logging.getLogger("cnkibug.browser_runtime")
@@ -30,28 +30,28 @@ def launch_browser(
     p: Any,
     events: EventSink = NULL_EVENTS,
 ) -> BrowserLaunchResult:
-    for channel in browser_channels():
-        name = channel or "chromium"
+    failures = []
+    for candidate in browser_candidates(p):
+        name = candidate.name
         try:
             _logger.info("浏览器启动开始: channel=%s", name)
             with events.activity("少女祈祷中..."):
                 browser = p.chromium.launch(
-                    args=["--start-maximized"], **browser_launch_options(channel),
+                    args=["--start-maximized"], **browser_launch_options(candidate),
                 )
-            events.emit("browser_launched", channel=name)
+            channel = candidate.channel or "chromium"
+            events.emit("browser_launched", channel=channel, browser_name=name)
             _logger.info("浏览器启动成功: channel=%s", name)
-            return BrowserLaunchResult(browser, name)
+            return BrowserLaunchResult(browser, channel)
         except PlaywrightError as error:
-            if channel == "msedge":
-                _logger.warning("Edge 启动失败，尝试 Chromium: %s", error)
+            failures.append(f"{name}: {error}")
+            _logger.warning("浏览器启动失败: browser=%s error=%s", name, error)
+            if candidate.channel == "msedge":
                 events.emit("browser_edge_failed", error=str(error))
-                continue
-            _logger.error("Chromium 启动失败: %s", error)
-            raise BrowserLaunchError(f"浏览器启动彻底失败: {error}") from error
         except Exception:
             _logger.exception("浏览器启动出现非预期异常")
             raise
-    raise BrowserLaunchError("没有可用的浏览器")
+    raise BrowserLaunchError("没有可用的浏览器：\n" + "\n".join(failures))
 
 
 def create_browser_context(
