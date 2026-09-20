@@ -8,7 +8,7 @@ import openpyxl
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font
 
-from ..cnki.models import Paper, deduplicate_papers, normalize_doi
+from ..cnki.models import Paper, deduplicate_papers, document_type_family, normalize_doi, split_authors
 
 
 COLUMNS = (
@@ -23,6 +23,12 @@ COLUMNS = (
 DETAIL_FIELDS = {"paper_keywords", "abstract", "institutions", "funds", "classification", "volume", "issue", "pages"}
 ALIASES = {label: key for key, label in COLUMNS} | {key: key for key, _ in COLUMNS}
 ALIASES.update({"keyword": "queries", "检索项": "queries", "题名": "title"})
+
+_RIS_TYPES = {
+    "": "GEN", "journal": "JOUR", "thesis": "THES", "conference": "CONF",
+    "book": "BOOK", "book_section": "CHAP", "newspaper": "NEWS", "patent": "PAT",
+    "standard": "STAND", "statute": "STAT", "video": "VIDEO",
+}
 
 
 def paper_columns(include_citation: bool = True, include_details: bool = True) -> list[tuple[str, str]]:
@@ -128,19 +134,30 @@ def read_papers(path: str | Path) -> list[Paper]:
 
 
 def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) -> None:
+    families = [document_type_family(paper.document_type) for paper in papers]
+    unsupported = list(dict.fromkeys(paper.document_type for paper, family in zip(papers, families) if family not in _RIS_TYPES))
+    if unsupported:
+        raise ValueError(
+            f"以下文献类型暂不支持准确的 Zotero 导出：{'、'.join(unsupported)}。"
+            "请使用 Excel 或 CSV 保存这些结果。"
+        )
     with open(path, "w", encoding="utf-8-sig", newline="\n") as stream:
         def emit(tag: str, value: str) -> None:
             if value:
                 stream.write(f"{tag}  - {' '.join(str(value).split())}\n")
 
-        for paper in papers:
-            thesis = paper.document_type in {"博士", "硕士", "学位论文"}
-            kind = "THES" if thesis else "CONF" if "会议" in paper.document_type else "JOUR" if paper.document_type in {"期刊", "学术期刊", "学术辑刊", "特色期刊"} else "GEN"
+        for paper, family in zip(papers, families):
+            kind = _RIS_TYPES[family]
+            thesis = kind == "THES"
             emit("TY", kind)
             emit("TI", paper.title)
-            for author in split_values(paper.authors):
+            for author in split_authors(paper.authors):
                 emit("AU", author)
-            emit("PB" if thesis else "JO", paper.source)
+            source_tag = {"THES": "PB", "JOUR": "JO", "CONF": "JO", "NEWS": "T2", "CHAP": "T2", "GEN": "JO"}.get(kind)
+            if source_tag:
+                emit(source_tag, paper.source)
+            elif paper.source:
+                emit("N1", f"来源：{paper.source}")
             emit("PY", paper.publication_date[:4] if re.match(r"^\d{4}", paper.publication_date) else "")
             emit("DA", paper.publication_date)
             emit("DO", normalize_doi(paper.doi))
@@ -156,6 +173,8 @@ def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) 
                 if len(page_range) > 1:
                     emit("EP", page_range[1])
             emit("M3", paper.document_type if thesis else "")
+            if paper.document_type:
+                emit("N1", f"文献类型：{paper.document_type}")
             if include_pdf and paper.pdf_path and Path(paper.pdf_path).is_file():
                 emit("L1", Path(paper.pdf_path).resolve().as_uri())
             for label, value in (("作者单位", paper.institutions), ("基金", paper.funds), ("分类号", paper.classification)):

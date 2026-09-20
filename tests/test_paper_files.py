@@ -132,6 +132,41 @@ def test_ris_exports_authors_type_keywords_and_existing_pdf(tmp_path):
     assert f"L1  - {pdf.resolve().as_uri()}" in text
 
 
+@pytest.mark.parametrize("document_type, ris_type", [
+    ("期刊", "JOUR"), ("学术期刊", "JOUR"), ("学位论文", "THES"), ("博士论文", "THES"),
+    ("会议", "CONF"), ("会议论文", "CONF"), ("图书", "BOOK"), ("图书章节", "CHAP"),
+    ("报纸", "NEWS"), ("专利", "PAT"), ("标准", "STAND"), ("法律法规", "STAT"),
+    ("视频", "VIDEO"), ("", "GEN"),
+])
+def test_ris_preserves_known_resource_types_and_original_labels(tmp_path, document_type, ris_type):
+    path = tmp_path / "papers.ris"
+    save_papers(path, [Paper(title="题名", authors="张三、李四", document_type=document_type)])
+    text = path.read_text(encoding="utf-8-sig")
+    assert f"TY  - {ris_type}\n" in text
+    assert "AU  - 张三\nAU  - 李四\n" in text
+    if document_type:
+        assert f"N1  - 文献类型：{document_type}\n" in text
+
+
+@pytest.mark.parametrize("document_type, source_line", [
+    ("学术期刊", "JO  - 来源"), ("学位论文", "PB  - 来源"), ("会议", "JO  - 来源"),
+    ("报纸", "T2  - 来源"), ("图书", "N1  - 来源：来源"), ("专利", "N1  - 来源：来源"),
+])
+def test_ris_preserves_source_without_inventing_resource_metadata(tmp_path, document_type, source_line):
+    path = tmp_path / "papers.ris"
+    save_papers(path, [Paper(title="题名", source="来源", document_type=document_type)])
+    assert source_line + "\n" in path.read_text(encoding="utf-8-sig")
+
+
+@pytest.mark.parametrize("document_type", ["年鉴", "成果", "文库", "未知类型"])
+def test_ris_reports_ambiguous_types_without_replacing_existing_export(tmp_path, document_type):
+    path = tmp_path / "papers.ris"
+    path.write_text("previous export", encoding="utf-8")
+    with pytest.raises(ValueError, match=document_type):
+        save_papers(path, [Paper(title="题名", document_type=document_type)])
+    assert path.read_text(encoding="utf-8") == "previous export"
+
+
 def test_result_conversion_does_not_share_checkpoint_dicts():
     metadata = {"doi": "10.1234/example"}
     raw = {"查询": [["标题", "作者", "来源", "2026", "url", metadata]]}
