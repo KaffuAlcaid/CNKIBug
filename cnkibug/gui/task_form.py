@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import tkinter as tk
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any
@@ -18,6 +18,7 @@ from ..fileio.keyword_input import (
     load_keywords_txt,
 )
 from ..fileio.paths import get_real_desktop_path
+from ..fileio.search_plans import read_search_plan, write_search_plan
 from .advanced import AdvancedSearchDialog
 from .search_options import SearchOptionsDialog
 
@@ -106,6 +107,12 @@ class TaskForm(ttk.Frame):
             heading, text="导入 TXT", command=self._import_txt, bootstyle="secondary-outline",
         )
         self._import_button.pack(side=tk.RIGHT)
+        self._plan_button = ttk.Menubutton(heading, text="检索方案", bootstyle="secondary-outline")
+        self._plan_button.pack(side=tk.RIGHT, padx=(0, 6))
+        plans = tk.Menu(self._plan_button, tearoff=False)
+        plans.add_command(label="载入方案", command=self._load_plan)
+        plans.add_command(label="保存方案", command=self._save_plan)
+        self._plan_button.configure(menu=plans)
 
         entry_row = ttk.Frame(keyword_frame)
         entry_row.pack(fill=tk.X, pady=(0, 8))
@@ -233,6 +240,7 @@ class TaskForm(ttk.Frame):
             self._add_keyword_button,
             self._advanced_button,
             self._import_button,
+            self._plan_button,
             self._pages_entry,
             self._output_entry,
             self._browse_button,
@@ -245,6 +253,45 @@ class TaskForm(ttk.Frame):
             self._review_button,
         ]
         self._sync_option_states()
+
+    def _save_plan(self) -> None:
+        if self._running:
+            return
+        request = self.collect_request()
+        if request is None:
+            return
+        filename = filedialog.asksaveasfilename(
+            parent=self.root, title="保存检索方案", initialfile="cnki-search-plan.json",
+            defaultextension=".json", filetypes=[("检索方案", "*.json")],
+        )
+        if not filename:
+            return
+        task = asdict(request)
+        task["output_dir"] = str(request.output_dir) if request.output_dir else None
+        try:
+            write_search_plan(filename, task)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("无法保存检索方案", str(error), parent=self.root)
+            return
+        self._keyword_status_var.set(f"方案已保存：{Path(filename).name}")
+
+    def _load_plan(self) -> None:
+        if self._running:
+            return
+        filename = filedialog.askopenfilename(parent=self.root, title="载入检索方案", filetypes=[("检索方案", "*.json")])
+        if not filename:
+            return
+        try:
+            task = read_search_plan(filename)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("无法载入检索方案", str(error), parent=self.root)
+            return
+        if (self._keywords or self._keyword_var.get().strip()) and not messagebox.askyesno(
+            "载入检索方案", "载入方案将替换当前检索项和输出选项。继续？", parent=self.root,
+        ):
+            return
+        self.populate_resume(task)
+        self._keyword_status_var.set(f"方案：{Path(filename).name}；当前任务：{len(self._keywords)} 项")
 
     @property
     def output_dir(self) -> Path:
