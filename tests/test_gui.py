@@ -217,6 +217,8 @@ def _results_view():
     viewer._checked = {0}
     viewer._statuses = {}
     viewer._detail_statuses = {}
+    viewer._zotero_statuses = {}
+    viewer._row_statuses = {}
     viewer.query = Mock(get=lambda: "query")
     viewer.table = Mock()
     viewer.table.selection.return_value = ()

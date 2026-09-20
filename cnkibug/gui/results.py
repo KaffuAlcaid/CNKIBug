@@ -17,6 +17,7 @@ from ..cnki.downloads import DownloadSession
 from ..cnki.details import fetch_selected_details
 from ..cnki.models import Paper, deduplicate_papers
 from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
+from ..fileio.zotero import send_papers_to_zotero
 from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
 from .download_dialog import DownloadDialog
@@ -52,6 +53,8 @@ class ResultsWindow:
         self._checked: set[int] = set()
         self._statuses: dict[int, str] = {}
         self._detail_statuses: dict[int, str] = {}
+        self._zotero_statuses: dict[int, str] = {}
+        self._row_statuses: dict[int, str] = {}
         self._sort_key = "publication_date"
         self._descending = True
         self._papers: list[Paper] = []
@@ -103,6 +106,8 @@ class ResultsWindow:
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="关联本地 PDF", command=self._associate_pdf)
         self._paper_menu.add_command(label="解除 PDF 关联", command=self._unlink_pdf)
+        self._paper_menu.add_separator()
+        self._paper_menu.add_command(label="发送到 Zotero", command=self._send_zotero)
         self._paper_actions.configure(menu=self._paper_menu)
         self._export_button = ttk.Button(self._action_bar, text="导出所选", command=self._export, bootstyle="primary")
         self._export_button.pack(side=tk.RIGHT)
@@ -203,6 +208,8 @@ class ResultsWindow:
         self._checked.clear()
         self._statuses.clear()
         self._detail_statuses.clear()
+        self._zotero_statuses.clear()
+        self._row_statuses.clear()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
         self.search.set("")
@@ -214,7 +221,7 @@ class ResultsWindow:
         paper = self._papers[index]
         authors = split_values(paper.authors)
         display_authors = "、".join(authors[:2]) + (" 等" if len(authors) > 2 else "")
-        status = self._detail_statuses.get(index) or self._statuses.get(index, "已下载" if paper.pdf_path else "")
+        status = self._row_statuses.get(index, "已下载" if paper.pdf_path else "")
         return ("☑" if index in self._checked else "☐", paper.title, display_authors, paper.source, paper.publication_date[:10], status)
 
     def _populate(self):
@@ -234,6 +241,13 @@ class ResultsWindow:
             self.table.selection_set(str(self._visible[0]))
         self._update_summary()
         self._show_paper()
+
+    def _set_row_status(self, index: int, status: str) -> None:
+        self._row_statuses[index] = status
+        if self.table.exists(str(index)):
+            self.table.item(str(index), values=self._values(index))
+        if self.table.selection() == (str(index),):
+            self._show_paper()
 
     def _sort(self, name):
         if name in {"checked", "status"}:
@@ -311,6 +325,9 @@ class ResultsWindow:
             detail_status = self._detail_statuses.get(int(selected[0]), "") if selected else ""
             if detail_status:
                 content["info"] += f"\n\n详情状态：{detail_status}"
+            zotero_status = self._zotero_statuses.get(int(selected[0]), "") if selected else ""
+            if zotero_status:
+                content["info"] += f"\n\nZotero：{zotero_status}"
         for name, text in self._texts.items():
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
@@ -378,6 +395,7 @@ class ResultsWindow:
             messagebox.showerror("无法关联 PDF", str(error), parent=self.window)
             return
         self._statuses[index] = "已关联 PDF"
+        self._row_statuses[index] = "已关联 PDF"
         self._detail_statuses.pop(index, None)
         self._operation_status.set(f"已关联：{path.name}")
         self._populate()
@@ -388,6 +406,7 @@ class ResultsWindow:
             return
         self._papers[index].pdf_path = ""
         self._statuses.pop(index, None)
+        self._row_statuses.pop(index, None)
         self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
         self._populate()
 
@@ -434,6 +453,9 @@ class ResultsWindow:
             label="正在补抓所选论文详情", needs_browser=True,
         )
 
+    def _send_zotero(self):
+        self._start_operation(lambda items: send_papers_to_zotero(items, self._events), label="正在连接 Zotero")
+
     def _download(self):
         if self.busy or not self._checked:
             return
@@ -466,14 +488,15 @@ class ResultsWindow:
             while True:
                 event = self._queue.get_nowait()
                 payload = event.payload
-                if event.name == "paper_details":
+                if event.name == "paper_zotero":
+                    self._zotero_statuses[payload["index"]] = payload["status"]
+                    self._set_row_status(payload["index"], payload["status"])
+                elif event.name == "paper_details":
                     index = payload["index"]
                     for key, value in payload["updates"].items():
                         setattr(self._papers[index], key, value)
                     self._detail_statuses[index] = payload["status"]
-                    if self.table.exists(str(index)):
-                        self.table.item(str(index), values=self._values(index))
-                    self._show_paper()
+                    self._set_row_status(index, payload["status"])
                 elif event.name in {"paper_operation_progress", "activity_started"}:
                     self._operation_status.set(payload["message"])
                 elif event.name == "verify_required":
@@ -491,10 +514,7 @@ class ResultsWindow:
                     self._statuses[index] = payload["status"]
                     if payload["path"]:
                         self._papers[index].pdf_path = payload["path"]
-                    if self.table.exists(str(index)):
-                        self.table.item(str(index), values=self._values(index))
-                    if self.table.selection() == (str(index),):
-                        self._show_paper()
+                    self._set_row_status(index, payload["status"])
                 elif event.name == "download_preparing":
                     remaining = payload["remaining"]
                     self._continue_button.configure(text="立即继续")
@@ -513,7 +533,7 @@ class ResultsWindow:
                     self._continue_button.pack_forget()
                     self._operation_status.set("正在下载所选论文")
                 elif event.name == "confirm_requested":
-                    answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("知网页面", payload["prompt"], parent=self.window)
+                    answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("请确认", payload["prompt"], parent=self.window)
                     payload["response_queue"].put(answer)
                 elif event.name in {"download_error", "paper_task_error"} and not (self._closing or self._hide_when_done):
                     messagebox.showerror("论文处理结束", payload["error"], parent=self.window)
