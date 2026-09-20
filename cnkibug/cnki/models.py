@@ -53,6 +53,36 @@ def normalize_doi(value: str) -> str:
     return value.strip().rstrip(".;；。")
 
 
+def split_authors(value: str) -> list[str]:
+    return [" ".join(part.split()) for part in re.split(r"[;；、\r\n]+", value) if part.strip()]
+
+
+def document_type_family(value: str) -> str:
+    value = value.strip()
+    families = {
+        "期刊": "journal", "学术期刊": "journal", "学术辑刊": "journal", "特色期刊": "journal",
+        "博士": "thesis", "硕士": "thesis", "学位论文": "thesis",
+        "博士论文": "thesis", "硕士论文": "thesis", "博士学位论文": "thesis", "硕士学位论文": "thesis",
+        "会议": "conference", "会议论文": "conference", "中国会议": "conference", "国际会议": "conference",
+        "图书": "book", "图书章节": "book_section", "报纸": "newspaper", "报纸文章": "newspaper",
+        "专利": "patent", "标准": "standard", "法律法规": "statute", "视频": "video",
+    }
+    return families.get(value, value)
+
+
+def _document_types_conflict(first: str, second: str) -> bool:
+    first_family, second_family = document_type_family(first), document_type_family(second)
+    if not first_family or not second_family:
+        return False
+    if first_family != second_family:
+        return True
+    if first_family == "thesis":
+        first_degree = next((degree for degree in ("博士", "硕士") if degree in first), "")
+        second_degree = next((degree for degree in ("博士", "硕士") if degree in second), "")
+        return bool(first_degree and second_degree and first_degree != second_degree)
+    return False
+
+
 @dataclass
 class Paper:
     title: str = ""
@@ -102,16 +132,21 @@ def deduplicate_papers(papers: list[Paper]) -> list[Paper]:
             keys.append(("doi", paper.doi.casefold()))
         if paper.detail_url:
             keys.append(("url", paper.detail_url.strip()))
-        identity = (paper.title, paper.authors, paper.source, paper.publication_date)
-        if all(value.strip() for value in identity):
-            keys.append(("fields", *(" ".join(value.split()).casefold() for value in identity)))
+        title, source, publication_date = (
+            " ".join(value.split()).casefold()
+            for value in (paper.title, paper.source, paper.publication_date)
+        )
+        authors = tuple(author.casefold() for author in split_authors(paper.authors))
+        identity = (title, authors, source, publication_date)
+        if all(identity):
+            keys.append(("fields", *identity))
         found = None
         for key in keys:
             for index in indexes.get(key, []):
                 existing = result[index]
                 if existing.doi and paper.doi and existing.doi.casefold() != paper.doi.casefold():
                     continue
-                if existing.document_type and paper.document_type and existing.document_type != paper.document_type:
+                if key[0] == "fields" and _document_types_conflict(existing.document_type, paper.document_type):
                     continue
                 found = index
                 break

@@ -4,7 +4,7 @@ import openpyxl
 import pytest
 
 from cnkibug.cnki.models import (
-    Paper, append_article_details, deduplicate_papers, paper_from_record, papers_from_results,
+    Paper, append_article_details, deduplicate_papers, paper_from_record, papers_from_results, split_authors,
 )
 from cnkibug.core.search_query import SearchOptions
 from cnkibug.fileio.papers import COLUMNS, read_papers, save_papers
@@ -40,6 +40,50 @@ def test_dedup_joins_queries_without_mutating_checkpoint_or_conflicting_dois():
     assert papers[0].queries == ["一", "二"]
     assert papers[0].abstract == "摘要"
     assert first.queries == ["一"] and first.abstract == ""
+
+
+@pytest.mark.parametrize("identifier", ["doi", "detail_url"])
+@pytest.mark.parametrize("types", [("期刊", "学术期刊"), ("博士", "学位论文"), ("会议论文", "会议"), ("期刊", "图书")])
+def test_dedup_identifiers_take_precedence_over_type_labels(identifier, types):
+    values = {identifier: "10.1234/shared" if identifier == "doi" else "https://kns.cnki.net/shared"}
+    first = Paper(**values, document_type=types[0], queries=["一"])
+    second = Paper(**values, document_type=types[1], queries=["二"])
+
+    papers = deduplicate_papers([first, second])
+
+    assert len(papers) == 1
+    assert papers[0].queries == ["一", "二"]
+    assert first.queries == ["一"]
+
+
+def test_dedup_matching_url_does_not_override_conflicting_dois():
+    first = Paper(doi="10.1234/one", detail_url="https://kns.cnki.net/shared", document_type="期刊")
+    second = replace(first, doi="10.1234/two", document_type="学术期刊")
+    assert len(deduplicate_papers([first, second])) == 2
+
+
+def test_author_separators_preserve_commas_inside_names():
+    assert split_authors("Smith, John；Doe, Jane") == ["Smith, John", "Doe, Jane"]
+
+
+@pytest.mark.parametrize("authors", ["张三；李四", "张三、李四", "张三\n李四"])
+@pytest.mark.parametrize("types", [("期刊", "学术期刊"), ("博士", "学位论文"), ("会议论文", "会议")])
+def test_dedup_fields_normalize_author_separators_and_type_aliases(authors, types):
+    first = Paper(title="题名", authors="张三; 李四", source="来源", publication_date="2026-01-02", document_type=types[0])
+    second = replace(first, authors=authors, document_type=types[1])
+    assert len(deduplicate_papers([first, second])) == 1
+
+
+@pytest.mark.parametrize("changes", [
+    {"authors": "李四；张三"},
+    {"publication_date": "2026-01-03"},
+    {"publication_date": "2026"},
+    {"document_type": "会议"},
+    {"document_type": "硕士"},
+])
+def test_dedup_fields_preserve_author_order_full_dates_and_type_conflicts(changes):
+    first = Paper(title="题名", authors="张三; 李四", source="来源", publication_date="2026-01-02", document_type="博士")
+    assert len(deduplicate_papers([first, replace(first, **changes)])) == 2
 
 
 @pytest.mark.parametrize("extension", ["xlsx", "csv"])
