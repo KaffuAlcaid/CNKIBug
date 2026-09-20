@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import re
 from math import ceil
@@ -296,7 +297,7 @@ async def _download_one(home_page, paper, destination, settings, cancel, events,
         new_page.on("response", on_response)
 
     context.on("page", watch)
-    target = None
+    part_path = None
     keep_pages_open = False
     try:
         _logger.info("PDF 下载步骤: 激活知网首页")
@@ -388,23 +389,29 @@ async def _download_one(home_page, paper, destination, settings, cancel, events,
         while target.exists():
             target = destination / f"{name}_{number}.pdf"
             number += 1
+        part_path = target.with_name(target.name + ".part")
         if captured["download"] is not None:
             _logger.info("PDF 下载步骤: 保存浏览器下载文件")
-            await _await_or_cancel(captured["download"].save_as(str(target)), cancel)
+            await _await_or_cancel(captured["download"].save_as(str(part_path)), cancel)
         else:
             _logger.info("PDF 下载步骤: 读取 PDF 响应内容")
             content = await _await_or_cancel(captured["response"].body(), cancel)
-            target.write_bytes(content)
-        with target.open("rb") as stream:
-            if b"%PDF-" not in stream.read(1024):
+            part_path.write_bytes(content)
+        with part_path.open("rb") as stream:
+            if part_path.stat().st_size == 0 or b"%PDF-" not in stream.read(1024):
                 raise RuntimeError("知网返回的文件不是 PDF")
+        if cancel.is_set():
+            raise RuntimeError("已停止")
+        os.replace(part_path, target)
         _logger.info("PDF 文件保存完成")
         return target
     except BaseException:
-        if captured["download"] is not None:
-            await captured["download"].cancel()
-        if target is not None:
-            target.unlink(missing_ok=True)
+        try:
+            if captured["download"] is not None:
+                await captured["download"].cancel()
+        finally:
+            if part_path is not None:
+                part_path.unlink(missing_ok=True)
         raise
     finally:
         context.remove_listener("page", watch)
