@@ -133,6 +133,15 @@ def read_papers(path: str | Path) -> list[Paper]:
         workbook.close()
 
 
+def associate_pdf(paper: Paper, path: str | Path) -> Path:
+    path = Path(path).expanduser().resolve()
+    with path.open("rb") as stream:
+        if path.suffix.lower() != ".pdf" or b"%PDF-" not in stream.read(1024):
+            raise ValueError("请选择有效的 PDF 文件。")
+    paper.pdf_path = str(path)
+    return path
+
+
 def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) -> None:
     families = [document_type_family(paper.document_type) for paper in papers]
     unsupported = list(dict.fromkeys(paper.document_type for paper, family in zip(papers, families) if family not in _RIS_TYPES))

@@ -7,7 +7,7 @@ from cnkibug.cnki.models import (
     Paper, append_article_details, deduplicate_papers, paper_from_record, papers_from_results, split_authors,
 )
 from cnkibug.core.search_query import SearchOptions
-from cnkibug.fileio.papers import COLUMNS, read_papers, save_papers
+from cnkibug.fileio.papers import COLUMNS, associate_pdf, read_papers, save_papers
 from cnkibug.workflow.keyword_run import _merge_record_fields
 from cnkibug.workflow.state import make_task_state
 
@@ -130,6 +130,28 @@ def test_ris_exports_authors_type_keywords_and_existing_pdf(tmp_path):
     assert "DO  - 10.1234/test" in text
     assert "KW  - 焊接\nKW  - 材料" in text
     assert f"L1  - {pdf.resolve().as_uri()}" in text
+
+
+def test_associated_pdf_is_not_moved_and_is_included_in_ris(tmp_path):
+    pdf = tmp_path / "manual.PDF"
+    contents = b"%PDF-1.7\nmanual attachment"
+    pdf.write_bytes(contents)
+    paper = Paper(title="Paper", document_type="期刊")
+    assert associate_pdf(paper, pdf) == pdf.resolve()
+    assert pdf.read_bytes() == contents
+    ris = tmp_path / "papers.ris"
+    save_papers(ris, [paper], include_pdf=True)
+    assert f"L1  - {pdf.resolve().as_uri()}" in ris.read_text(encoding="utf-8-sig")
+
+
+def test_invalid_pdf_keeps_previous_association(tmp_path):
+    invalid = tmp_path / "login.pdf"
+    invalid.write_text("<html>Login required</html>", encoding="utf-8")
+    paper = Paper(pdf_path="previous.pdf")
+    with pytest.raises(ValueError, match="PDF"):
+        associate_pdf(paper, invalid)
+    assert paper.pdf_path == "previous.pdf"
+    assert invalid.exists()
 
 
 @pytest.mark.parametrize("document_type, ris_type", [

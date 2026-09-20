@@ -16,7 +16,7 @@ import ttkbootstrap as ttk
 from ..cnki.downloads import DownloadSession
 from ..cnki.details import fetch_selected_details
 from ..cnki.models import Paper, deduplicate_papers
-from ..fileio.papers import read_papers, save_papers, split_values
+from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
 from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
 from .download_dialog import DownloadDialog
@@ -100,6 +100,9 @@ class ResultsWindow:
         self._paper_actions.pack(side=tk.LEFT, padx=(8, 0))
         self._paper_menu = tk.Menu(self._paper_actions, tearoff=False)
         self._paper_menu.add_command(label="补抓所选详情", command=self._fetch_details)
+        self._paper_menu.add_separator()
+        self._paper_menu.add_command(label="关联本地 PDF", command=self._associate_pdf)
+        self._paper_menu.add_command(label="解除 PDF 关联", command=self._unlink_pdf)
         self._paper_actions.configure(menu=self._paper_menu)
         self._export_button = ttk.Button(self._action_bar, text="导出所选", command=self._export, bootstyle="primary")
         self._export_button.pack(side=tk.RIGHT)
@@ -277,6 +280,10 @@ class ResultsWindow:
         self._export_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._download_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._paper_actions.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
+        single = len(self._checked) == 1 and not self.busy
+        self._paper_menu.entryconfigure("关联本地 PDF", state=tk.NORMAL if single else tk.DISABLED)
+        linked = single and bool(self._papers[next(iter(self._checked))].pdf_path)
+        self._paper_menu.entryconfigure("解除 PDF 关联", state=tk.NORMAL if linked else tk.DISABLED)
 
     def _current(self) -> Paper | None:
         selected = self.table.selection()
@@ -295,6 +302,7 @@ class ResultsWindow:
                 ("基金", paper.funds), ("分类号", paper.classification), ("卷", paper.volume), ("期", paper.issue),
                 ("页码", paper.pages), ("被引次数", paper.citation_count), ("下载次数", paper.download_count),
                 ("命中检索项", "；".join(paper.queries)), ("详情链接", paper.detail_url),
+                ("本地 PDF", paper.pdf_path),
             ))
             selected = self.table.selection()
             status = self._statuses.get(int(selected[0]), "") if selected else ""
@@ -344,6 +352,44 @@ class ResultsWindow:
             self._operation_status.set(f"已导出 {len(papers)} 篇：{path.name}")
         except Exception as error:
             messagebox.showerror("导出失败", str(error), parent=self.window)
+
+    def _attachment_target(self):
+        if self.busy:
+            return None
+        if len(self._checked) != 1:
+            messagebox.showinfo("选择论文", "请只勾选一篇论文。", parent=self.window)
+            return None
+        return next(iter(self._checked))
+
+    def _associate_pdf(self):
+        index = self._attachment_target()
+        if index is None:
+            return
+        paper = self._papers[index]
+        initial = Path(paper.pdf_path).parent if paper.pdf_path else self.get_output_dir()
+        filename = filedialog.askopenfilename(
+            parent=self.window, title=f"关联 PDF：{paper.title}", initialdir=str(initial), filetypes=[("PDF", "*.pdf")],
+        )
+        if not filename:
+            return
+        try:
+            path = associate_pdf(paper, filename)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("无法关联 PDF", str(error), parent=self.window)
+            return
+        self._statuses[index] = "已关联 PDF"
+        self._detail_statuses.pop(index, None)
+        self._operation_status.set(f"已关联：{path.name}")
+        self._populate()
+
+    def _unlink_pdf(self):
+        index = self._attachment_target()
+        if index is None:
+            return
+        self._papers[index].pdf_path = ""
+        self._statuses.pop(index, None)
+        self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
+        self._populate()
 
     @property
     def alive(self) -> bool:
