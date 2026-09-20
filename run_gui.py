@@ -34,10 +34,10 @@ def _show_startup_error_dialog(message: str) -> None:
     root = None
     shown = False
     try:
-        import tkinter as tk
-        from tkinter import messagebox
+        import ttkbootstrap as ttk
+        from cnkibug.gui import dialogs as messagebox
 
-        root = tk.Tk()
+        root = ttk.Window()
         root.withdraw()
         messagebox.showerror("CNKIBug", message, parent=root)
         shown = True
@@ -56,7 +56,7 @@ def _show_startup_error_dialog(message: str) -> None:
     try:
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(None, message, "CNKIBug", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, message, "CNKIBug", 0)
     except Exception:
         pass
 

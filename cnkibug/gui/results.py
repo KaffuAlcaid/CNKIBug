@@ -8,10 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
+from . import dialogs as messagebox
 
 from ..cnki.downloads import DownloadSession
 from ..cnki.details import fetch_selected_details
@@ -116,15 +117,19 @@ class ResultsWindow:
         self._export_button.pack(side=tk.RIGHT)
         self._include_pdf = tk.BooleanVar(self.window, value=False)
         self._pdf_export_check = ttk.Checkbutton(self._action_bar, text="附带 PDF", variable=self._include_pdf)
-        self.export_format = tk.StringVar(self.window, value=self._initial_format)
+        self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 10), before=self._export_button)
+        self.export_formats = {
+            extension: tk.BooleanVar(self.window, value=extension == self._initial_format)
+            for extension in ("xlsx", "csv", "ris")
+        }
         formats = ttk.Frame(self._action_bar)
         formats.pack(side=tk.RIGHT, padx=10)
-        for label, value in (("Excel", "xlsx"), ("CSV", "csv"), ("Zotero", "ris")):
-            ttk.Radiobutton(
-                formats, text=label, value=value, variable=self.export_format,
-                command=self._sync_export_type, bootstyle="secondary-toolbutton",
-            ).pack(side=tk.LEFT, padx=(0, 3))
-        self._sync_export_type()
+        for label, extension in (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris")):
+            ttk.Checkbutton(
+                formats, text=label, variable=self.export_formats[extension],
+                command=self._sync_export_types, bootstyle="primary",
+            ).pack(side=tk.LEFT, padx=(0, 12))
+        self._sync_export_types()
 
         self._operation_bar = ttk.Frame(footer)
         self._operation_bar.pack(fill=tk.X)
@@ -183,18 +188,23 @@ class ResultsWindow:
         ttk.Button(bottom, text="查看知网页面", command=self._open_url, bootstyle="secondary").pack(side=tk.RIGHT)
         ttk.Button(bottom, text="打开 DOI", command=self._open_doi, bootstyle="secondary").pack(side=tk.RIGHT, padx=8)
         self._operation_status = tk.StringVar(self.window)
-        ttk.Label(footer, textvariable=self._operation_status, wraplength=1100).pack(fill=tk.X, pady=(5, 0))
+        self._operation_label = ttk.Label(footer, textvariable=self._operation_status, wraplength=1100)
+        self._operation_label.pack(fill=tk.X, pady=(5, 0))
         self._output_text = tk.StringVar(self.window)
         self._output_label = ttk.Label(footer, textvariable=self._output_text, wraplength=1100)
         self._output_label.pack(fill=tk.X, pady=(4, 0))
-        body.bind("<Configure>", lambda event: self._output_label.configure(wraplength=max(200, event.width - 8)))
+        def resize_footer(event):
+            width = max(200, event.width - 8)
+            self._output_label.configure(wraplength=width)
+            self._operation_label.configure(wraplength=width)
+
+        body.bind("<Configure>", resize_footer)
         self._show_output_dir()
 
-    def _sync_export_type(self):
-        if self.export_format.get() == "ris":
-            self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 8), before=self._export_button)
-        else:
-            self._pdf_export_check.pack_forget()
+    def _sync_export_types(self):
+        self._pdf_export_check.configure(state=tk.NORMAL if self.export_formats["ris"].get() else tk.DISABLED)
+        enabled = self._checked and not self.busy and any(value.get() for value in self.export_formats.values())
+        self._export_button.configure(state=tk.NORMAL if enabled else tk.DISABLED)
 
     def _show_output_dir(self):
         self._output_text.set(f"保存位置：{self.get_output_dir()}")
@@ -297,7 +307,7 @@ class ResultsWindow:
 
     def _update_summary(self):
         self._summary.set(f"显示 {len(self._visible)} / {len(self._papers)} 篇，已勾选 {len(self._checked)} 篇")
-        self._export_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
+        self._sync_export_types()
         self._download_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._paper_actions.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         single = len(self._checked) == 1 and not self.busy
@@ -311,6 +321,12 @@ class ResultsWindow:
 
     def _show_paper(self):
         paper = self._current()
+        if paper:
+            self._title.pack(fill=tk.X, before=self._notebook)
+            self._meta.pack(fill=tk.X, pady=(4, 6), before=self._notebook)
+        else:
+            self._title.pack_forget()
+            self._meta.pack_forget()
         self._title.configure(text=paper.title if paper else "")
         self._meta.configure(text=f"{paper.authors.replace(';', '；')}  |  {paper.source}  |  {paper.publication_date}" if paper else "", wraplength=max(200, self._details.winfo_width() - 16))
         content = {"abstract": "", "info": "", "citation": "", "journal": "期刊信息未查询"}
@@ -375,20 +391,40 @@ class ResultsWindow:
     def _export(self):
         if not self._checked or self.busy:
             return
+        extensions = [extension for extension, value in self.export_formats.items() if value.get()]
+        if not extensions:
+            return
         papers = [self._papers[i] for i in sorted(self._checked)]
         try:
             directory = self._destination()
-            name = datetime.now().strftime("cnki_selected_%Y%m%d_%H%M%S")
-            extension = self.export_format.get()
-            path = directory / f"{name}.{extension}"
+            base_name = datetime.now().strftime("cnki_selected_%Y%m%d_%H%M%S")
+            name = base_name
             sequence = 2
-            while path.exists():
-                path = directory / f"{name}_{sequence}.{extension}"
+            while any((directory / f"{name}.{extension}").exists() for extension in extensions):
+                name = f"{base_name}_{sequence}"
                 sequence += 1
-            save_papers(path, papers, extension == "ris" and self._include_pdf.get())
-            self._operation_status.set(f"已导出 {len(papers)} 篇：{path.name}")
         except Exception as error:
             messagebox.showerror("导出失败", str(error), parent=self.window)
+            return
+        saved, failures = [], []
+        for extension in extensions:
+            path = directory / f"{name}.{extension}"
+            try:
+                save_papers(path, papers, extension == "ris" and self._include_pdf.get())
+                saved.append(path)
+            except Exception as error:
+                failures.append(f"{extension.upper()}：{error}")
+        if saved:
+            self._operation_status.set(f"已导出 {len(papers)} 篇：" + "、".join(path.name for path in saved))
+        else:
+            self._operation_status.set("本次导出未生成结果文件。")
+        if failures:
+            message = "\n".join(failures)
+            if saved:
+                self._operation_status.set(f"已导出 {len(saved)} 种格式，{len(failures)} 种格式失败。")
+                messagebox.showwarning("部分导出失败", "已生成：" + "、".join(path.name for path in saved) + "\n\n" + message, parent=self.window)
+            else:
+                messagebox.showerror("导出失败", message, parent=self.window)
 
     def _attachment_target(self):
         if self.busy:

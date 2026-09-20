@@ -10,12 +10,10 @@ from pathlib import Path
 from queue import Empty, Queue
 from tempfile import TemporaryFile
 from threading import Event, Thread
-from tkinter import messagebox
 from typing import Any
 
 import ttkbootstrap as ttk
 from PIL import Image
-from ttkbootstrap.dialogs import Messagebox
 
 from ..app.runtime import cleanup_runtime_history, init_runtime, read_config, save_config
 from ..core.runtime import appimage_path
@@ -41,6 +39,7 @@ from ..workflow.state import (
     remaining_workload,
 )
 from .events import GuiEvent, GuiEventSink
+from . import dialogs as messagebox
 from .advanced import confirm_advanced_task
 from .settings import SettingsDialog
 from .task_form import GuiTaskRequest, TaskForm
@@ -281,7 +280,6 @@ class CNKIBugApp:
         self._maintenance_actions = ttk.Menubutton(toolbar, text="工具", bootstyle="secondary-outline")
         self._maintenance_actions.pack(side=tk.RIGHT)
         tools = tk.Menu(self._maintenance_actions, tearoff=False)
-        tools.add_command(label="运行环境", command=lambda: self._open_settings(selected_tab="运行环境"))
         tools.add_command(label="打开日志文件夹", command=self._open_log_directory)
         tools.add_command(label="清理日志与报告", command=self._cleanup_logs_and_reports)
         tools.add_separator()
@@ -548,14 +546,12 @@ class CNKIBugApp:
                     self.root.after_idle(self.root.attributes, "-topmost", False)
                     self.root.lift()
                     self.root.focus_force()
-                answer = False if self._close_when_done else Messagebox.show_question(
+                answer = False if self._close_when_done else messagebox.askokcancel(
                     title="需要手动验证",
                     message="请在浏览器中完成安全验证后点击继续，恢复抓取论文结果。\n点击取消将停止任务并保存已抓取的结果。",
-                    buttons=["继续:primary", "取消:secondary"],
-                    default="继续",
+                    confirm="继续",
                     parent=self.root,
-                    localize=False,
-                ) == "继续"
+                )
                 if response_queue is not None:
                     response_queue.put(answer)
                 if not answer:

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
-from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 from ttkbootstrap.widgets import ToolTip
+from . import dialogs as messagebox
 
 from ..core.search_query import (
     AdvancedQuery, MATCH_MODES, PUBLICATION_FILTERS, SEARCH_FIELDS, SearchCondition,

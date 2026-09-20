@@ -39,6 +39,13 @@ def test_zotero_mapping_preserves_authors_and_query_notes():
     assert "A &lt; B" in item["notes"][0]["note"]
 
 
+def test_zotero_missing_type_uses_document_without_inventing_a_journal():
+    item = zotero.build_zotero_item(Paper(title="Legacy item", source="Original source"), "paper-1")
+    assert item["itemType"] == "document"
+    assert "publicationTitle" not in item
+    assert "来源：Original source" in item["notes"][0]["note"]
+
+
 def test_zotero_sends_metadata_then_streams_pdf_to_matching_item(monkeypatch, tmp_path):
     pdf = tmp_path / "论文.pdf"
     pdf.write_bytes(b"%PDF-1.7\nattachment")

@@ -14,6 +14,7 @@ from cnkibug.gui.app import (
     _prepare_output_directory,
 )
 from cnkibug.gui.events import GuiEvent, GuiEventSink
+from cnkibug.gui import dialogs
 from cnkibug.gui.results import ResultsWindow
 from cnkibug.gui.settings import SettingsDialog, _NUMERIC_FIELDS
 from cnkibug.gui.task_form import GuiTaskRequest, TaskForm, _merge_task_keywords, _resolve_save_mode
@@ -243,6 +244,35 @@ def test_results_apply_details_without_resetting_selection_or_pdf():
     assert viewer._papers[0].doi == "10.1234/test"
     assert viewer._papers[0].pdf_path == "saved.pdf"
     assert viewer._checked == {0}
+
+
+@pytest.mark.parametrize("kind, extensions", [("期刊", {"xlsx", "csv", "ris"}), ("年鉴", {"xlsx", "csv"})])
+def test_selected_formats_export_independently_without_overwriting(monkeypatch, tmp_path, kind, extensions):
+    viewer = _results_view()
+    viewer._papers = [Paper(title="Paper", document_type=kind)]
+    viewer._destination = lambda: tmp_path
+    viewer.export_formats = {extension: Mock(get=lambda: True) for extension in ("xlsx", "csv", "ris")}
+    viewer._include_pdf = Mock(get=lambda: False)
+    monkeypatch.setattr("cnkibug.gui.results.datetime", SimpleNamespace(now=lambda: SimpleNamespace(strftime=lambda _: "batch")))
+    warning = Mock()
+    monkeypatch.setattr("cnkibug.gui.results.messagebox.showwarning", warning)
+    (tmp_path / "batch.csv").write_text("existing", encoding="utf-8")
+
+    viewer._export()
+
+    assert (tmp_path / "batch.csv").read_text(encoding="utf-8") == "existing"
+    assert {path.suffix[1:] for path in tmp_path.glob("batch_2.*")} == extensions
+    assert warning.call_count == (kind == "年鉴")
+
+
+def test_ttk_confirmation_keeps_yes_no_cancel_distinct_and_silent(monkeypatch):
+    question = Mock(side_effect=["是", "否", "取消", None])
+    monkeypatch.setattr(dialogs.Messagebox, "show_question", question)
+    assert dialogs.askyesnocancel("Title", "Message") is True
+    assert dialogs.askyesnocancel("Title", "Message") is False
+    assert dialogs.askyesnocancel("Title", "Message") is None
+    assert dialogs.askyesnocancel("Title", "Message") is None
+    assert all(call.kwargs["alert"] is False for call in question.call_args_list)
 
 
 def test_results_close_and_reopen_preserves_selection_and_pdf_associations():

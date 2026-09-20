@@ -12,7 +12,7 @@ from .papers import split_values
 
 
 _ITEM_TYPES = {
-    "": "journalArticle", "journal": "journalArticle", "thesis": "thesis",
+    "journal": "journalArticle", "thesis": "thesis",
     "conference": "conferencePaper", "book": "book", "book_section": "bookSection",
     "newspaper": "newspaperArticle", "patent": "patent", "standard": "report",
     "statute": "statute", "video": "videoRecording",

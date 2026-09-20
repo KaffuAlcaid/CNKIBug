@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog
 
 import ttkbootstrap as ttk
 
 from ..cnki.downloads import validate_webvpn_url
+from . import dialogs as messagebox
 
 class DownloadDialog:
     def __init__(self, parent, wait_seconds: int, webvpn_url: str = "") -> None:
@@ -45,7 +45,7 @@ class DownloadDialog:
 
     def _use_webvpn(self) -> None:
         while True:
-            value = simpledialog.askstring("机构 WebVPN 登录", "学校指定的知网 WebVPN 网址：", initialvalue=self._last_url, parent=self.window)
+            value = messagebox.askstring("机构 WebVPN 登录", "学校指定的知网 WebVPN 网址：", initialvalue=self._last_url, parent=self.window)
             if value is None:
                 self.window.grab_set()
                 return

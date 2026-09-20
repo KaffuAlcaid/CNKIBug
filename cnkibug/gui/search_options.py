@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox
 
 import ttkbootstrap as ttk
 
 from ..core.search_query import LANGUAGES, RESOURCE_TYPES, SORT_MODES, SearchOptions
+from .advanced import _place_dialog
+from . import dialogs as messagebox
 
 
 class SearchOptionsDialog:
@@ -13,6 +14,7 @@ class SearchOptionsDialog:
         self.result = options
         current = options or SearchOptions()
         window = self.window = ttk.Toplevel(parent)
+        window.withdraw()
         window.title("检索设置")
         window.transient(parent)
         window.resizable(False, False)
@@ -39,7 +41,12 @@ class SearchOptionsDialog:
         buttons.pack(fill=tk.X, pady=(18, 0))
         ttk.Button(buttons, text="保存", command=self._save).pack(side=tk.RIGHT)
         ttk.Button(buttons, text="取消", command=window.destroy, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=8)
+        window.bind("<Escape>", lambda _event: window.destroy())
+        window.update_idletasks()
+        _place_dialog(window, parent, window.winfo_reqwidth(), window.winfo_reqheight())
+        window.deiconify()
         window.grab_set()
+        window.focus_set()
         parent.wait_window(window)
 
     def _save(self) -> None:

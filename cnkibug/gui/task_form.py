@@ -5,10 +5,11 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from typing import Any
 
 import ttkbootstrap as ttk
+from . import dialogs as messagebox
 
 from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
 from ..fileio.keyword_input import (
@@ -99,20 +100,22 @@ class TaskForm(ttk.Frame):
         heading = ttk.Frame(keyword_frame)
         heading.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(heading, text="检索项", font=("TkDefaultFont", 11, "bold")).pack(side=tk.LEFT)
-        self._advanced_button = ttk.Button(
-            heading, text="高级检索", command=self._open_advanced, bootstyle="secondary-outline",
-        )
-        self._advanced_button.pack(side=tk.RIGHT, padx=(6, 0))
-        self._import_button = ttk.Button(
-            heading, text="导入 TXT", command=self._import_txt, bootstyle="secondary-outline",
-        )
-        self._import_button.pack(side=tk.RIGHT)
-        self._plan_button = ttk.Menubutton(heading, text="检索方案", bootstyle="secondary-outline")
-        self._plan_button.pack(side=tk.RIGHT, padx=(0, 6))
+        actions = ttk.Frame(heading)
+        actions.pack(side=tk.LEFT, padx=(16, 0))
+        self._plan_button = ttk.Menubutton(actions, text="检索方案", bootstyle="secondary-outline")
+        self._plan_button.pack(side=tk.LEFT)
         plans = tk.Menu(self._plan_button, tearoff=False)
         plans.add_command(label="载入方案", command=self._load_plan)
         plans.add_command(label="保存方案", command=self._save_plan)
         self._plan_button.configure(menu=plans)
+        self._import_button = ttk.Button(
+            actions, text="导入 TXT", command=self._import_txt, bootstyle="secondary-outline",
+        )
+        self._import_button.pack(side=tk.LEFT, padx=(6, 0))
+        self._advanced_button = ttk.Button(
+            actions, text="高级检索", command=self._open_advanced, bootstyle="secondary-outline",
+        )
+        self._advanced_button.pack(side=tk.LEFT, padx=(6, 0))
 
         entry_row = ttk.Frame(keyword_frame)
         entry_row.pack(fill=tk.X, pady=(0, 8))
@@ -179,14 +182,14 @@ class TaskForm(ttk.Frame):
         self._format_var = tk.StringVar(value="excel")
         self._excel_radio = ttk.Radiobutton(
             scope, text="Excel", variable=self._format_var, value="excel",
-            command=self._sync_option_states, bootstyle="secondary-toolbutton",
+            command=self._sync_option_states, bootstyle="primary",
         )
         self._csv_radio = ttk.Radiobutton(
             scope, text="CSV", variable=self._format_var, value="csv",
-            command=self._sync_option_states, bootstyle="secondary-toolbutton",
+            command=self._sync_option_states, bootstyle="primary",
         )
         self._csv_radio.pack(side=tk.RIGHT)
-        self._excel_radio.pack(side=tk.RIGHT, padx=(0, 4))
+        self._excel_radio.pack(side=tk.RIGHT, padx=(0, 16))
         ttk.Label(scope, text="输出格式").pack(side=tk.RIGHT, padx=(0, 8))
 
         ttk.Label(settings_row, text="保存位置").grid(row=1, column=0, sticky=tk.W, padx=(0, 12), pady=(10, 0))

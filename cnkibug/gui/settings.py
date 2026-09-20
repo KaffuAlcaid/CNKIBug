@@ -4,7 +4,6 @@ import tkinter as tk
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from tkinter import messagebox
 from typing import Any
 
 import ttkbootstrap as ttk
@@ -14,6 +13,7 @@ from ..core.version import APP_VERSION
 from .update_dialog import UpdateDialog
 from .updater import SOURCE_LABELS
 from .environment import EnvironmentPanel
+from . import dialogs as messagebox
 from ..fileio.paths import get_real_desktop_path
 
 
@@ -127,7 +127,7 @@ class SettingsDialog:
         theme_row.grid(row=0, column=1, sticky=tk.W)
         for text, value in (("浅色", "litera"), ("暗色", "darkly")):
             ttk.Radiobutton(theme_row, text=text, value=value, variable=self._theme,
-                            width=10, bootstyle="secondary-toolbutton").pack(side=tk.LEFT, padx=(0, 4))
+                            width=10, bootstyle="primary").pack(side=tk.LEFT, padx=(0, 12))
 
         self._numbers: dict[str, tk.StringVar] = {}
         for row, (key, label, divisor) in enumerate(_NUMERIC_FIELDS):

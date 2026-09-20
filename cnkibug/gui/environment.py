@@ -7,10 +7,11 @@ from pathlib import Path
 from queue import Empty, Queue
 from tempfile import TemporaryFile
 from threading import Event, Thread
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
+from . import dialogs as messagebox
 
 from ..app.runtime import save_config
 from ..browser.environment import (
