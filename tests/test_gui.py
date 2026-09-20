@@ -14,6 +14,7 @@ from cnkibug.gui.app import (
     _prepare_output_directory,
 )
 from cnkibug.gui.events import GuiEvent, GuiEventSink
+from cnkibug.gui.results import ResultsWindow
 from cnkibug.gui.settings import SettingsDialog, _NUMERIC_FIELDS
 from cnkibug.gui.task_form import GuiTaskRequest, TaskForm, _merge_task_keywords, _resolve_save_mode
 from cnkibug.gui.task_progress import TaskProgress
@@ -185,6 +186,110 @@ def test_finished_task_updates_existing_results_even_when_display_is_declined(mo
     app._show_results()
     viewer.window.deiconify.assert_called_once()
     viewer.set_papers.assert_called_once()
+
+
+def _results_view():
+    viewer = ResultsWindow.__new__(ResultsWindow)
+    viewer.window = Mock()
+    viewer.busy = False
+    viewer._closing = False
+    viewer._hide_when_done = False
+    viewer._queue = Queue()
+    viewer.cancel = Event()
+    viewer._download_session = Mock(alive=False)
+    viewer._download_session.close.side_effect = viewer.cancel.set
+    viewer._papers = [Paper(title="Paper", pdf_path="saved.pdf")]
+    viewer._checked = {0}
+    viewer._statuses = {}
+    viewer.query = Mock(get=lambda: "query")
+    viewer.table = Mock()
+    viewer.table.selection.return_value = ()
+    viewer._continue_button = Mock()
+    viewer._stop_button = Mock()
+    viewer._open_button = Mock()
+    viewer._operation_status = Mock()
+    viewer._update_summary = Mock()
+    return viewer
+
+
+def test_results_close_and_reopen_preserves_selection_and_pdf_associations():
+    viewer = _results_view()
+    papers = viewer._papers
+    viewer.close()
+    viewer.window.withdraw.assert_called_once_with()
+    viewer.window.destroy.assert_not_called()
+    viewer._download_session.close.assert_not_called()
+
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app._results_window = viewer
+    app._show_results()
+
+    assert app._results_window is viewer
+    assert viewer._papers is papers
+    assert viewer._papers[0].pdf_path == "saved.pdf"
+    assert viewer._checked == {0}
+    assert viewer.query.get() == "query"
+    viewer.window.deiconify.assert_called_once_with()
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_results_download_close_waits_for_completion_before_hiding(monkeypatch, confirmed):
+    viewer = _results_view()
+    viewer.busy = True
+    viewer._download_session.alive = True
+    monkeypatch.setattr("cnkibug.gui.results.messagebox.askyesno", lambda *args, **kwargs: confirmed)
+
+    viewer.close()
+
+    assert viewer.busy
+    viewer.window.withdraw.assert_not_called()
+    viewer.window.destroy.assert_not_called()
+    if not confirmed:
+        viewer._download_session.close.assert_not_called()
+        assert not viewer._hide_when_done
+        return
+    viewer._download_session.close.assert_called_once_with()
+    viewer._queue.put(GuiEvent("paper_download", {"index": 0, "status": "已下载", "path": "latest.pdf"}))
+    viewer._queue.put(GuiEvent("download_finished", {"stopped": True}))
+    viewer._drain()
+
+    assert not viewer.busy and not viewer._closing and not viewer._hide_when_done
+    assert viewer._papers[0].pdf_path == "latest.pdf"
+    assert viewer._checked == {0}
+    viewer.window.withdraw.assert_called_once_with()
+    viewer.window.destroy.assert_not_called()
+
+
+def test_results_download_finishing_during_close_confirmation_hides_immediately(monkeypatch):
+    viewer = _results_view()
+    viewer.busy = True
+
+    def confirm(*args, **kwargs):
+        viewer.busy = False
+        return True
+
+    monkeypatch.setattr("cnkibug.gui.results.messagebox.askyesno", confirm)
+    viewer.close()
+
+    assert not viewer._hide_when_done
+    viewer.window.withdraw.assert_called_once_with()
+    viewer.window.destroy.assert_not_called()
+
+
+def test_results_application_shutdown_overrides_pending_window_hide():
+    viewer = _results_view()
+    viewer.busy = True
+    viewer._download_session.alive = True
+    viewer._hide_when_done = True
+
+    viewer.shutdown()
+
+    assert viewer._closing and not viewer._hide_when_done
+    viewer.window.destroy.assert_not_called()
+    viewer._queue.put(GuiEvent("download_finished", {"stopped": True}))
+    viewer._drain()
+    viewer.window.destroy.assert_called_once_with()
+    viewer.window.withdraw.assert_not_called()
 
 
 def _resume_app(paths):

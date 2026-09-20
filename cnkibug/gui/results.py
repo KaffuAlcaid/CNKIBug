@@ -39,6 +39,7 @@ class ResultsWindow:
         self.prepare_browser = prepare_browser
         self.busy = False
         self._closing = False
+        self._hide_when_done = False
         self._queue: Queue[GuiEvent] = Queue()
         self.cancel = Event()
         self._continue = Event()
@@ -380,7 +381,7 @@ class ResultsWindow:
                 elif event.name == "confirm_requested":
                     answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("知网页面", payload["prompt"], parent=self.window)
                     payload["response_queue"].put(answer)
-                elif event.name == "download_error" and not self._closing:
+                elif event.name == "download_error" and not (self._closing or self._hide_when_done):
                     messagebox.showerror("下载任务结束", payload["error"], parent=self.window)
                 elif event.name == "download_finished":
                     self.busy = False
@@ -392,6 +393,9 @@ class ResultsWindow:
                     if self._closing:
                         self.window.destroy()
                         return
+                    if self._hide_when_done:
+                        self._hide_when_done = False
+                        self.window.withdraw()
         except Empty:
             pass
         self.window.after(100, self._drain)
@@ -408,13 +412,17 @@ class ResultsWindow:
 
     def close(self):
         if self.busy:
-            if messagebox.askyesno("停止下载", "停止下载并关闭论文结果窗口？", parent=self.window):
-                self.shutdown()
-            return
-        self.shutdown()
+            if not messagebox.askyesno("停止下载", "停止下载并关闭论文结果窗口？", parent=self.window):
+                return
+            self._download_session.close()
+            if self.busy:
+                self._hide_when_done = True
+                return
+        self.window.withdraw()
 
     def shutdown(self):
         self._closing = True
+        self._hide_when_done = False
         self._download_session.close()
         self.busy = self._download_session.alive
         if not self.busy:
