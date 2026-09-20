@@ -175,6 +175,9 @@ def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) 
             emit("M3", paper.document_type if thesis else "")
             if paper.document_type:
                 emit("N1", f"文献类型：{paper.document_type}")
+            for query in paper.queries:
+                if query.strip():
+                    emit("N1", f"命中检索项：{query}")
             if include_pdf and paper.pdf_path and Path(paper.pdf_path).is_file():
                 emit("L1", Path(paper.pdf_path).resolve().as_uri())
             for label, value in (("作者单位", paper.institutions), ("基金", paper.funds), ("分类号", paper.classification)):

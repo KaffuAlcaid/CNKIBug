@@ -167,6 +167,27 @@ def test_ris_reports_ambiguous_types_without_replacing_existing_export(tmp_path,
     assert path.read_text(encoding="utf-8") == "previous export"
 
 
+def test_ris_preserves_merged_query_origins_separately_from_paper_keywords(tmp_path):
+    first = Paper(title="论文", doi="10.1234/shared", document_type="期刊", paper_keywords="材料；焊接", queries=["主题：增材制造"])
+    second = replace(first, queries=["作者：张三"])
+    papers = deduplicate_papers([first, second])
+    path = tmp_path / "papers.ris"
+
+    save_papers(path, papers)
+
+    text = path.read_text(encoding="utf-8-sig")
+    assert text.count("TY  - JOUR\n") == 1
+    assert "N1  - 命中检索项：主题：增材制造\n" in text
+    assert "N1  - 命中检索项：作者：张三\n" in text
+    assert [line for line in text.splitlines() if line.startswith("KW  - ")] == ["KW  - 材料", "KW  - 焊接"]
+
+
+def test_ris_omits_empty_query_origins(tmp_path):
+    path = tmp_path / "papers.ris"
+    save_papers(path, [Paper(title="论文", document_type="期刊", queries=["", "  "])])
+    assert "命中检索项" not in path.read_text(encoding="utf-8-sig")
+
+
 def test_result_conversion_does_not_share_checkpoint_dicts():
     metadata = {"doi": "10.1234/example"}
     raw = {"查询": [["标题", "作者", "来源", "2026", "url", metadata]]}
