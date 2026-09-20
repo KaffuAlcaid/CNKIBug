@@ -424,7 +424,7 @@ class CNKIBugApp:
         if self._running:
             return
         if self._downloads_running():
-            messagebox.showinfo("下载正在运行", "请在论文下载结束后开始抓取。", parent=self.root)
+            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后开始抓取。", parent=self.root)
             return
         if not self._ensure_browser_ready():
             return
@@ -622,7 +622,7 @@ class CNKIBugApp:
             self.root, self._current_results, settings=self.settings, paths=self.runtime.paths,
             get_output_dir=lambda: self._task_form.output_dir,
             initial_format="csv" if self._task_form.output_format == "csv" else "xlsx",
-            can_download=lambda: not self._running,
+            can_run=lambda: not self._running,
             prepare_browser=self._ensure_browser_ready,
         )
 
@@ -661,7 +661,7 @@ class CNKIBugApp:
 
     def _on_close(self) -> None:
         if self._downloads_running():
-            if messagebox.askyesno("停止下载并退出", "停止当前论文下载并退出 CNKIBug？", parent=self.root):
+            if messagebox.askyesno("停止处理并退出", "停止当前论文处理并退出 CNKIBug？", parent=self.root):
                 self._close_application()
             return
         if not messagebox.askyesno(
@@ -684,7 +684,7 @@ class CNKIBugApp:
 
     def _close_application(self) -> None:
         viewer = getattr(self, "_results_window", None)
-        if viewer is not None and viewer._download_session.alive:
+        if viewer is not None and viewer.alive:
             viewer.shutdown()
             self.root.after(200, self._exit_after_download)
         else:
@@ -692,7 +692,7 @@ class CNKIBugApp:
 
     def _exit_after_download(self) -> None:
         viewer = getattr(self, "_results_window", None)
-        if viewer is not None and viewer._download_session.alive:
+        if viewer is not None and viewer.alive:
             self.root.after(200, self._exit_after_download)
         else:
             self.root.destroy()

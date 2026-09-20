@@ -10,6 +10,9 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
+from ..core.runtime import RuntimePaths
+from ..browser.runtime import open_browser_context
+from .models import Paper, normalize_doi
 from .guard import (
     VERIFY_CANCELLED,
     VERIFY_PAGE_CLOSED,
@@ -25,6 +28,39 @@ ABSTRACT_INPUT_SELECTOR = "#abstract_text"
 ABSTRACT_VISIBLE_SELECTOR = "#ChDivSummary"
 
 _logger = logging.getLogger("cnkibug.cnki.details")
+
+
+def fetch_selected_details(items: list[tuple[int, Paper]], settings: ScraperSettings,
+                           paths: RuntimePaths, events: EventSink) -> str:
+    if not items or events.cancel_requested():
+        return "没有需要处理的论文"
+    changed = failed = unchanged = 0
+    with open_browser_context(settings, paths, events) as context:
+        fetcher = ArticleDetailFetcher(context, settings, events)
+        for position, (index, paper) in enumerate(items, 1):
+            if events.cancel_requested():
+                break
+            events.emit("paper_operation_progress", message=f"补抓详情 {position}/{len(items)}：{paper.title}")
+            details = fetcher.fetch(paper.detail_url, log_ref=f"selected={position}/{len(items)}")
+            if events.cancel_requested():
+                break
+            if details.failed:
+                failed += 1
+                status = "验证超时" if details.verify_timeout else "浏览器已关闭" if details.page_closed else "详情获取失败"
+                events.emit("paper_details", index=index, updates={}, status=status)
+                if details.verify_timeout or details.page_closed:
+                    break
+                continue
+            values = {**details.metadata, "paper_keywords": "；".join(details.keywords), "abstract": details.abstract}
+            values["doi"] = normalize_doi(values.get("doi", ""))
+            updates = {key: values[key] for key in (
+                "paper_keywords", "abstract", "doi", "institutions", "funds", "classification", "volume", "issue", "pages",
+            ) if values.get(key) and not getattr(paper, key)}
+            changed += bool(updates)
+            unchanged += not bool(updates)
+            events.emit("paper_details", index=index, updates=updates, status="详情已补齐" if updates else "无可补字段")
+    remaining = len(items) - changed - failed - unchanged
+    return f"补抓详情：补齐 {changed} 篇，无可补字段 {unchanged} 篇，失败 {failed} 篇，未处理 {remaining} 篇"
 
 
 @dataclass(frozen=True)

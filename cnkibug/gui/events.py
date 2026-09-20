@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from queue import Queue
+from queue import Empty, Queue
 from threading import Event
 from typing import Any, Iterator
 
@@ -33,7 +33,12 @@ class GuiEventSink(EventSink):
             default=default,
             response_queue=response_queue,
         )
-        return response_queue.get()
+        while not self.cancel_requested():
+            try:
+                return response_queue.get(timeout=0.2)
+            except Empty:
+                pass
+        return False
 
     def cancel_requested(self) -> bool:
         return self._cancel_event.is_set()

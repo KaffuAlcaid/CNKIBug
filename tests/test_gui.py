@@ -133,6 +133,20 @@ def test_gui_output_directory_is_created_and_write_checked(tmp_path):
     assert list(output_dir.iterdir()) == []
 
 
+def test_gui_confirmation_wait_ends_when_operation_is_cancelled():
+    queue = Queue()
+    cancelled = Event()
+    sink = GuiEventSink(queue, cancelled)
+    answers = []
+    worker = Thread(target=lambda: answers.append(sink.confirm("Continue?")))
+    worker.start()
+    queue.get(timeout=1)
+    cancelled.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert answers == [False]
+
+
 def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tmp_path):
     app = CNKIBugApp.__new__(CNKIBugApp)
     app._running = False
@@ -194,6 +208,7 @@ def _results_view():
     viewer.busy = False
     viewer._closing = False
     viewer._hide_when_done = False
+    viewer._worker = None
     viewer._queue = Queue()
     viewer.cancel = Event()
     viewer._download_session = Mock(alive=False)
@@ -201,15 +216,30 @@ def _results_view():
     viewer._papers = [Paper(title="Paper", pdf_path="saved.pdf")]
     viewer._checked = {0}
     viewer._statuses = {}
+    viewer._detail_statuses = {}
     viewer.query = Mock(get=lambda: "query")
     viewer.table = Mock()
     viewer.table.selection.return_value = ()
     viewer._continue_button = Mock()
     viewer._stop_button = Mock()
     viewer._open_button = Mock()
+    viewer._paper_actions = Mock()
     viewer._operation_status = Mock()
     viewer._update_summary = Mock()
     return viewer
+
+
+def test_results_apply_details_without_resetting_selection_or_pdf():
+    viewer = _results_view()
+    viewer._show_paper = Mock()
+    viewer._queue.put(GuiEvent("paper_details", {
+        "index": 0, "updates": {"abstract": "Collected abstract", "doi": "10.1234/test"}, "status": "详情已补齐",
+    }))
+    viewer._drain()
+    assert viewer._papers[0].abstract == "Collected abstract"
+    assert viewer._papers[0].doi == "10.1234/test"
+    assert viewer._papers[0].pdf_path == "saved.pdf"
+    assert viewer._checked == {0}
 
 
 def test_results_close_and_reopen_preserves_selection_and_pdf_associations():

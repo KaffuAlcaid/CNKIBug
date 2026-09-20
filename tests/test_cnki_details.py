@@ -1,4 +1,5 @@
 from dataclasses import replace
+from contextlib import nullcontext
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -9,6 +10,8 @@ from playwright.sync_api import sync_playwright
 from cnkibug.app.runtime import DEFAULT_CONFIG
 from cnkibug.cnki.details import ArticleDetailFetcher
 from cnkibug.cnki.details import ArticleDetails
+from cnkibug.cnki import details as details_module
+from cnkibug.cnki.models import Paper
 from cnkibug.cnki.guard import VERIFY_NONE
 from cnkibug.cnki.pages import _append_page_details
 from cnkibug.cnki.results import PageParseResult
@@ -110,6 +113,31 @@ class _DetailFetcher:
 
     def fetch(self, url, *, log_ref):
         return next(self.results)
+
+
+def test_selected_details_only_fill_missing_fields(monkeypatch):
+    events = _RecordingEvents()
+    paper = Paper(title="Existing", abstract="Keep this", doi="10.1234/original", detail_url="https://kns.cnki.net/paper")
+    monkeypatch.setattr(details_module, "open_browser_context", lambda *args: nullcontext(object()))
+    monkeypatch.setattr(details_module, "ArticleDetailFetcher", lambda *args: _DetailFetcher([
+        ArticleDetails(["材料"], "Other abstract", metadata={"doi": "10.1234/other", "volume": "12"}),
+    ]))
+    message = details_module.fetch_selected_details([(3, paper)], _settings(), object(), events)
+    payload = next(payload for name, payload in events.items if name == "paper_details")
+    assert payload["index"] == 3
+    assert payload["updates"] == {"paper_keywords": "材料", "volume": "12"}
+    assert paper.paper_keywords == "" and paper.abstract == "Keep this"
+    assert "补齐 1 篇" in message
+
+
+def test_selected_details_stop_after_verification_timeout(monkeypatch):
+    events = _RecordingEvents()
+    monkeypatch.setattr(details_module, "open_browser_context", lambda *args: nullcontext(object()))
+    monkeypatch.setattr(details_module, "ArticleDetailFetcher", lambda *args: _DetailFetcher([
+        ArticleDetails([], "", failed=True, verify_timeout=True),
+    ]))
+    message = details_module.fetch_selected_details([(0, Paper()), (1, Paper())], _settings(), object(), events)
+    assert "失败 1 篇，未处理 1 篇" in message
 
 
 def test_page_enrichment_preserves_record_order_and_raw_keywords():

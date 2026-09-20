@@ -1,19 +1,39 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 from playwright.sync_api import Error as PlaywrightError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
-from .cache import discard_cookie_state, prepare_cookie_state
+from .cache import discard_cookie_state, prepare_cookie_state, save_cookie_state
 from .environment import browser_candidates, browser_launch_options
 
 
 _logger = logging.getLogger("cnkibug.browser_runtime")
+
+
+@contextmanager
+def open_browser_context(settings: ScraperSettings, paths: RuntimePaths, events: EventSink = NULL_EVENTS) -> Iterator[Any]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = launch_browser(playwright, events).browser
+        try:
+            context = create_browser_context(browser, settings, paths)
+            try:
+                yield context
+            finally:
+                try:
+                    save_cookie_state(context, settings.session_cache_enabled, paths)
+                finally:
+                    context.close()
+        finally:
+            browser.close()
 
 
 @dataclass(frozen=True)

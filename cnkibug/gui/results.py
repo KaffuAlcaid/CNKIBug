@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import copy
+import logging
 import tkinter as tk
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Event
+from threading import Event, Thread
 from tkinter import filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 
 from ..cnki.downloads import DownloadSession
+from ..cnki.details import fetch_selected_details
 from ..cnki.models import Paper, deduplicate_papers
 from ..fileio.papers import read_papers, save_papers, split_values
 from ..fileio.paths import get_real_desktop_path
@@ -22,7 +24,7 @@ from .download_dialog import DownloadDialog
 
 class ResultsWindow:
     def __init__(self, parent, papers: list[Paper], *, settings, paths, output_dir: Path | None = None,
-                 get_output_dir=None, initial_format="xlsx", can_download=lambda: True,
+                 get_output_dir=None, initial_format="xlsx", can_run=lambda: True,
                  prepare_browser=lambda: True):
         self.window = ttk.Toplevel(parent)
         self.window.title("CNKIBug - 论文结果")
@@ -35,11 +37,12 @@ class ResultsWindow:
         self.output_dir = output_dir
         self.get_output_dir = get_output_dir or (lambda: self.output_dir or Path(get_real_desktop_path()))
         self._initial_format = initial_format
-        self.can_download = can_download
+        self.can_run = can_run
         self.prepare_browser = prepare_browser
         self.busy = False
         self._closing = False
         self._hide_when_done = False
+        self._worker: Thread | None = None
         self._queue: Queue[GuiEvent] = Queue()
         self.cancel = Event()
         self._continue = Event()
@@ -48,6 +51,7 @@ class ResultsWindow:
         self._webvpn_url = ""
         self._checked: set[int] = set()
         self._statuses: dict[int, str] = {}
+        self._detail_statuses: dict[int, str] = {}
         self._sort_key = "publication_date"
         self._descending = True
         self._papers: list[Paper] = []
@@ -92,6 +96,11 @@ class ResultsWindow:
         self._selection_button.configure(menu=selection_menu)
         self._download_button = ttk.Button(self._action_bar, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
         self._download_button.pack(side=tk.LEFT, padx=(8, 0))
+        self._paper_actions = ttk.Menubutton(self._action_bar, text="论文操作", bootstyle="secondary-outline")
+        self._paper_actions.pack(side=tk.LEFT, padx=(8, 0))
+        self._paper_menu = tk.Menu(self._paper_actions, tearoff=False)
+        self._paper_menu.add_command(label="补抓所选详情", command=self._fetch_details)
+        self._paper_actions.configure(menu=self._paper_menu)
         self._export_button = ttk.Button(self._action_bar, text="导出所选", command=self._export, bootstyle="primary")
         self._export_button.pack(side=tk.RIGHT)
         self._include_pdf = tk.BooleanVar(self.window, value=False)
@@ -122,7 +131,7 @@ class ResultsWindow:
         self.table = ttk.Treeview(listing, columns=columns, show="headings", selectmode="browse", height=10)
         self.window.style.configure("Results.Treeview", rowheight=30)
         self.table.configure(style="Results.Treeview")
-        for key, label, size in (("checked", "勾选", 46), ("title", "论文标题", 470), ("authors", "作者", 130), ("source", "来源", 170), ("publication_date", "发表日期", 110), ("status", "下载状态", 120)):
+        for key, label, size in (("checked", "勾选", 46), ("title", "论文标题", 470), ("authors", "作者", 130), ("source", "来源", 170), ("publication_date", "发表日期", 110), ("status", "状态", 120)):
             anchor = tk.CENTER if key == "checked" else tk.W
             self.table.heading(key, text=label, anchor=anchor, command=(lambda name=key: self._sort(name)))
             self.table.column(key, width=size, minwidth=40 if key == "checked" else 90, stretch=key == "title", anchor=anchor)
@@ -190,6 +199,7 @@ class ResultsWindow:
         self._papers = deduplicate_papers(copy.deepcopy(papers))
         self._checked.clear()
         self._statuses.clear()
+        self._detail_statuses.clear()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
         self.search.set("")
@@ -201,7 +211,8 @@ class ResultsWindow:
         paper = self._papers[index]
         authors = split_values(paper.authors)
         display_authors = "、".join(authors[:2]) + (" 等" if len(authors) > 2 else "")
-        return ("☑" if index in self._checked else "☐", paper.title, display_authors, paper.source, paper.publication_date[:10], self._statuses.get(index, "已下载" if paper.pdf_path else ""))
+        status = self._detail_statuses.get(index) or self._statuses.get(index, "已下载" if paper.pdf_path else "")
+        return ("☑" if index in self._checked else "☐", paper.title, display_authors, paper.source, paper.publication_date[:10], status)
 
     def _populate(self):
         selected = self.table.selection()
@@ -265,6 +276,7 @@ class ResultsWindow:
         self._summary.set(f"显示 {len(self._visible)} / {len(self._papers)} 篇，已勾选 {len(self._checked)} 篇")
         self._export_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._download_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
+        self._paper_actions.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
 
     def _current(self) -> Paper | None:
         selected = self.table.selection()
@@ -288,6 +300,9 @@ class ResultsWindow:
             status = self._statuses.get(int(selected[0]), "") if selected else ""
             if status:
                 content["info"] += f"\n\n下载状态：{status}"
+            detail_status = self._detail_statuses.get(int(selected[0]), "") if selected else ""
+            if detail_status:
+                content["info"] += f"\n\n详情状态：{detail_status}"
         for name, text in self._texts.items():
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
@@ -330,10 +345,53 @@ class ResultsWindow:
         except Exception as error:
             messagebox.showerror("导出失败", str(error), parent=self.window)
 
+    @property
+    def alive(self) -> bool:
+        return self._download_session.alive or (self._worker is not None and self._worker.is_alive())
+
+    def _start_operation(self, operation, *, label: str, needs_browser: bool = False):
+        if self.busy or not self._checked:
+            return
+        if not self.can_run():
+            messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后处理论文。", parent=self.window)
+            return
+        if needs_browser and not self.prepare_browser():
+            return
+        items = [(index, copy.deepcopy(self._papers[index])) for index in sorted(self._checked)]
+        self.cancel.clear()
+        self.busy = True
+        self._operation_status.set(label)
+        self._open_button.configure(state=tk.DISABLED)
+        self._stop_button.configure(text="停止处理", state=tk.NORMAL)
+        self._stop_button.pack(side=tk.RIGHT)
+        self._update_summary()
+
+        def worker():
+            message = label
+            try:
+                message = operation(items)
+            except Exception as error:
+                logging.getLogger("cnkibug.gui.results").exception("论文操作失败")
+                message = str(error)
+                if not self.cancel.is_set():
+                    self._events.emit("paper_task_error", error=message)
+            finally:
+                self._worker = None
+                self._events.emit("paper_task_finished", message=message, stopped=self.cancel.is_set())
+
+        self._worker = Thread(target=worker, name="cnkibug-paper-operation", daemon=True)
+        self._worker.start()
+
+    def _fetch_details(self):
+        self._start_operation(
+            lambda items: fetch_selected_details(items, self.settings, self.paths, self._events),
+            label="正在补抓所选论文详情", needs_browser=True,
+        )
+
     def _download(self):
         if self.busy or not self._checked:
             return
-        if not self.can_download():
+        if not self.can_run():
             messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后下载论文。", parent=self.window)
             return
         if not self.prepare_browser():
@@ -350,7 +408,7 @@ class ResultsWindow:
             return
         items = [(i, copy.deepcopy(self._papers[i])) for i in sorted(self._checked)]
         self.busy = True
-        self._stop_button.configure(state=tk.NORMAL)
+        self._stop_button.configure(text="停止下载", state=tk.NORMAL)
         self._stop_button.pack(side=tk.RIGHT)
         self._open_button.configure(state=tk.DISABLED)
         self._update_summary()
@@ -362,8 +420,28 @@ class ResultsWindow:
             while True:
                 event = self._queue.get_nowait()
                 payload = event.payload
-                if event.name == "paper_download":
+                if event.name == "paper_details":
                     index = payload["index"]
+                    for key, value in payload["updates"].items():
+                        setattr(self._papers[index], key, value)
+                    self._detail_statuses[index] = payload["status"]
+                    if self.table.exists(str(index)):
+                        self.table.item(str(index), values=self._values(index))
+                    self._show_paper()
+                elif event.name in {"paper_operation_progress", "activity_started"}:
+                    self._operation_status.set(payload["message"])
+                elif event.name == "verify_required":
+                    answers = payload.get("response_queue")
+                    answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel(
+                        "需要手动验证", "请在浏览器中完成安全验证，然后继续。", parent=self.window,
+                    )
+                    if answers is not None:
+                        answers.put(answer)
+                    if not answer:
+                        self.cancel.set()
+                elif event.name == "paper_download":
+                    index = payload["index"]
+                    self._detail_statuses.pop(index, None)
                     self._statuses[index] = payload["status"]
                     if payload["path"]:
                         self._papers[index].pdf_path = payload["path"]
@@ -391,15 +469,16 @@ class ResultsWindow:
                 elif event.name == "confirm_requested":
                     answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("知网页面", payload["prompt"], parent=self.window)
                     payload["response_queue"].put(answer)
-                elif event.name == "download_error" and not (self._closing or self._hide_when_done):
-                    messagebox.showerror("下载任务结束", payload["error"], parent=self.window)
-                elif event.name == "download_finished":
+                elif event.name in {"download_error", "paper_task_error"} and not (self._closing or self._hide_when_done):
+                    messagebox.showerror("论文处理结束", payload["error"], parent=self.window)
+                elif event.name in {"download_finished", "paper_task_finished"}:
                     self.busy = False
                     self._continue_button.pack_forget()
                     self._stop_button.configure(state=tk.DISABLED)
                     self._stop_button.pack_forget()
                     self._open_button.configure(state=tk.NORMAL)
-                    self._operation_status.set("下载已停止" if payload.get("stopped") else "本批下载结束")
+                    message = payload.get("message", "下载已停止" if payload.get("stopped") else "本批下载结束")
+                    self._operation_status.set(f"已停止。{message}" if event.name == "paper_task_finished" and payload.get("stopped") else message)
                     self._update_summary()
                     if self._closing:
                         self.window.destroy()
@@ -423,7 +502,7 @@ class ResultsWindow:
 
     def close(self):
         if self.busy:
-            if not messagebox.askyesno("停止下载", "停止下载并关闭论文结果窗口？", parent=self.window):
+            if not messagebox.askyesno("停止处理", "停止当前处理并关闭论文结果窗口？", parent=self.window):
                 return
             self._download_session.close()
             if self.busy:
@@ -435,6 +514,6 @@ class ResultsWindow:
         self._closing = True
         self._hide_when_done = False
         self._download_session.close()
-        self.busy = self._download_session.alive
+        self.busy = self.alive
         if not self.busy:
             self.window.destroy()
