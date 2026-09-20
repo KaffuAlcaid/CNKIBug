@@ -65,14 +65,32 @@ class SettingsDialog:
             side=tk.RIGHT, padx=8,
         )
 
-        notebook = ttk.Notebook(outer)
-        notebook.pack(fill=tk.BOTH, expand=True)
-        tabs = {}
+        body = ttk.Frame(outer)
+        body.pack(fill=tk.BOTH, expand=True)
+        sidebar = ttk.Frame(body)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 18))
+        ttk.Label(sidebar, text="设置", font=("TkDefaultFont", 14, "bold")).pack(anchor=tk.W, pady=(0, 16))
+        self.window.style.configure("Settings.Treeview", rowheight=36)
+        self._navigation = ttk.Treeview(sidebar, show="tree", selectmode="browse", height=6, style="Settings.Treeview")
+        self._navigation.column("#0", width=116, minwidth=116, stretch=False)
+        self._navigation.pack(fill=tk.Y, expand=True)
+        ttk.Separator(body, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
+        content = ttk.Frame(body)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._page_title = tk.StringVar(master=self.window)
+        ttk.Label(content, textvariable=self._page_title, font=("TkDefaultFont", 12, "bold")).pack(anchor=tk.W, pady=(4, 18))
+        pages = ttk.Frame(content)
+        pages.pack(fill=tk.BOTH, expand=True)
+        pages.columnconfigure(0, weight=1)
+        pages.rowconfigure(0, weight=1)
+        tabs = self._tabs = {}
         for name in ("外观", "抓取", "会话", "日志", "运行环境", "更新"):
-            tab = ttk.Frame(notebook, padding=18)
-            tab.columnconfigure(1, weight=1)
-            notebook.add(tab, text=name)
+            tab = ttk.Frame(pages)
+            tab.columnconfigure(0, weight=1)
+            tab.grid(row=0, column=0, sticky=tk.NSEW)
+            self._navigation.insert("", tk.END, iid=name, text=name)
             tabs[name] = tab
+        self._navigation.bind("<<TreeviewSelect>>", self._select_page)
 
         self.environment = EnvironmentPanel(
             tabs["运行环境"], config_path.parent,
@@ -82,8 +100,9 @@ class SettingsDialog:
         )
         self.environment.grid(row=0, column=0, columnspan=2, sticky=tk.NSEW)
         tabs["运行环境"].rowconfigure(0, weight=1)
-        if selected_tab in tabs:
-            notebook.select(tabs[selected_tab])
+        page_name = selected_tab if selected_tab in tabs else "外观"
+        self._navigation.selection_set(page_name)
+        self._show_page(page_name)
 
         ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}").grid(
             row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 16),
@@ -108,7 +127,7 @@ class SettingsDialog:
         theme_row.grid(row=0, column=1, sticky=tk.W)
         for text, value in (("浅色", "litera"), ("暗色", "darkly")):
             ttk.Radiobutton(theme_row, text=text, value=value, variable=self._theme,
-                            bootstyle="outline-toolbutton").pack(side=tk.LEFT, padx=(0, 8))
+                            width=10, bootstyle="secondary-toolbutton").pack(side=tk.LEFT, padx=(0, 4))
 
         self._numbers: dict[str, tk.StringVar] = {}
         for row, (key, label, divisor) in enumerate(_NUMERIC_FIELDS):
@@ -120,7 +139,7 @@ class SettingsDialog:
             ttk.Label(tab, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 24), pady=8)
             spinbox = ttk.Spinbox(tab, textvariable=variable, from_=0 if key == "download_auth_wait_sec" else 1 / divisor, to=2147483647 / divisor,
                                  increment=1, width=12)
-            spinbox.grid(row=row, column=1, sticky=tk.EW, pady=8)
+            spinbox.grid(row=row, column=1, sticky=tk.E, pady=8)
             if key == "session_cache_ttl_hours":
                 self._cache_ttl = spinbox
 
@@ -147,16 +166,25 @@ class SettingsDialog:
 
         self._populate(config)
         self.window.update_idletasks()
-        width = min(max(640, self.window.winfo_reqwidth()), parent.winfo_screenwidth() - 80)
-        height = min(max(460, self.window.winfo_reqheight()), parent.winfo_screenheight() - 80)
+        width = min(max(800, self.window.winfo_reqwidth()), parent.winfo_screenwidth() - 80)
+        height = min(max(540, self.window.winfo_reqheight()), parent.winfo_screenheight() - 80)
         self.window.geometry(f"{width}x{height}")
-        self.window.minsize(width, height)
+        self.window.minsize(min(720, width), min(460, height))
         self.window.position_center()
         self.window.deiconify()
         self.window.grab_set()
 
     def show(self) -> None:
         self.window.wait_window()
+
+    def _select_page(self, _event=None) -> None:
+        selection = self._navigation.selection()
+        if selection:
+            self._show_page(selection[0])
+
+    def _show_page(self, name: str) -> None:
+        self._tabs[name].tkraise()
+        self._page_title.set(name)
 
     def _close(self) -> None:
         if self.environment.busy:

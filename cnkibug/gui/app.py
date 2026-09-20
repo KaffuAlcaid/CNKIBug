@@ -49,8 +49,8 @@ from .task_progress import TaskProgress
 
 _logger = logging.getLogger("cnkibug.gui")
 
-_PREFERRED_WINDOW_WIDTH = 900
-_PREFERRED_WINDOW_HEIGHT = 1219
+_PREFERRED_WINDOW_WIDTH = 1040
+_PREFERRED_WINDOW_HEIGHT = 780
 _WINDOW_MARGIN = 80
 _EVENTS_PER_DRAIN = 100
 
@@ -91,7 +91,7 @@ class CNKIBugApp:
             self.root.winfo_screenheight(),
         )
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(min(760, width), min(700, height))
+        self.root.minsize(min(820, width), min(620, height))
         self._icon_image: tk.PhotoImage | None = None
         self._set_window_icon(icon_path)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -216,6 +216,7 @@ class CNKIBugApp:
         style = self.root.style
         if style.theme_use() != config["gui_theme"]:
             style.theme_use(config["gui_theme"])
+        style.configure("TButton", padding=(10, 5))
         self._task_form.apply_theme(style)
         self._task_progress.apply_theme(style)
         viewer = getattr(self, "_results_window", None)
@@ -264,12 +265,12 @@ class CNKIBugApp:
             messagebox.showinfo("清理完成", message, parent=self.root)
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=18)
+        container = ttk.Frame(self.root, padding=16)
         container.pack(fill=tk.BOTH, expand=True)
 
         header = ttk.Frame(container)
         header.pack(fill=tk.X, pady=(0, 12))
-        ttk.Label(header, text="CNKIBug", font=("TkDefaultFont", 20, "bold")).pack(
+        ttk.Label(header, text="CNKIBug", font=("TkDefaultFont", 16, "bold")).pack(
             side=tk.LEFT,
             anchor=tk.NW,
         )
@@ -277,31 +278,20 @@ class CNKIBugApp:
         header_actions.pack(side=tk.RIGHT)
         toolbar = ttk.Frame(header_actions)
         toolbar.pack(fill=tk.X)
-        ttk.Button(
-            toolbar,
-            text="信息",
-            command=self._show_info,
-            bootstyle="secondary-outline",
-        ).pack(side=tk.RIGHT)
+        self._maintenance_actions = ttk.Menubutton(toolbar, text="工具", bootstyle="secondary-outline")
+        self._maintenance_actions.pack(side=tk.RIGHT)
+        tools = tk.Menu(self._maintenance_actions, tearoff=False)
+        tools.add_command(label="运行环境", command=lambda: self._open_settings(selected_tab="运行环境"))
+        tools.add_command(label="打开日志文件夹", command=self._open_log_directory)
+        tools.add_command(label="清理日志与报告", command=self._cleanup_logs_and_reports)
+        tools.add_separator()
+        tools.add_command(label="关于 CNKIBug", command=self._show_info)
+        self._maintenance_actions.configure(menu=tools)
         self._settings_button = ttk.Button(
             toolbar, text="设置", command=self._open_settings, bootstyle="secondary-outline",
         )
         self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="primary").pack(side=tk.RIGHT, padx=(0, 8))
-        self._maintenance_actions = ttk.Frame(header_actions)
-        self._maintenance_actions.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(
-            self._maintenance_actions,
-            text="打开日志文件夹",
-            command=self._open_log_directory,
-            bootstyle="secondary-outline",
-        ).pack(fill=tk.X)
-        ttk.Button(
-            self._maintenance_actions,
-            text="清理日志与报告",
-            command=self._cleanup_logs_and_reports,
-            bootstyle="danger-outline",
-        ).pack(fill=tk.X, pady=(6, 0))
 
         self._task_form = TaskForm(
             container,
@@ -525,10 +515,7 @@ class CNKIBugApp:
         self._running = running
         self._task_form.set_running(running)
         self._task_progress.set_running(running)
-        if running:
-            self._maintenance_actions.pack_forget()
-        else:
-            self._maintenance_actions.pack(fill=tk.X, pady=(6, 0))
+        self._maintenance_actions.configure(state=tk.DISABLED if running else tk.NORMAL)
 
     # Tk 控件只能在主线程修改，因此定时排空工作线程事件队列。
     def _drain_events(self) -> None:

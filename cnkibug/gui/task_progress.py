@@ -27,7 +27,7 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-class TaskProgress(ttk.Labelframe):
+class TaskProgress(ttk.Frame):
     def __init__(
         self,
         parent: tk.Misc,
@@ -35,7 +35,7 @@ class TaskProgress(ttk.Labelframe):
         on_stop: Callable[[], None],
         on_new_task: Callable[[], None],
     ) -> None:
-        super().__init__(parent, text="任务状态", padding=10)
+        super().__init__(parent, padding=(0, 8))
         self._task_started_at: float | None = None
         self._actual_seconds: float | None = None
         self._active_elapsed = 0.0
@@ -60,7 +60,7 @@ class TaskProgress(ttk.Labelframe):
 
         progress_frame = self
         self._status_var = tk.StringVar(value="等待设置任务")
-        ttk.Label(progress_frame, textvariable=self._status_var, font=("TkDefaultFont", 11, "bold")).pack(anchor=tk.W)
+        ttk.Label(progress_frame, textvariable=self._status_var, font=("TkDefaultFont", 13, "bold")).pack(anchor=tk.W, pady=(0, 8))
         self._progress_var = tk.IntVar(value=0)
         progress_row = ttk.Frame(progress_frame)
         progress_row.pack(fill=tk.X, pady=(8, 2))
@@ -69,7 +69,7 @@ class TaskProgress(ttk.Labelframe):
             progress_row,
             variable=self._progress_var,
             maximum=100,
-            bootstyle="info-striped",
+            bootstyle="primary",
         )
         self._progress.grid(row=0, column=0, sticky="ew")
         self._progress_percent_var = tk.StringVar(value="0%")
@@ -94,12 +94,22 @@ class TaskProgress(ttk.Labelframe):
             wraplength=340,
         ).grid(row=0, column=1, sticky=tk.E)
         self._detail_var = tk.StringVar(value="尚未开始")
-        ttk.Label(progress_frame, textvariable=self._detail_var, bootstyle="secondary").pack(anchor=tk.W, pady=(2, 6))
-
-        self._log = ScrolledText(progress_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
+        detail_label = ttk.Label(progress_frame, textvariable=self._detail_var, wraplength=900)
+        detail_label.pack(fill=tk.X, pady=(8, 10))
+        self.bind("<Configure>", lambda event: detail_label.configure(wraplength=max(200, event.width - 12)))
+        self._log_visible = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            progress_frame, text="运行记录", variable=self._log_visible, command=self._toggle_log,
+        ).pack(anchor=tk.W, pady=(0, 8))
+        self._log_frame = ttk.Frame(progress_frame)
+        self._log_frame.pack(fill=tk.BOTH, expand=True)
+        self._log = ScrolledText(
+            self._log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
+            relief=tk.FLAT, borderwidth=0, padx=10, pady=8,
+        )
         self._log.pack(fill=tk.BOTH, expand=True)
 
-        stop_row = ttk.Frame(progress_frame)
+        stop_row = self._stop_row = ttk.Frame(progress_frame)
         stop_row.pack(fill=tk.X, pady=(8, 0))
         self._new_task_button = ttk.Button(
             stop_row,
@@ -122,6 +132,12 @@ class TaskProgress(ttk.Labelframe):
     def completed(self) -> bool:
         return self._progress_mode == "completed"
 
+    def _toggle_log(self) -> None:
+        if self._log_visible.get():
+            self._log_frame.pack(fill=tk.BOTH, expand=True, before=self._stop_row)
+        else:
+            self._log_frame.pack_forget()
+
     def apply_theme(self, style: ttk.Style) -> None:
         colors = style.colors
         self._log.configure(
@@ -138,6 +154,10 @@ class TaskProgress(ttk.Labelframe):
 
     def set_running(self, running: bool) -> None:
         self._stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
+        if running:
+            self._stop_button.pack(side=tk.RIGHT)
+        else:
+            self._stop_button.pack_forget()
 
     def disable_stop(self) -> None:
         self._stop_button.configure(state=tk.DISABLED)

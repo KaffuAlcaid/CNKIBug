@@ -64,48 +64,53 @@ class ResultsWindow:
         footer = ttk.Frame(body)
         footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         toolbar = ttk.Frame(body)
-        toolbar.pack(fill=tk.X, pady=(0, 8))
-        self._open_button = ttk.Button(toolbar, text="打开文件", command=self.open_file, bootstyle="secondary")
-        self._open_button.pack(side=tk.LEFT, padx=(0, 8))
+        toolbar.pack(fill=tk.X, pady=(0, 10))
+        toolbar.columnconfigure(2, weight=1)
+        self._open_button = ttk.Button(toolbar, text="打开文件", command=self.open_file, bootstyle="secondary-outline")
+        self._open_button.grid(row=0, column=0, padx=(0, 12))
+        ttk.Label(toolbar, text="标题 / 作者").grid(row=0, column=1, padx=(0, 6))
         self.search = tk.StringVar(self.window)
-        ttk.Label(toolbar, text="标题 / 作者").pack(side=tk.LEFT, padx=(0, 6))
-        search = ttk.Entry(toolbar, textvariable=self.search)
-        search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        search = ttk.Entry(toolbar, textvariable=self.search, width=18)
+        search.grid(row=0, column=2, sticky="ew")
         self.search.trace_add("write", lambda *_: self._populate())
-        self._download_button = ttk.Button(toolbar, text="下载 PDF", command=self._download)
-        self._download_button.pack(side=tk.LEFT)
-        self._continue_button = ttk.Button(toolbar, text="立即继续", command=self._continue.set, bootstyle="secondary")
-        self._stop_button = ttk.Button(toolbar, text="停止下载", command=self.cancel.set, state=tk.DISABLED, bootstyle="danger-outline")
-        self._stop_button.pack(side=tk.LEFT, padx=(8, 0))
-
-        export_row = ttk.Frame(body)
-        export_row.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(export_row, text="导出类型").pack(side=tk.LEFT, padx=(0, 10))
-        self.export_format = tk.StringVar(self.window, value=self._initial_format)
-        for label, value in (("Excel (.xlsx)", "xlsx"), ("CSV (.csv)", "csv"), ("Zotero (.ris)", "ris")):
-            ttk.Radiobutton(export_row, text=label, value=value, variable=self.export_format,
-                            command=self._sync_export_type).pack(side=tk.LEFT, padx=(0, 14))
-        self._include_pdf = tk.BooleanVar(self.window, value=False)
-        self._pdf_export_check = ttk.Checkbutton(export_row, text="包含已下载附件", variable=self._include_pdf)
-        self._pdf_export_check.pack(side=tk.LEFT, padx=(0, 10))
-        self._export_button = ttk.Button(export_row, text="导出所选", command=self._export, bootstyle="secondary")
-        self._export_button.pack(side=tk.RIGHT)
-        self._sync_export_type()
-
-        filters = ttk.Frame(body)
-        filters.pack(fill=tk.X, pady=(0, 8))
         self.query = tk.StringVar(self.window, value="全部检索项")
-        self._query_box = ttk.Combobox(filters, textvariable=self.query, state="readonly", width=24)
-        self._query_box.pack(side=tk.LEFT)
+        self._query_box = ttk.Combobox(toolbar, textvariable=self.query, state="readonly", width=18)
+        self._query_box.grid(row=0, column=3, padx=(8, 0))
         self._query_box.bind("<<ComboboxSelected>>", lambda _: self._populate())
         self.kind = tk.StringVar(self.window, value="全部类型")
-        self._kind_box = ttk.Combobox(filters, textvariable=self.kind, state="readonly", width=12)
-        self._kind_box.pack(side=tk.LEFT, padx=8)
+        self._kind_box = ttk.Combobox(toolbar, textvariable=self.kind, state="readonly", width=10)
+        self._kind_box.grid(row=0, column=4, padx=(8, 0))
         self._kind_box.bind("<<ComboboxSelected>>", lambda _: self._populate())
-        ttk.Button(filters, text="全选筛选结果", command=self._select_visible, bootstyle="secondary").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(filters, text="清空勾选", command=self._clear_checked, bootstyle="secondary").pack(side=tk.LEFT)
+
+        self._action_bar = ttk.Frame(body)
+        self._action_bar.pack(fill=tk.X, pady=(0, 10))
+        self._selection_button = ttk.Menubutton(self._action_bar, text="选择", bootstyle="secondary-outline")
+        self._selection_button.pack(side=tk.LEFT)
+        selection_menu = tk.Menu(self._selection_button, tearoff=False)
+        selection_menu.add_command(label="全选筛选结果", command=self._select_visible)
+        selection_menu.add_command(label="清空勾选", command=self._clear_checked)
+        self._selection_button.configure(menu=selection_menu)
+        self._download_button = ttk.Button(self._action_bar, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
+        self._download_button.pack(side=tk.LEFT, padx=(8, 0))
+        self._export_button = ttk.Button(self._action_bar, text="导出所选", command=self._export, bootstyle="primary")
+        self._export_button.pack(side=tk.RIGHT)
+        self._include_pdf = tk.BooleanVar(self.window, value=False)
+        self._pdf_export_check = ttk.Checkbutton(self._action_bar, text="附带 PDF", variable=self._include_pdf)
+        self.export_format = tk.StringVar(self.window, value=self._initial_format)
+        formats = ttk.Frame(self._action_bar)
+        formats.pack(side=tk.RIGHT, padx=10)
+        for label, value in (("Excel", "xlsx"), ("CSV", "csv"), ("Zotero", "ris")):
+            ttk.Radiobutton(
+                formats, text=label, value=value, variable=self.export_format,
+                command=self._sync_export_type, bootstyle="secondary-toolbutton",
+            ).pack(side=tk.LEFT, padx=(0, 3))
+        self._sync_export_type()
+
+        self._operation_bar = ttk.Frame(footer)
+        self._operation_bar.pack(fill=tk.X)
+        self._continue_button = ttk.Button(self._operation_bar, text="立即继续", command=self._continue.set, bootstyle="secondary-outline")
+        self._stop_button = ttk.Button(self._operation_bar, text="停止下载", command=self.cancel.set, state=tk.DISABLED, bootstyle="danger-outline")
         self._show_detail = tk.BooleanVar(self.window, value=True)
-        ttk.Checkbutton(filters, text="显示详情", variable=self._show_detail, command=self._toggle_details).pack(side=tk.RIGHT)
 
         self._panes = ttk.Panedwindow(body, orient=tk.VERTICAL)
         self._panes.pack(fill=tk.BOTH, expand=True)
@@ -152,6 +157,7 @@ class ResultsWindow:
         bottom.pack(fill=tk.X)
         self._summary = tk.StringVar(self.window)
         ttk.Label(bottom, textvariable=self._summary).pack(side=tk.LEFT)
+        ttk.Checkbutton(bottom, text="显示详情", variable=self._show_detail, command=self._toggle_details).pack(side=tk.LEFT, padx=12)
         ttk.Button(bottom, text="查看知网页面", command=self._open_url, bootstyle="secondary").pack(side=tk.RIGHT)
         ttk.Button(bottom, text="打开 DOI", command=self._open_doi, bootstyle="secondary").pack(side=tk.RIGHT, padx=8)
         self._operation_status = tk.StringVar(self.window)
@@ -163,7 +169,10 @@ class ResultsWindow:
         self._show_output_dir()
 
     def _sync_export_type(self):
-        self._pdf_export_check.configure(state=tk.NORMAL if self.export_format.get() == "ris" else tk.DISABLED)
+        if self.export_format.get() == "ris":
+            self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 8), before=self._export_button)
+        else:
+            self._pdf_export_check.pack_forget()
 
     def _show_output_dir(self):
         self._output_text.set(f"保存位置：{self.get_output_dir()}")
@@ -342,6 +351,7 @@ class ResultsWindow:
         items = [(i, copy.deepcopy(self._papers[i])) for i in sorted(self._checked)]
         self.busy = True
         self._stop_button.configure(state=tk.NORMAL)
+        self._stop_button.pack(side=tk.RIGHT)
         self._open_button.configure(state=tk.DISABLED)
         self._update_summary()
 
@@ -387,6 +397,7 @@ class ResultsWindow:
                     self.busy = False
                     self._continue_button.pack_forget()
                     self._stop_button.configure(state=tk.DISABLED)
+                    self._stop_button.pack_forget()
                     self._open_button.configure(state=tk.NORMAL)
                     self._operation_status.set("下载已停止" if payload.get("stopped") else "本批下载结束")
                     self._update_summary()
