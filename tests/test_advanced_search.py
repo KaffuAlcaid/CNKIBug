@@ -125,9 +125,9 @@ def test_workflow_dispatches_each_query_without_changing_ordinary_calls(monkeypa
 
 
 def _list_app():
-    from cnkibug.gui.app import CNKIBugApp
+    from cnkibug.gui.task_form import TaskForm
 
-    app = CNKIBugApp.__new__(CNKIBugApp)
+    app = TaskForm.__new__(TaskForm)
     app.root = Mock()
     app._running = False
     app._keywords = ["ordinary"]
@@ -149,7 +149,7 @@ def test_gui_advanced_add_cancel_edit_delete_preserves_other_items(monkeypatch):
     first, second, edited = _query(), _query("steel"), _query("alloy")
     dialog = Mock()
     dialog.return_value.show.side_effect = [first, second, None, edited]
-    monkeypatch.setattr("cnkibug.gui.app.AdvancedSearchDialog", dialog)
+    monkeypatch.setattr("cnkibug.gui.task_form.AdvancedSearchDialog", dialog)
     app._open_advanced()
     app._open_advanced()
     assert len(app._keywords) == 3

@@ -11,13 +11,12 @@ from cnkibug.app.runtime import DEFAULT_CONFIG, RuntimeState, get_runtime_paths
 from cnkibug.cnki.models import Paper
 from cnkibug.gui.app import (
     CNKIBugApp,
-    GuiTaskRequest,
-    _merge_task_keywords,
     _prepare_output_directory,
-    _resolve_save_mode,
 )
 from cnkibug.gui.events import GuiEvent, GuiEventSink
 from cnkibug.gui.settings import SettingsDialog, _NUMERIC_FIELDS
+from cnkibug.gui.task_form import GuiTaskRequest, TaskForm, _merge_task_keywords, _resolve_save_mode
+from cnkibug.gui.task_progress import TaskProgress
 from cnkibug.workflow.state import make_task_state
 
 
@@ -83,25 +82,27 @@ def test_gui_keyword_list_append_replace_and_dedupe():
 
 def test_gui_clears_keywords_only_after_completed_task():
     app = CNKIBugApp.__new__(CNKIBugApp)
-    app._freeze_active = Mock()
-    app._current_percentage = Mock(return_value=42)
-    app._progress_var = Mock()
-    app._progress_percent_var = Mock()
-    app._status_var = Mock()
-    app._set_keywords = Mock()
-    app._keyword_var = Mock()
+    progress = app._task_progress = TaskProgress.__new__(TaskProgress)
+    progress._freeze_active = Mock()
+    progress._current_percentage = Mock(return_value=42)
+    progress._progress_var = Mock()
+    progress._progress_percent_var = Mock()
+    progress._status_var = Mock()
+    form = app._task_form = TaskForm.__new__(TaskForm)
+    form._set_keywords = Mock()
+    form._keyword_var = Mock()
 
     app._handle_event(GuiEvent("progress_completed", {}))
 
-    app._set_keywords.assert_called_once_with([])
-    app._keyword_var.set.assert_called_once_with("")
+    form._set_keywords.assert_called_once_with([])
+    form._keyword_var.set.assert_called_once_with("")
 
-    app._set_keywords.reset_mock()
-    app._keyword_var.set.reset_mock()
+    form._set_keywords.reset_mock()
+    form._keyword_var.set.reset_mock()
     app._handle_event(GuiEvent("progress_stopped", {"message": "任务已停止"}))
 
-    app._set_keywords.assert_not_called()
-    app._keyword_var.set.assert_not_called()
+    form._set_keywords.assert_not_called()
+    form._keyword_var.set.assert_not_called()
 
 
 def test_gui_event_sink_marshals_confirmation_and_cancellation():
@@ -165,12 +166,10 @@ def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tm
 def test_finished_task_updates_existing_results_even_when_display_is_declined(monkeypatch):
     app = CNKIBugApp.__new__(CNKIBugApp)
     app.root = Mock()
-    app._actual_seconds = 1.0
+    app._task_progress = Mock(spec=TaskProgress, completed=True)
     app._set_running = Mock()
-    app._new_task_button = Mock()
     app._close_when_done = False
     app._result_prompt_pending = True
-    app._progress_mode = "completed"
     app._current_results = [Paper(title="Current task")]
     viewer = app._results_window = Mock(busy=False)
 
@@ -192,8 +191,8 @@ def _resume_app(paths):
     app = CNKIBugApp.__new__(CNKIBugApp)
     app.root = Mock()
     app.runtime = SimpleNamespace(paths=paths)
-    app._append_log = Mock()
-    app._populate_resume_form = Mock()
+    app._task_progress = Mock(spec=TaskProgress)
+    app._task_form = Mock(spec=TaskForm)
     app._start_task = Mock()
     return app
 
@@ -214,7 +213,7 @@ def test_gui_ignore_checkpoint_deletes_file(monkeypatch, tmp_path):
     app._offer_resume()
 
     assert not checkpoint.exists()
-    app._append_log.assert_called_once_with("已忽略并删除上次任务断点。", "warning")
+    app._task_progress.append_log.assert_called_once_with("已忽略并删除上次任务断点。", "warning")
     app._start_task.assert_not_called()
     app.root.destroy.assert_not_called()
 
@@ -264,7 +263,7 @@ def test_gui_failed_checkpoint_delete_reprompts(monkeypatch, tmp_path):
     assert checkpoint.exists()
     assert len(errors) == 1
     app.root.destroy.assert_called_once_with()
-    app._append_log.assert_not_called()
+    app._task_progress.append_log.assert_not_called()
     app._start_task.assert_not_called()
 
 
@@ -297,8 +296,10 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     app.root = Mock()
     app.root.style.theme_use.return_value = "litera"
     app.root.style.theme.type = "dark"
-    app._form_canvas = Mock()
-    app._log = Mock()
+    app._task_form = TaskForm.__new__(TaskForm)
+    app._task_form._form_canvas = Mock()
+    app._task_progress = TaskProgress.__new__(TaskProgress)
+    app._task_progress._log = Mock()
     logger = Mock()
     monkeypatch.setattr("cnkibug.gui.app.logging.getLogger", lambda: logger)
     config = {**DEFAULT_CONFIG, "gui_theme": "darkly", "log_level": "WARNING", "timeout_goto_ms": 45000}
@@ -310,8 +311,8 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     assert app.settings.timeout_goto_ms == 45000
     logger.setLevel.assert_called_once_with("WARNING")
     app.root.style.theme_use.assert_called_with("darkly")
-    app._form_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
-    app._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
+    app._task_form._form_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
+    app._task_progress._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
 
 
 def _settings_dialog(config=None):

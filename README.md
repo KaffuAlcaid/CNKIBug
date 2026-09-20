@@ -148,7 +148,7 @@ macOS 当前未纳入正式测试和支持范围。Release 中单独提供的 `C
 
 - [使用说明](docs/usage.md)：导入、输出、进度和完整截图
 - [配置说明](docs/configuration.md)：`config.json` 和常见调整
-- [开发和打包](docs/development.md)：手动打包、项目结构和测试
+- [开发和打包](docs/development.md)：项目结构、GUI 模块职责、打包和测试
 
 ## 系统要求
 

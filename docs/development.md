@@ -65,7 +65,9 @@ CNKIBug/
 主要文件：
 
 - `cnkibug/app/cli.py`：终端菜单和任务循环
-- `cnkibug/gui/app.py`：GUI 窗口、表单和任务控制
+- `cnkibug/gui/app.py`：主窗口组装、任务启停与续跑、确认交互和结果同步
+- `cnkibug/gui/task_form.py`：任务表单、检索项编辑、输入校验和 `GuiTaskRequest` 任务请求
+- `cnkibug/gui/task_progress.py`：进度显示、计时、预计耗时和日志
 - `cnkibug/gui/environment.py`：Linux 初始化设置和设置中的运行环境检查
 - `cnkibug/browser/environment.py`：浏览器选择、运行环境检查和 Chromium 安装
 - `cnkibug/browser/`：浏览器启动、上下文和会话缓存
@@ -73,6 +75,8 @@ CNKIBug/
 - `cnkibug/core/`：设置、事件、耗时估算、内存采样和运行路径
 - `cnkibug/fileio/`：导入、导出和输出目录
 - `cnkibug/workflow/`：任务状态、断点、保存和报告
+
+任务表单和进度视图各自管理控件及显示状态，主窗口通过方法和回调协调操作。抓取在线程中运行，通过事件队列传递消息；Tk 控件由主线程更新。
 
 ## 测试
 
