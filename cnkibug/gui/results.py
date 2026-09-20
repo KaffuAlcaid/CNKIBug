@@ -15,6 +15,7 @@ import ttkbootstrap as ttk
 
 from ..cnki.downloads import DownloadSession
 from ..cnki.details import fetch_selected_details
+from ..cnki.journals import fetch_journal_info
 from ..cnki.models import Paper, deduplicate_papers
 from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
 from ..fileio.zotero import send_papers_to_zotero
@@ -55,6 +56,7 @@ class ResultsWindow:
         self._detail_statuses: dict[int, str] = {}
         self._zotero_statuses: dict[int, str] = {}
         self._row_statuses: dict[int, str] = {}
+        self._journal_infos: dict[int, dict] = {}
         self._sort_key = "publication_date"
         self._descending = True
         self._papers: list[Paper] = []
@@ -103,6 +105,7 @@ class ResultsWindow:
         self._paper_actions.pack(side=tk.LEFT, padx=(8, 0))
         self._paper_menu = tk.Menu(self._paper_actions, tearoff=False)
         self._paper_menu.add_command(label="补抓所选详情", command=self._fetch_details)
+        self._paper_menu.add_command(label="查询所选期刊信息", command=self._query_journals)
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="关联本地 PDF", command=self._associate_pdf)
         self._paper_menu.add_command(label="解除 PDF 关联", command=self._unlink_pdf)
@@ -163,13 +166,15 @@ class ResultsWindow:
         self._notebook = ttk.Notebook(self._details)
         self._notebook.pack(fill=tk.BOTH, expand=True)
         self._texts = {}
-        for name, label in (("abstract", "摘要与关键词"), ("info", "详细信息"), ("citation", "引用格式")):
+        for name, label in (("abstract", "摘要与关键词"), ("info", "详细信息"), ("citation", "引用格式"), ("journal", "期刊信息")):
             frame = ttk.Frame(self._notebook)
             self._notebook.add(frame, text=label)
             text = ScrolledText(frame, wrap=tk.WORD, height=7, font=("TkDefaultFont", 10), relief=tk.FLAT, padx=10, pady=8, spacing1=3, spacing3=3)
             text.configure(background=self.window.style.colors.inputbg, foreground=self.window.style.colors.inputfg, state=tk.DISABLED)
             text.pack(fill=tk.BOTH, expand=True)
             self._texts[name] = text
+            if name == "journal":
+                ttk.Button(frame, text="查看期刊来源", command=self._open_journal_source, bootstyle="secondary-outline").pack(anchor=tk.E, pady=6)
         bottom = ttk.Frame(footer)
         bottom.pack(fill=tk.X)
         self._summary = tk.StringVar(self.window)
@@ -210,6 +215,7 @@ class ResultsWindow:
         self._detail_statuses.clear()
         self._zotero_statuses.clear()
         self._row_statuses.clear()
+        self._journal_infos.clear()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
         self.search.set("")
@@ -307,7 +313,7 @@ class ResultsWindow:
         paper = self._current()
         self._title.configure(text=paper.title if paper else "")
         self._meta.configure(text=f"{paper.authors.replace(';', '；')}  |  {paper.source}  |  {paper.publication_date}" if paper else "", wraplength=max(200, self._details.winfo_width() - 16))
-        content = {"abstract": "", "info": "", "citation": ""}
+        content = {"abstract": "", "info": "", "citation": "", "journal": "期刊信息未查询"}
         if paper:
             content["abstract"] = f"关键词：{'；'.join(split_values(paper.paper_keywords)) or '未采集'}\n\n{paper.abstract or '摘要未采集'}"
             content["citation"] = paper.citation or "引用格式未采集"
@@ -328,6 +334,20 @@ class ResultsWindow:
             zotero_status = self._zotero_statuses.get(int(selected[0]), "") if selected else ""
             if zotero_status:
                 content["info"] += f"\n\nZotero：{zotero_status}"
+            journal = self._journal_infos.get(int(selected[0]), {}) if selected else {}
+            if journal:
+                if journal.get("error"):
+                    content["journal"] = journal["error"]
+                else:
+                    content["journal"] = "\n".join(f"{label}：{journal.get(key) or '页面未提供'}" for key, label in (
+                        ("name", "期刊"), ("issn", "ISSN"), ("cn", "CN"), ("sponsor", "主办单位"), ("frequency", "出版周期"),
+                    ))
+                    content["journal"] += "\n\n页面收录信息：\n" + (journal.get("indexing") or "页面未提供，不能据此判断未收录。")
+                    content["journal"] += "\n\n影响因子（页面原文）：\n" + ("\n".join(journal.get("metrics", [])) or "页面未提供")
+                if journal.get("source_url"):
+                    content["journal"] += f"\n\n来源：{journal['source_url']}"
+                if journal.get("queried_at"):
+                    content["journal"] += f"\n查询时间：{journal['queried_at']}"
         for name, text in self._texts.items():
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
@@ -456,6 +476,19 @@ class ResultsWindow:
     def _send_zotero(self):
         self._start_operation(lambda items: send_papers_to_zotero(items, self._events), label="正在连接 Zotero")
 
+    def _query_journals(self):
+        self._start_operation(
+            lambda items: fetch_journal_info(items, self.settings, self.paths, self._events),
+            label="正在查询期刊信息", needs_browser=True,
+        )
+
+    def _open_journal_source(self):
+        selected = self.table.selection()
+        info = self._journal_infos.get(int(selected[0]), {}) if selected else {}
+        url = info.get("source_url", "")
+        if url.startswith(("https://", "http://")):
+            webbrowser.open(url)
+
     def _download(self):
         if self.busy or not self._checked:
             return
@@ -488,7 +521,11 @@ class ResultsWindow:
             while True:
                 event = self._queue.get_nowait()
                 payload = event.payload
-                if event.name == "paper_zotero":
+                if event.name == "journal_result":
+                    for index in payload["indices"]:
+                        self._journal_infos[index] = payload["info"]
+                        self._set_row_status(index, payload["status"])
+                elif event.name == "paper_zotero":
                     self._zotero_statuses[payload["index"]] = payload["status"]
                     self._set_row_status(payload["index"], payload["status"])
                 elif event.name == "paper_details":
