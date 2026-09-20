@@ -124,28 +124,34 @@ def test_workflow_dispatches_each_query_without_changing_ordinary_calls(monkeypa
     assert scraper.call_args.kwargs["start_page"] == 2
 
 
-def _list_app():
-    from cnkibug.gui.task_form import TaskForm
+def _list_app(monkeypatch):
+    from cnkibug.gui import task_form
 
-    app = TaskForm.__new__(TaskForm)
+    def variable(*, value):
+        result = Mock()
+        result.get.return_value = value
+        result.set.side_effect = lambda text: setattr(result.get, "return_value", text)
+        return result
+
+    for name in ("Frame", "Label", "Entry", "Button"):
+        monkeypatch.setattr(task_form.ttk, name, Mock(side_effect=lambda *args, **kwargs: Mock()))
+    monkeypatch.setattr(task_form.tk, "StringVar", variable)
+    monkeypatch.setattr(task_form, "ToolTip", Mock())
+    app = task_form.TaskForm.__new__(task_form.TaskForm)
     app.root = Mock()
     app._running = False
-    app._keywords = ["ordinary"]
+    app._keyword_rows = []
     app._advanced_queries = {}
-    app._keyword_var = Mock()
-    app._keyword_var.get.return_value = ""
     app._keyword_list = Mock()
-    app._keyword_list.get_children.return_value = []
-    app._keyword_list.selection.return_value = []
+    app._keyword_canvas = Mock()
     app._keyword_status_var = Mock()
-    app._modify_keyword_button = Mock()
-    app._delete_keyword_button = Mock()
-    app._keyword_entry = Mock()
+    app._focus_keyword = Mock()
+    app._set_keywords(["ordinary"])
     return app
 
 
 def test_gui_advanced_add_cancel_edit_delete_preserves_other_items(monkeypatch):
-    app = _list_app()
+    app = _list_app(monkeypatch)
     first, second, edited = _query(), _query("steel"), _query("alloy")
     dialog = Mock()
     dialog.return_value.show.side_effect = [first, second, None, edited]
@@ -154,26 +160,34 @@ def test_gui_advanced_add_cancel_edit_delete_preserves_other_items(monkeypatch):
     app._open_advanced()
     assert len(app._keywords) == 3
     first_key, second_key = app._keywords[1:]
-    app._open_advanced(1)
+    app._open_advanced(app._keyword_rows[1])
     assert app._advanced_queries[first_key] == first
-    app._open_advanced(1)
+    app._open_advanced(app._keyword_rows[1])
     assert app._keywords == ["ordinary", first_key, second_key]
     assert app._advanced_queries == {first_key: edited, second_key: second}
     dialog.assert_called_with(app.root, first)
-    app._keyword_list.selection.return_value = ["keyword-1"]
-    app._delete_keyword()
+    app._delete_keyword(app._keyword_rows[1])
     assert app._keywords == ["ordinary", second_key]
     assert app._advanced_queries == {second_key: second}
 
 
-def test_gui_render_and_clear_keep_types_and_conditions_consistent():
-    app = _list_app()
+def test_gui_inline_edits_and_clear_keep_types_and_conditions_consistent(monkeypatch):
+    app = _list_app(monkeypatch)
+    warning = Mock()
+    monkeypatch.setattr("cnkibug.gui.task_form.messagebox.showwarning", warning)
     query = _query()
     app._advanced_queries = {"Advanced 1": query}
     app._set_keywords(["ordinary", "Advanced 1"])
-    displayed = [call.kwargs["values"] for call in app._keyword_list.insert.call_args_list]
-    assert displayed[0][2] == "ordinary"
-    assert displayed[1][2] == query.summary()
-    assert displayed[0][1] != displayed[1][1]
+    ordinary, advanced = app._keyword_rows
+    assert advanced.text.get() == query.summary()
+    ordinary.text.set("  edited  phrase  ")
+    assert app._collect_keywords() == ["edited  phrase", "Advanced 1"]
+    assert app._advanced_queries == {"Advanced 1": query}
+    ordinary.text.set("Advanced 1")
+    assert app._collect_keywords() is None
+    warning.assert_called_once()
+    ordinary.text.set("  ")
+    assert app._collect_keywords() == ["Advanced 1"]
     app._set_keywords([])
+    assert app._keywords == []
     assert app._advanced_queries == {}

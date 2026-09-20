@@ -9,10 +9,12 @@ from tkinter import filedialog
 from typing import Any
 
 import ttkbootstrap as ttk
+from ttkbootstrap.widgets import ToolTip
 from . import dialogs as messagebox
 
 from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
 from ..fileio.keyword_input import (
+    MAX_KEYWORDS,
     KeywordImportError,
     KeywordImportResult,
     dedupe_keywords,
@@ -35,6 +37,21 @@ class GuiTaskRequest:
     output_dir: Path | None
     advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
     search_options: SearchOptions | None = None
+
+
+@dataclass
+class _KeywordRow:
+    frame: ttk.Frame
+    number: ttk.Label
+    text: tk.StringVar
+    entry: ttk.Entry
+    delete_button: ttk.Button
+    query_key: str | None = None
+    edit_button: ttk.Button | None = None
+
+    @property
+    def keyword(self) -> str:
+        return self.query_key if self.query_key is not None else self.text.get().strip()
 
 
 def _resolve_save_mode(keyword_count: int, output_format: str, split_excel: bool) -> str:
@@ -65,7 +82,7 @@ class TaskForm(ttk.Frame):
         super().__init__(parent)
         self.root = self.winfo_toplevel()
         self._running = False
-        self._keywords: list[str] = []
+        self._keyword_rows: list[_KeywordRow] = []
         self._advanced_queries: dict[str, AdvancedQuery] = {}
         self._search_options: SearchOptions | None = None
 
@@ -112,57 +129,38 @@ class TaskForm(ttk.Frame):
             actions, text="导入 TXT", command=self._import_txt, bootstyle="secondary-outline",
         )
         self._import_button.pack(side=tk.LEFT, padx=(6, 0))
+        self._add_keyword_button = ttk.Button(
+            actions, text="+ 普通检索项", command=self._add_keyword, bootstyle="secondary-outline",
+        )
+        self._add_keyword_button.pack(side=tk.LEFT, padx=(6, 0))
         self._advanced_button = ttk.Button(
             actions, text="高级检索", command=self._open_advanced, bootstyle="secondary-outline",
         )
         self._advanced_button.pack(side=tk.LEFT, padx=(6, 0))
 
-        entry_row = ttk.Frame(keyword_frame)
-        entry_row.pack(fill=tk.X, pady=(0, 8))
-        entry_row.columnconfigure(0, weight=1)
-        self._keyword_var = tk.StringVar()
-        self._keyword_entry = ttk.Entry(entry_row, textvariable=self._keyword_var)
-        self._keyword_entry.grid(row=0, column=0, sticky="ew")
-        self._keyword_entry.bind("<Return>", lambda _event: self._add_keyword())
-        self._add_keyword_button = ttk.Button(
-            entry_row, text="添加", command=self._add_keyword, bootstyle="secondary-outline", width=7,
-        )
-        self._add_keyword_button.grid(row=0, column=1, padx=(8, 0))
-
         list_frame = ttk.Frame(keyword_frame)
         list_frame.pack(fill=tk.X)
-        self.root.style.configure("Task.Treeview", rowheight=30)
-        self._keyword_list = ttk.Treeview(
-            list_frame, columns=("number", "type", "keyword"), show="headings",
-            height=5, selectmode="browse", style="Task.Treeview",
+        self._keyword_canvas = tk.Canvas(
+            list_frame, height=190, borderwidth=0, highlightthickness=0,
+            background=self.root.style.colors.bg, yscrollincrement=20,
         )
-        self._keyword_list.heading("number", text="#")
-        self._keyword_list.heading("type", text="类型")
-        self._keyword_list.heading("keyword", text="关键词 / 检索条件", anchor=tk.W)
-        self._keyword_list.column("number", width=44, minwidth=44, stretch=False, anchor=tk.CENTER)
-        self._keyword_list.column("type", width=90, minwidth=90, stretch=False, anchor=tk.CENTER)
-        self._keyword_list.column("keyword", minwidth=220, anchor=tk.W)
-        self._keyword_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._keyword_list.bind("<<TreeviewSelect>>", self._keyword_selected)
-        self._keyword_list.bind("<Double-1>", self._edit_selected_item)
-        keyword_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._keyword_list.yview)
+        self._keyword_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        keyword_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._keyword_canvas.yview)
         keyword_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._keyword_list.configure(yscrollcommand=keyword_scrollbar.set)
-
-        keyword_actions = ttk.Frame(keyword_frame)
-        keyword_actions.pack(fill=tk.X, pady=(6, 0))
-        self._modify_keyword_button = ttk.Button(
-            keyword_actions, text="编辑", command=self._modify_keyword,
-            state=tk.DISABLED, bootstyle="secondary-outline", width=7,
+        self._keyword_canvas.configure(yscrollcommand=keyword_scrollbar.set)
+        self._keyword_list = ttk.Frame(self._keyword_canvas)
+        keyword_window = self._keyword_canvas.create_window((0, 0), window=self._keyword_list, anchor=tk.NW)
+        self._keyword_list.bind(
+            "<Configure>",
+            lambda _event: self._keyword_canvas.configure(scrollregion=self._keyword_canvas.bbox("all")),
         )
-        self._modify_keyword_button.pack(side=tk.LEFT)
-        self._delete_keyword_button = ttk.Button(
-            keyword_actions, text="移除", command=self._delete_keyword,
-            state=tk.DISABLED, bootstyle="secondary-outline", width=7,
+        self._keyword_canvas.bind(
+            "<Configure>", lambda event: self._keyword_canvas.itemconfigure(keyword_window, width=event.width),
         )
-        self._delete_keyword_button.pack(side=tk.LEFT, padx=(6, 0))
         self._keyword_status_var = tk.StringVar(value="当前任务：0 项")
-        ttk.Label(keyword_actions, textvariable=self._keyword_status_var, bootstyle="secondary").pack(side=tk.RIGHT)
+        ttk.Label(keyword_frame, textvariable=self._keyword_status_var, bootstyle="secondary").pack(
+            anchor=tk.E, pady=(6, 0),
+        )
 
         ttk.Separator(self._form).pack(fill=tk.X, pady=(0, 12))
         settings_row = ttk.Frame(self._form)
@@ -239,7 +237,6 @@ class TaskForm(ttk.Frame):
         self._review_button.pack(side=tk.RIGHT)
 
         self._form_controls = [
-            self._keyword_entry,
             self._add_keyword_button,
             self._advanced_button,
             self._import_button,
@@ -255,6 +252,7 @@ class TaskForm(ttk.Frame):
             self._txt_check,
             self._review_button,
         ]
+        self._set_keywords([])
         self._sync_option_states()
 
     def _save_plan(self) -> None:
@@ -289,7 +287,7 @@ class TaskForm(ttk.Frame):
         except (OSError, ValueError) as error:
             messagebox.showerror("无法载入检索方案", str(error), parent=self.root)
             return
-        if (self._keywords or self._keyword_var.get().strip()) and not messagebox.askyesno(
+        if self._keywords and not messagebox.askyesno(
             "载入检索方案", "载入方案将替换当前检索项和输出选项。继续？", parent=self.root,
         ):
             return
@@ -310,7 +308,7 @@ class TaskForm(ttk.Frame):
 
     def apply_theme(self, style: ttk.Style) -> None:
         self._form_canvas.configure(background=style.colors.bg)
-        style.configure("Task.Treeview", rowheight=30)
+        self._keyword_canvas.configure(background=style.colors.bg)
 
     def _toggle_more_options(self) -> None:
         if self._show_more.get():
@@ -333,22 +331,11 @@ class TaskForm(ttk.Frame):
 
     def clear(self) -> None:
         self._set_keywords([])
-        self._reset_keyword_editor()
 
     def collect_request(self) -> GuiTaskRequest | None:
-        pending_keyword = self._keyword_var.get().strip()
-        selected_index = self._selected_keyword_index()
-        if pending_keyword and (
-            selected_index is None or pending_keyword != self._keywords[selected_index]
-        ):
-            messagebox.showwarning(
-                "检索项尚未保存",
-                "输入框中的内容尚未添加或修改，请先保存到当前任务列表。",
-                parent=self.root,
-            )
-            self._keyword_entry.focus_set()
+        keywords = self._collect_keywords()
+        if keywords is None:
             return None
-        keywords = list(self._keywords)
         if not keywords:
             messagebox.showerror("任务设置错误", "请至少输入一个关键词或检索句。", parent=self.root)
             return None
@@ -391,7 +378,6 @@ class TaskForm(ttk.Frame):
         keywords = state.get("keywords", [])
         self._advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
         self._set_keywords([str(item) for item in keywords])
-        self._reset_keyword_editor()
         self._pages_var.set(str(state.get("max_pages", 1)))
         save_mode = str(state.get("save_mode", "single"))
         self._format_var.set("csv" if save_mode.endswith("csv") else "excel")
@@ -428,14 +414,15 @@ class TaskForm(ttk.Frame):
         except KeyError:
             # Tcl-created controls such as Combobox popdowns have no Python widget.
             return
-        if pointer is self._keyword_list:
-            return
+        canvas = self._form_canvas
         current = pointer
         while current is not None and current not in {
             self._form,
             self._form_canvas,
             self,
         }:
+            if current is self._keyword_canvas:
+                canvas = self._keyword_canvas
             current = getattr(current, "master", None)
         if current is None:
             return
@@ -449,168 +436,166 @@ class TaskForm(ttk.Frame):
             if not delta:
                 return
             units = -3 if delta > 0 else 3
-        self._form_canvas.yview_scroll(units, "units")
+        canvas.yview_scroll(units, "units")
 
-    # 关键词列表和输入框始终由这一组方法同步，避免可见内容与任务数据分离。
-    def _selected_keyword_index(self) -> int | None:
-        selection = self._keyword_list.selection()
-        if not selection:
+    @property
+    def _keywords(self) -> list[str]:
+        return [row.keyword for row in self._keyword_rows if row.keyword]
+
+    def _collect_keywords(self) -> list[str] | None:
+        try:
+            merged = dedupe_keywords(self._keywords)
+        except KeywordImportError as error:
+            messagebox.showerror("任务设置错误", str(error), parent=self.root)
             return None
-        return int(selection[0].removeprefix("keyword-"))
-
-    def _select_keyword(self, index: int) -> None:
-        item_id = f"keyword-{index}"
-        self._keyword_list.selection_set(item_id)
-        self._keyword_list.focus(item_id)
-        self._keyword_list.see(item_id)
+        if merged.duplicates:
+            keyword = merged.duplicates[0]
+            messagebox.showwarning("重复检索项", f"“{keyword}”在任务列表中重复，请编辑或移除。", parent=self.root)
+            rows = [row for row in self._keyword_rows if row.keyword == keyword]
+            self._focus_keyword(rows[-1])
+            return None
+        return merged.keywords
 
     def _set_keywords(self, keywords: list[str], status: str | None = None) -> None:
-        self._keywords = list(keywords)
-        self._advanced_queries = {key: query for key, query in self._advanced_queries.items() if key in self._keywords}
-        items = self._keyword_list.get_children()
-        if items:
-            self._keyword_list.delete(*items)
-        for index, keyword in enumerate(self._keywords):
-            self._keyword_list.insert(
-                "",
-                tk.END,
-                iid=f"keyword-{index}",
-                values=(
-                    index + 1,
-                    "高级检索" if keyword in self._advanced_queries else "普通检索",
-                    self._advanced_queries[keyword].summary() if keyword in self._advanced_queries else keyword,
-                ),
-            )
-        self._keyword_status_var.set(status or f"当前任务：{len(self._keywords)} 项")
+        self._advanced_queries = {key: query for key, query in self._advanced_queries.items() if key in keywords}
+        for row in self._keyword_rows:
+            row.frame.destroy()
+        self._keyword_rows.clear()
+        for keyword in keywords or [""]:
+            self._append_keyword_row(keyword, query_key=keyword if keyword in self._advanced_queries else None)
+        self._keyword_canvas.yview_moveto(0)
         self._sync_keyword_action_states()
+        if status:
+            self._keyword_status_var.set(status)
+
+    def _append_keyword_row(self, keyword: str, *, query_key: str | None = None) -> _KeywordRow:
+        frame = ttk.Frame(self._keyword_list)
+        frame.pack(fill=tk.X, pady=(0, 6), padx=(0, 4))
+        frame.columnconfigure(2, weight=1)
+        number = ttk.Label(frame, width=4, anchor=tk.CENTER)
+        number.grid(row=0, column=0)
+        ttk.Label(frame, text="高级检索" if query_key else "普通检索", width=9).grid(row=0, column=1)
+        text = tk.StringVar(value=self._advanced_queries[query_key].summary() if query_key else keyword)
+        entry = ttk.Entry(frame, textvariable=text)
+        entry.grid(row=0, column=2, columnspan=1 if query_key else 2, sticky="ew")
+        delete = ttk.Button(frame, text="-", width=3, bootstyle="secondary-outline")
+        delete.grid(row=0, column=4, padx=(6, 0))
+        row = _KeywordRow(frame, number, text, entry, delete, query_key=query_key)
+        delete.configure(command=lambda: self._delete_keyword(row))
+        ToolTip(delete, text="移除检索项")
+        if query_key:
+            row.edit_button = ttk.Button(
+                frame, text="编辑条件", width=8, command=lambda: self._open_advanced(row),
+                bootstyle="secondary-outline",
+            )
+            row.edit_button.grid(row=0, column=3, padx=(6, 0))
+            entry.bind("<Double-1>", lambda _event: self._open_advanced(row))
+        else:
+            entry.bind("<Return>", lambda _event: self._next_keyword(row))
+            text.trace_add("write", lambda *_args: self._keyword_status_var.set(f"当前任务：{len(self._keywords)} 项"))
+        entry.bind("<FocusIn>", lambda _event: self._see_keyword(row))
+        if row.edit_button:
+            row.edit_button.bind("<FocusIn>", lambda _event: self._see_keyword(row))
+        delete.bind("<FocusIn>", lambda _event: self._see_keyword(row))
+        self._keyword_rows.append(row)
+        return row
 
     def _sync_keyword_action_states(self) -> None:
-        state = tk.NORMAL if not self._running and self._selected_keyword_index() is not None else tk.DISABLED
-        self._modify_keyword_button.configure(state=state)
-        self._delete_keyword_button.configure(state=state)
+        state = tk.DISABLED if self._running else tk.NORMAL
+        for index, row in enumerate(self._keyword_rows):
+            row.number.configure(text=str(index + 1))
+            row.entry.configure(state=tk.DISABLED if self._running else "readonly" if row.query_key else tk.NORMAL)
+            row.delete_button.configure(state=state)
+            if row.edit_button:
+                row.edit_button.configure(state=state)
+        self._keyword_status_var.set(f"当前任务：{len(self._keywords)} 项")
 
-    def _keyword_selected(self, _event: tk.Event | None = None) -> None:
-        index = self._selected_keyword_index()
-        if index is not None:
-            keyword = self._keywords[index]
-            self._keyword_var.set("" if keyword in self._advanced_queries else keyword)
-        self._sync_keyword_action_states()
+    def _see_keyword(self, row: _KeywordRow) -> None:
+        self._keyword_canvas.update_idletasks()
+        top = row.frame.winfo_y()
+        bottom = top + row.frame.winfo_height()
+        visible_top = self._keyword_canvas.canvasy(0)
+        visible_height = self._keyword_canvas.winfo_height()
+        height = max(1, self._keyword_list.winfo_height())
+        if top < visible_top:
+            self._keyword_canvas.yview_moveto(top / height)
+        elif bottom > visible_top + visible_height:
+            self._keyword_canvas.yview_moveto((bottom - visible_height) / height)
 
-    def _edit_selected_item(self, event: tk.Event) -> None:
+    def _focus_keyword(self, row: _KeywordRow) -> None:
+        self._see_keyword(row)
+        (row.edit_button or row.entry).focus_set()
+
+    def _next_keyword(self, row: _KeywordRow) -> str:
         if self._running:
-            return
-        item_id = self._keyword_list.identify_row(event.y)
-        if not item_id:
-            return
-        self._keyword_list.selection_set(item_id)
-        self._keyword_selected()
-        index = self._selected_keyword_index()
-        if index is not None and self._keywords[index] in self._advanced_queries:
-            self._open_advanced(index)
+            return "break"
+        index = self._keyword_rows.index(row)
+        if index + 1 < len(self._keyword_rows):
+            self._focus_keyword(self._keyword_rows[index + 1])
         else:
-            self._keyword_entry.focus_set()
+            self._add_keyword()
+        return "break"
 
-    def _open_advanced(self, index: int | None = None) -> None:
+    def _open_advanced(self, row: _KeywordRow | None = None) -> None:
         if self._running:
             return
-        pending = self._keyword_var.get().strip()
-        selected = self._selected_keyword_index()
-        if pending and (selected is None or pending != self._keywords[selected]):
-            messagebox.showwarning(
-                "检索项尚未保存", "请先将输入框中的内容保存到任务列表。", parent=self.root,
-            )
+        if row is None and len(self._keywords) >= MAX_KEYWORDS:
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
             return
-        keyword = self._keywords[index] if index is not None else None
+        keyword = row.query_key if row is not None else None
         original = self._advanced_queries.get(keyword) if keyword is not None else None
         query = AdvancedSearchDialog(self.root, original).show()
         if query is None:
             return
         for existing, value in self._advanced_queries.items():
             if existing != keyword and value == query:
-                self._select_keyword(self._keywords.index(existing))
                 messagebox.showwarning("重复检索项", "相同的高级检索条件已在当前任务中。", parent=self.root)
+                self._focus_keyword(next(item for item in self._keyword_rows if item.query_key == existing))
                 return
         if keyword is None:
+            keywords = set(self._keywords)
             number = 1
-            while f"高级检索 {number}" in self._keywords:
+            while f"高级检索 {number}" in keywords:
                 number += 1
             keyword = f"高级检索 {number}"
-            try:
-                keywords = _merge_task_keywords(self._keywords, [keyword]).keywords
-            except KeywordImportError as error:
-                messagebox.showerror("任务列表已满", str(error), parent=self.root)
-                return
-        else:
-            keywords = list(self._keywords)
         self._advanced_queries[keyword] = query
-        self._set_keywords(keywords)
-        self._select_keyword(keywords.index(keyword))
-
-    def _reset_keyword_editor(self, *, focus: bool = False) -> None:
-        self._keyword_var.set("")
-        if focus:
-            self._keyword_entry.focus_set()
+        if row is None:
+            row = self._append_keyword_row(keyword, query_key=keyword)
+        else:
+            row.text.set(query.summary())
+        self._sync_keyword_action_states()
+        self._focus_keyword(row)
 
     def _add_keyword(self) -> None:
-        keyword = self._keyword_var.get().strip()
-        if not keyword:
-            messagebox.showerror("添加失败", "请输入关键词或检索句。", parent=self.root)
-            self._keyword_entry.focus_set()
-            return
-        try:
-            merged = _merge_task_keywords(self._keywords, [keyword])
-        except KeywordImportError as error:
-            messagebox.showerror("添加失败", str(error), parent=self.root)
-            return
-        if merged.duplicates:
-            index = self._keywords.index(keyword)
-            self._select_keyword(index)
-            messagebox.showwarning(
-                "重复检索项",
-                f"“{keyword}”已在当前任务中。",
-                parent=self.root,
-            )
-            return
-        self._set_keywords(merged.keywords)
-        self._reset_keyword_editor(focus=True)
-
-    def _modify_keyword(self) -> None:
         if self._running:
             return
-        index = self._selected_keyword_index()
-        if index is None:
+        for row in self._keyword_rows:
+            if not row.keyword:
+                self._focus_keyword(row)
+                return
+        if len(self._keyword_rows) >= MAX_KEYWORDS:
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
             return
-        if self._keywords[index] in self._advanced_queries:
-            self._open_advanced(index)
-            return
-        keyword = self._keyword_var.get().strip()
-        if not keyword:
-            messagebox.showerror("修改失败", "检索项不能为空。", parent=self.root)
-            return
-        if keyword in self._keywords and self._keywords.index(keyword) != index:
-            messagebox.showwarning(
-                "重复检索项",
-                f"“{keyword}”已在当前任务中。",
-                parent=self.root,
-            )
-            return
-        updated = list(self._keywords)
-        updated[index] = keyword
-        self._set_keywords(updated, f"已修改第 {index + 1} 项；当前任务：{len(updated)} 项")
-        self._reset_keyword_editor(focus=True)
+        row = self._append_keyword_row("")
+        self._sync_keyword_action_states()
+        self._focus_keyword(row)
 
-    def _delete_keyword(self) -> None:
+    def _delete_keyword(self, row: _KeywordRow) -> None:
         if self._running:
             return
-        index = self._selected_keyword_index()
-        if index is None:
-            return
-        deleted = self._keywords[index]
-        updated = [*self._keywords[:index], *self._keywords[index + 1 :]]
-        self._set_keywords(updated, f"已删除“{deleted}”；当前任务：{len(updated)} 项")
-        self._reset_keyword_editor(focus=True)
+        index = self._keyword_rows.index(row)
+        self._keyword_rows.remove(row)
+        row.frame.destroy()
+        if row.query_key is not None:
+            self._advanced_queries.pop(row.query_key, None)
+        if not self._keyword_rows:
+            self._append_keyword_row("")
+        self._sync_keyword_action_states()
+        self._focus_keyword(self._keyword_rows[min(index, len(self._keyword_rows) - 1)])
 
     def _import_txt(self) -> None:
+        if self._running:
+            return
         path = filedialog.askopenfilename(
             parent=self.root,
             title="选择关键词 TXT",
@@ -634,9 +619,12 @@ class TaskForm(ttk.Frame):
             if choice is None:
                 return
             append = choice
+        keywords = self._collect_keywords() if append else []
+        if keywords is None:
+            return
         try:
             merged = _merge_task_keywords(
-                self._keywords,
+                keywords,
                 imported.keywords,
                 replace=not append,
             )
@@ -652,7 +640,6 @@ class TaskForm(ttk.Frame):
             f"已从 TXT 载入 {len(imported.keywords)} 项；当前任务：{len(merged.keywords)} 项"
             f"{duplicate_text}",
         )
-        self._reset_keyword_editor()
 
     def _choose_output_dir(self) -> None:
         initial = os.path.expanduser(os.path.expandvars(self._output_var.get().strip()))

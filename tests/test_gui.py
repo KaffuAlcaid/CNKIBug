@@ -92,19 +92,15 @@ def test_gui_clears_keywords_only_after_completed_task():
     progress._status_var = Mock()
     form = app._task_form = TaskForm.__new__(TaskForm)
     form._set_keywords = Mock()
-    form._keyword_var = Mock()
 
     app._handle_event(GuiEvent("progress_completed", {}))
 
     form._set_keywords.assert_called_once_with([])
-    form._keyword_var.set.assert_called_once_with("")
 
     form._set_keywords.reset_mock()
-    form._keyword_var.set.reset_mock()
     app._handle_event(GuiEvent("progress_stopped", {"message": "任务已停止"}))
 
     form._set_keywords.assert_not_called()
-    form._keyword_var.set.assert_not_called()
 
 
 def test_gui_event_sink_marshals_confirmation_and_cancellation():
@@ -466,6 +462,7 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     app.root.style.theme.type = "dark"
     app._task_form = TaskForm.__new__(TaskForm)
     app._task_form._form_canvas = Mock()
+    app._task_form._keyword_canvas = Mock()
     app._task_progress = TaskProgress.__new__(TaskProgress)
     app._task_progress._log = Mock()
     logger = Mock()
@@ -480,6 +477,7 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     logger.setLevel.assert_called_once_with("WARNING")
     app.root.style.theme_use.assert_called_with("darkly")
     app._task_form._form_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
+    app._task_form._keyword_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
     app._task_progress._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
 
 
