@@ -3,8 +3,9 @@ from __future__ import annotations
 import tkinter as tk
 
 import ttkbootstrap as ttk
-from ttkbootstrap.dialogs import Messagebox, QueryDialog
+from ttkbootstrap.dialogs import MessageDialog, QueryDialog
 from ttkbootstrap.icons import Icon
+from ttkbootstrap.utility import scale_size
 
 
 YES = "yes"
@@ -13,14 +14,34 @@ OK = "ok"
 CANCEL = "cancel"
 
 
+class _MessageDialog(MessageDialog):
+    def create_body(self, master):
+        container = ttk.Frame(master, padding=self._padding)
+        container.pack(fill=tk.X, expand=True)
+        if self._icon:
+            self._img = ttk.PhotoImage(data=self._icon)
+            ttk.Label(container, image=self._img).pack(side=tk.LEFT, anchor=tk.N, padx=(0, 12))
+        body = ttk.Frame(container)
+        body.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        wraplength = min(scale_size(master, 520), master.winfo_screenwidth() - 100)
+        # Let Tk wrap by rendered width; blank lines separate paragraphs only.
+        paragraphs = self._message.split("\n\n")
+        for index, paragraph in enumerate(paragraphs):
+            ttk.Label(
+                body, text=paragraph, wraplength=wraplength, justify=tk.LEFT, anchor=tk.W,
+            ).pack(fill=tk.X, pady=(0 if index == 0 else scale_size(master, 8), 0))
+
+
 def _show(title, message, buttons, *, parent=None, default=None, icon="info"):
     icons = {"info": Icon.info, "warning": Icon.warning, "error": Icon.error, "question": Icon.question}
     previous_grab = parent.grab_current() if parent is not None else None
     try:
-        return Messagebox.show_question(
+        dialog = _MessageDialog(
             title=title, message=message, parent=parent, buttons=buttons,
             default=default, icon=icons[icon], alert=False, localize=False,
         )
+        dialog.show()
+        return dialog.result
     finally:
         _restore_grab(previous_grab)
 

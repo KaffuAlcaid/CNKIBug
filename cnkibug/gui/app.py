@@ -154,7 +154,7 @@ class CNKIBugApp:
         messagebox.showinfo(
             "关于 CNKIBug",
             (
-                f"CNKIBug\n\n版本：v{APP_VERSION}\n\n免责声明\n\n"
+                f"CNKIBug  v{APP_VERSION}\n\n免责声明\n"
                 "CNKIBug 是独立开发的开源工具，与中国知网（CNKI）及其关联方不存在隶属、授权、合作或背书关系。\n\n"
                 "请在遵守适用法律法规、CNKI 用户协议及所在机构规定的前提下使用，并自行确认访问和处理相关内容的权限。\n\n"
                 "本软件按“现状”提供，不保证结果完整、准确或持续可用。请合理控制任务规模和访问频率，相关使用风险由使用者依法承担。\n\n"

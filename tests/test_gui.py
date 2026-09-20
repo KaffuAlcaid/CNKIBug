@@ -262,8 +262,8 @@ def test_selected_formats_export_independently_without_overwriting(monkeypatch, 
 
 
 def test_ttk_confirmation_keeps_yes_no_cancel_distinct_and_silent(monkeypatch):
-    question = Mock(side_effect=["是", "否", "取消", None])
-    monkeypatch.setattr(dialogs.Messagebox, "show_question", question)
+    question = Mock(side_effect=[Mock(result=value) for value in ("是", "否", "取消", None)])
+    monkeypatch.setattr(dialogs, "_MessageDialog", question)
     assert dialogs.askyesnocancel("Title", "Message") is True
     assert dialogs.askyesnocancel("Title", "Message") is False
     assert dialogs.askyesnocancel("Title", "Message") is None
