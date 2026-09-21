@@ -1,97 +1,146 @@
 # 配置说明
 
-[返回首页](../README.md)
+[返回首页](../README.md) · [使用说明](usage.md)
 
-配置文件名为 `config.json`，位置取决于运行方式：
+快速导航：[设置窗口](#通过设置窗口修改) · [常用调整](#常用调整) · [参数](#配置参数) · [数据位置](#配置与数据位置) · [运行环境](#运行环境) · [更新](#更新软件)
 
-| 运行方式 | 配置文件位置 |
-|---|---|
-| Windows EXE、直接运行源码 | 启动文件所在目录的 `CNKIBug-data/config.json` |
-| Linux AppImage、Linux 的 Python 包安装 | `~/.local/share/CNKIBug-data/config.json` |
-| Windows 的 Python 包安装 | `%LOCALAPPDATA%/CNKIBug-data/config.json` |
+## 通过设置窗口修改
 
-Linux 设置了 `XDG_DATA_HOME` 时，用户数据保存在该目录下的 `CNKIBug-data/`。日志、登录状态、断点和任务报告与配置文件保存在同一用户数据目录中。
+在任务设置页右上角点击“设置”，选择需要修改的类别
 
-GUI 可通过任务设置页右上角的设置按钮管理外观、抓取、会话、日志、运行环境和更新选项，保存后立即生效，无需重启。设置入口仅在任务设置页显示。
+| 类别 | 可以设置什么 |
+| --- | --- |
+| 外观 | 浅色或暗色主题 |
+| 抓取 | 页面等待、验证等待和翻页失败次数 |
+| 会话 | 登录状态复用、有效期和下载前等待时间 |
+| 日志 | 日志级别，以及是否记录检索词和保存路径 |
+| 运行环境 | 检查浏览器、系统组件和目录权限 |
+| 更新 | 检查更新、选择下载线路、测试连接 |
 
-手动编辑配置文件后，可在设置窗口点击重新读取配置；GUI 开始抓取前也会读取配置文件。终端版需重新启动程序。
+![设置窗口的抓取页，显示页面等待、安全验证等待和翻页失败次数](assets/guide/settings-scraping.png)
 
-恢复默认只填写设置窗口中的选项，点击保存后才会写入文件。重新读取配置会立即应用文件中的设置；读取失败时保留当前设置。
+点击“保存”后应用设置；“恢复默认”只填写默认值，确认后仍需点击“保存”
 
-```json
-{
-  "version": 2,
-  "timeout_goto_ms": 30000,
-  "timeout_load_ms": 20000,
-  "timeout_selector_ms": 15000,
-  "verify_wait_timeout_sec": 180,
-  "verify_notice_interval_sec": 15,
-  "max_advance_fail": 2,
-  "session_cache_enabled": true,
-  "session_cache_ttl_hours": 12,
-  "download_auth_wait_sec": 60,
-  "log_level": "INFO",
-  "log_save_path": true,
-  "log_keywords": false,
-  "log_scraped_records": false,
-  "detail_txt_export": false,
-  "gui_theme": "litera",
-  "update_source": "auto",
-  "linux_setup_completed": false,
-  "output_dir": ""
-}
-```
+手动编辑 `config.json` 后，可点击“重新读取配置”应用，读取失败时保留当前设置；GUI 开始抓取前也会读取文件，终端版需要重启
 
-| 参数                           | 默认值      | 可填值                                | 作用                                   |
-|------------------------------|----------|------------------------------------|--------------------------------------|
-| `version`                    | `2`      | 正整数                                | 配置文件版本号，不建议手动修改                      |
-| `timeout_goto_ms`            | `30000`  | 正整数，毫秒                             | 打开 CNKI 页面时的最长等待时间                   |
-| `timeout_load_ms`            | `20000`  | 正整数，毫秒                             | 等待页面加载的最长时间                          |
-| `timeout_selector_ms`        | `15000`  | 正整数，毫秒                             | 等待搜索框、结果表格、翻页按钮等元素的最长时间              |
-| `verify_wait_timeout_sec`    | `180`    | 正整数，秒                              | 等待用户完成滑块或安全验证的最长时间                   |
-| `verify_notice_interval_sec` | `15`     | 正整数，秒                              | 验证等待期间的提醒间隔                          |
-| `max_advance_fail`           | `2`      | 正整数                                | 连续翻页失败多少次后结束当前关键词                    |
-| `session_cache_enabled`      | `true`   | `true` / `false`                   | 是否复用抓取和 PDF 下载各自保存的浏览器会话 |
-| `session_cache_ttl_hours`    | `12`     | 正整数，小时                             | Cookie 会话缓存的有效期                      |
-| `download_auth_wait_sec`    | `60`     | 非负整数，秒                             | 下载前在知网首页等待机构授权的时间，可点“立即继续”提前开始 |
-| `log_level`                  | `"INFO"` | `"INFO"` / `"WARNING"` / `"ERROR"` | 日志级别                                 |
-| `log_save_path`              | `true`   | `true` / `false`                   | 是否在日志中记录导出文件路径                       |
-| `log_keywords`               | `false`  | `true` / `false`                   | 是否在日志中记录关键词                          |
-| `log_scraped_records`        | `false`  | `true` / `false`                   | 是否记录详细的抓取统计                          |
-| `detail_txt_export`          | `false`  | `true` / `false`                   | 抓取论文详情时是否额外导出关键词 TXT                 |
-| `gui_theme`                  | `"litera"` | `"litera"` / `"darkly"`          | GUI 浅色或暗色主题，随设置保存并记忆                 |
-| `update_source`              | `"auto"` | `"auto"` / `"ghproxy.net"` / `"ghfast.top"` / `"gh-proxy.org"` / `"direct"` | GUI 更新下载线路 |
-| `linux_setup_completed`      | `false` | `true` / `false` | Linux AppImage 是否已完成初始化，由初始化设置保存 |
-| `output_dir`                 | `""` | 目录路径或空字符串 | GUI 论文保存目录；空字符串使用默认桌面目录 |
+## 常用调整
 
-抓取会话保存在用户数据目录的 `cache/cookies`，PDF 下载会话保存在 `cache/download_cookies`，两者使用相同的有效期设置。下载缓存为空时可读取有效的抓取会话，下载后的状态单独保存。
+| 遇到的情况 | 建议调整 |
+| --- | --- |
+| 页面加载慢，经常超时 | 在“抓取”中适当增加页面导航、页面加载、元素与结果等待时间 |
+| 验证码还没处理完，程序已停止等待 | 增加“安全验证等待时间” |
+| 机构授权需要更长时间 | 在“会话”中增加“下载前首页等待（秒）” |
+| 保存的登录状态异常 | 关闭复用浏览器会话，重新完成登录 |
+| 分享日志时希望省去本机路径 | 关闭日志中的保存路径记录 |
+| 需要将论文关键词用于下一轮检索 | 在任务的“更多选项”中勾选“另存论文关键词 TXT” |
 
-## 初始化与运行环境
+## 配置参数
 
-Linux AppImage 在初始化完成前显示初始化设置，可选择论文保存目录并检查运行环境。程序依次尝试系统 Chrome、系统 Chromium 和已下载的 Chromium；需要下载时，点击“安装 Chromium”。缺少系统组件时，页面列出缺失项和安装指引；Ubuntu/Debian 使用适用的 Playwright 安装命令，Fedora 可通过 `sudo dnf install chromium` 安装系统浏览器及其组件。检查通过后点击“开始使用”保存设置。点击“稍后设置”时，下次启动仍会显示初始化设置。
+配置文件使用 JSON，布尔值写为 `true` 或 `false`，路径中的 Windows 反斜杠需要写成 `\\`，也可以使用 `/`
 
-Windows 直接进入主窗口。Windows 和 Linux 都可在“设置 → 运行环境”中手动检查程序组件、系统组件、浏览器和目录写入权限。浏览器检查会短暂打开一个空白窗口。
+设置窗口中的时间以秒显示，下面三个以 `_ms` 结尾的配置项以毫秒保存，例如 `30000` 表示 30 秒
 
-通过程序下载的 Chromium 默认保存在 Linux 的 `~/.cache/ms-playwright/`，设置 `XDG_CACHE_HOME` 时使用该目录下的 `ms-playwright/`；`PLAYWRIGHT_BROWSERS_PATH` 可指定下载位置。系统浏览器沿用原安装位置。完成初始化后，浏览器检查和安装仍可从设置中操作。
+### 抓取与等待
 
-## GUI 更新
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `timeout_goto_ms` | `30000` | 打开知网页面的最长等待时间，毫秒 |
+| `timeout_load_ms` | `20000` | 等待页面加载的最长时间，毫秒 |
+| `timeout_selector_ms` | `15000` | 等待搜索框、结果表格等控件的最长时间，毫秒 |
+| `verify_wait_timeout_sec` | `180` | 等待人工完成安全验证的最长时间，秒 |
+| `verify_notice_interval_sec` | `15` | 等待验证期间的提醒间隔，秒 |
+| `max_advance_fail` | `2` | 连续翻页失败达到该次数后，结束当前检索项 |
 
-- 自动：依次尝试 `ghproxy.net`、`ghfast.top`、`gh-proxy.org`，最后使用原始 GitHub 地址；网络错误时换源，每条线路一次。
-- 指定加速源：只使用选中的下载线路。
-- 无加速（系统代理）：更新信息和文件均使用 GitHub 原始地址，遵循 Python urllib 支持的系统及环境 HTTP/HTTPS 代理设置，不强制直连。
+这些参数均填写正整数
 
-加速模式优先从 JSDMirror 读取更新信息，不可用时尝试 GitHub API。下载固定到检查结果中的版本；换源时重新下载，文件校验失败会停止更新。
+### 浏览器会话
 
-测试连接检查当前模式下的更新信息和对应平台的下载地址，只读取文件开头的一小段。自动模式检查全部候选下载线路。
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `session_cache_enabled` | `true` | 复用已保存的浏览器登录状态 |
+| `session_cache_ttl_hours` | `12` | 登录状态有效期，填写正整数，单位为小时 |
+| `download_auth_wait_sec` | `60` | 下载前在知网首页等待授权的时间，填写非负整数，单位为秒 |
 
-Windows GUI EXE 和 Linux x86-64 AppImage 支持下载并替换后重启。AppImage 原文件所在目录可写时，更新保留原文件名和位置；无法直接替换时，可选择位置保存新版本。更新后主窗口成功启动时，会清理旧版本备份和本次更新临时文件。配置、登录状态和论文文件继续保留。
+抓取与 PDF 下载分别保存登录状态，使用相同的有效期设置，具体目录见[配置与数据位置](#配置与数据位置)
 
-源码和 Python 包安装方式通过发布页或 pip 手动更新。
+### 日志
 
-## 常见调整
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `log_level` | `"INFO"` | `INFO` 记录常规过程，`WARNING` 记录警告与错误，`ERROR` 只记录错误 |
+| `log_save_path` | `true` | 在日志中记录导出文件路径 |
+| `log_keywords` | `false` | 在日志中记录检索词 |
+| `log_scraped_records` | `false` | 在日志中记录详细抓取统计 |
 
-- 网络慢：把 `timeout_goto_ms`、`timeout_load_ms`、`timeout_selector_ms` 适当调大
-- 验证码来不及处理：把 `verify_wait_timeout_sec` 调大
-- 会话状态异常：抓取会话可删除用户数据目录中的 `cache/cookies`，PDF 下载会话可删除 `cache/download_cookies`；也可在 GUI 设置中关闭复用浏览器会话。终端版将 `session_cache_enabled` 改为 `false` 后重启
-- 不想日志记录本机路径：把 `log_save_path` 改为 `false`
-- 需要把论文关键词重新导入软件：把 `detail_txt_export` 改为 `true` 后重启
+### 导出与外观
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `detail_txt_export` | `false` | 采集论文详情时，额外导出论文关键词 TXT |
+| `output_dir` | `""` | 文献保存目录，留空时使用默认桌面目录 |
+| `gui_theme` | `"litera"` | `litera` 为浅色，`darkly` 为暗色 |
+| `update_source` | `"auto"` | `auto` 自动选择，也可填 `ghproxy.net`、`ghfast.top`、`gh-proxy.org` 或 `direct` |
+
+### 程序管理的参数
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `version` | `2` | 配置文件格式版本，由程序维护 |
+| `linux_setup_completed` | `false` | Linux AppImage 是否完成首次设置，由初始化窗口保存 |
+
+## 配置与数据位置
+
+在下列目录中可以找到 `config.json`，日志、登录状态和任务记录也存放在这里
+
+| 启动方式 | 数据目录 |
+| --- | --- |
+| Windows EXE、直接运行源码 | 启动文件所在目录的 `CNKIBug-data/` |
+| Linux AppImage、Linux Python 包 | `~/.local/share/CNKIBug-data/` |
+| Windows Python 包 | `%LOCALAPPDATA%/CNKIBug-data/` |
+
+Linux 设置了 `XDG_DATA_HOME` 时，使用该目录下的 `CNKIBug-data/`
+
+| 内容 | 数据目录内的位置 |
+| --- | --- |
+| 配置 | `config.json` |
+| 日志 | `log/` |
+| 任务报告 | `status/` |
+| 抓取登录状态 | `cache/cookies` |
+| PDF 下载登录状态 | `cache/download_cookies` |
+
+如需清除某类登录状态，先结束相关任务，再删除对应的登录状态文件；下载登录状态为空时，程序可能读取仍有效的抓取登录状态
+
+文献导出和 PDF 的保存位置由主窗口指定，分享日志或报告前请检查个人路径和登录信息
+
+## 运行环境
+
+在“设置 → 运行环境”中点击“开始检查”，可以检查程序组件、浏览器、系统组件和目录写入权限，检查期间可能短暂打开空白浏览器窗口
+
+Windows 优先使用 Microsoft Edge，Linux 依次尝试系统 Chrome、系统 Chromium 和通过程序安装的 Chromium
+
+| 检查结果 | 处理方法 |
+| --- | --- |
+| Linux 找不到浏览器 | 点击“安装 Chromium”，完成后重新检查 |
+| Ubuntu/Debian 缺少系统组件 | 按检查页面提供的安装命令处理 |
+| Fedora 缺少浏览器或组件 | 可运行 `sudo dnf install chromium` 安装系统浏览器 |
+| 保存目录不可写 | 更换到当前用户可写的目录 |
+
+Linux AppImage 首次设置检查通过后，点击“开始使用”；选择“稍后设置”会在下次启动时再次显示初始化窗口
+
+程序下载的 Chromium 默认位于 `~/.cache/ms-playwright/`，设置 `XDG_CACHE_HOME` 时使用其下的 `ms-playwright/`，也可通过 `PLAYWRIGHT_BROWSERS_PATH` 指定位置
+
+## 更新软件
+
+打开“设置 → 更新”，选择下载线路后点击“检查更新”，连接不畅时可先点击“测试连接”
+
+| 下载线路 | 行为 |
+| --- | --- |
+| 自动 | 依次尝试三个加速源，最后使用 GitHub 原始地址 |
+| 指定加速源 | 使用所选线路 |
+| 无加速（系统代理） | 使用 GitHub 原始地址，并沿用支持的系统或环境代理设置 |
+
+Windows EXE 和 Linux AppImage 支持下载更新、替换程序并重启，配置、登录状态和文献文件保留
+
+AppImage 所在目录可写时沿用原文件名和位置，否则可选择另一个位置保存；Python 包和源码安装的更新方式见各自安装说明
+
+[Python 包更新](pypi.md#更新) · [源码更新](development.md#更新源码)

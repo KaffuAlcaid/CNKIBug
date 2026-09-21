@@ -229,3 +229,6 @@ __marimo__/
 /AGENTS.md
 /PROJECT.md
 /.codex/
+
+# Local documentation drafts and media staging
+/cache/
