@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "tag_name": "v0.9.0",
+  "published_at": "2026-09-21T08:27:10Z",
+  "body": "1. 调整主窗口、设置和提示框布局，普通检索项支持行内编辑\n2. 支持保存和载入检索方案，恢复检索条件与输出选项\n3. 支持补抓所选文献的缺失详情、关联本地 PDF，并直接发送到 Zotero\n4. 支持查询期刊的 ISSN、CN、收录信息和影响因子原文\n5. 支持同时导出 Excel、CSV、RIS，完善文献去重、RIS 类型映射及检索来源保留\n6. PDF 下载完成后再生成最终文件，减少中断留下不完整 PDF 的问题\n7. 重写 README 和使用说明，补充 Windows 界面截图与操作演示\n\n高级检索、PDF 下载、Zotero 直接发送和期刊信息查询属于实验性功能\n\nLinux AppImage 仍为实验性版本，尚未完成不同发行版下的实际运行验证\n",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "CNKIBug-GUI-x86_64.AppImage",
+      "state": "uploaded",
+      "size": 64993784,
+      "digest": "sha256:d6851e7618cf0ec872ef34eaca68733407b74e1f5dbfa81000397bac2b368bcc",
+      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v0.9.0/CNKIBug-GUI-x86_64.AppImage"
+    },
+    {
+      "name": "CNKIBug-GUI.exe",
+      "state": "uploaded",
+      "size": 64000125,
+      "digest": "sha256:9796a1cebf6fa9468d7ad0bd9d642d993caa7eb1705a861fbe525e6e5e10050f",
+      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v0.9.0/CNKIBug-GUI.exe"
+    }
+  ]
+}
