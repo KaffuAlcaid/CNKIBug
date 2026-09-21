@@ -31,7 +31,6 @@ from ..browser.environment import system_process_environment
 
 REPOSITORY = "KaffuAlcaid/CNKIBug"
 RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
-MANIFEST_URL = f"https://cdn.jsdmirror.com/gh/{REPOSITORY}@updates/latest.json"
 GUI_ASSET = "CNKIBug-GUI.exe"
 LINUX_GUI_ASSET = "CNKIBug-GUI-x86_64.AppImage"
 UPDATE_SCRIPT = Path(__file__).with_name("apply_update.ps1")
@@ -143,8 +142,7 @@ def download_sources(source: str) -> tuple[str, ...]:
 
 def _metadata_sources(source: str) -> tuple[tuple[str, str], ...]:
     download_sources(source)
-    direct = ("GitHub", RELEASE_API)
-    return (direct,) if source == "direct" else (("JSDMirror", MANIFEST_URL), direct)
+    return (("GitHub", RELEASE_API),)
 
 
 def check_release(

@@ -130,7 +130,7 @@ AppImage 通过 `APPIMAGE` 定位自身，运行数据位置见[配置说明](co
 
 Release 附件上传后，`scripts/publish_update.py` 将正式版本号、说明、附件地址、大小和 SHA-256 写入 `updates` 分支的 `latest.json`
 
-GUI 根据平台选择附件，加速模式优先读取 JSDMirror 上的更新清单，无法读取时再访问 GitHub API；下载地址固定到本次检查到的版本，校验失败时停止更新
+GUI 通过 GitHub Release API 获取最新正式发布，与本地版本比较后按平台选择附件；安装包使用所选下载线路，下载地址固定到本次检查到的版本，校验失败时停止更新
 
 仓库 Secret `JSDMIRROR_API_KEY` 用于请求 CDN 缓存刷新，更新清单地址为：
 

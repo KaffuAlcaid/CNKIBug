@@ -231,12 +231,30 @@ def test_published_manifest_round_trips_through_the_updater():
     assert not linux_release.ready
 
 
-def test_direct_update_check_uses_only_github_api(monkeypatch):
-    read = Mock(return_value=_release())
-    monkeypatch.setattr(updater, "_read_release", read)
-    updater.check_release(source="direct")
-    assert read.call_args.args[0] == updater.RELEASE_API
-    assert read.call_count == 1
+@pytest.mark.parametrize("source", ["auto", "ghfast.top", "direct"])
+@pytest.mark.parametrize("github_available", [True, False])
+def test_update_check_does_not_use_stale_cdn_version(monkeypatch, source, github_available):
+    requests = []
+
+    def open_url(request, **kwargs):
+        requests.append(request.full_url)
+        if request.full_url == updater.RELEASE_API:
+            if not github_available:
+                raise URLError("offline")
+            tag = "v0.9.0"
+        else:
+            tag = "v0.7.0"
+        return io.BytesIO(json.dumps({"tag_name": tag, "assets": []}).encode())
+
+    monkeypatch.setattr(updater, "urlopen", open_url)
+    if github_available:
+        release = updater.check_release("0.8.0", source=source)
+        assert release.version == "0.9.0"
+        assert release.newer
+    else:
+        with pytest.raises(updater.UpdateError, match="无法取得更新信息"):
+            updater.check_release("0.8.0", source=source)
+    assert requests == [updater.RELEASE_API]
 
 
 def test_connection_probe_reads_only_the_beginning_of_the_executable(monkeypatch):
