@@ -50,7 +50,6 @@ def test_fetch_gbt_citation_clicks_inner_icon_and_closes_popup(page):
         page,
         page.query_selector("#result-row"),
         log_ref="page=1 row=1",
-        timeout_ms=500,
     )
 
     assert citation == "示例引文[J]. 测试期刊,2026."
@@ -67,7 +66,6 @@ def test_fetch_gbt_citation_only_removes_leading_one_index(page):
         page,
         page.query_selector("#result-row"),
         log_ref="page=1 row=1",
-        timeout_ms=500,
     )
 
     assert citation == "[2] 示例引文[J]. 测试期刊,2026."
