@@ -625,6 +625,7 @@ class ResultsWindow:
                     if self._hide_when_done:
                         self._hide_when_done = False
                         self.window.withdraw()
+                        self.window.event_generate("<<ResultsClosed>>")
         except Empty:
             pass
         self.window.after(100, self._drain)
@@ -648,6 +649,7 @@ class ResultsWindow:
                 self._hide_when_done = True
                 return
         self.window.withdraw()
+        self.window.event_generate("<<ResultsClosed>>")
 
     def shutdown(self):
         self._closing = True

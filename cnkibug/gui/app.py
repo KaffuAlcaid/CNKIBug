@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
+import webbrowser
 from base64 import b64encode
 from dataclasses import replace
 from io import BytesIO
@@ -118,6 +119,7 @@ class CNKIBugApp:
         self._active_include_citation = False
         self._active_output_dir: Path | None = None
         self._result_prompt_pending = False
+        self._star_prompt_pending = False
 
         self._build_ui()
         self._apply_config(self.runtime.config)
@@ -469,6 +471,7 @@ class CNKIBugApp:
         self._active_output_dir = output_dir
         self._current_results = []
         self._result_prompt_pending = False
+        self._star_prompt_pending = False
         viewer = getattr(self, "_results_window", None)
         if viewer is not None and viewer.window.winfo_exists():
             viewer.set_papers(self._current_results)
@@ -561,6 +564,7 @@ class CNKIBugApp:
                     self._pending_confirms.remove(response_queue)
         elif name == "progress_completed":
             self._task_form.clear()
+            self._star_prompt_pending = True
         elif name == "task_report":
             if "all_results" in payload and not getattr(self, "_result_prompt_pending", False):
                 self._current_results = papers_from_results(payload["all_results"], getattr(self, "_active_include_citation", False))
@@ -584,6 +588,7 @@ class CNKIBugApp:
             response_queue.put(answer)
             self._pending_confirms.remove(response_queue)
         elif name == "worker_failed":
+            self._star_prompt_pending = False
             messagebox.showerror("任务异常结束", str(payload.get("error", "未知错误")), parent=self.root)
         elif name == "worker_done":
             viewer = getattr(self, "_results_window", None)
@@ -621,6 +626,7 @@ class CNKIBugApp:
             can_run=lambda: not self._running,
             prepare_browser=self._ensure_browser_ready,
         )
+        self._results_window.window.bind("<<ResultsClosed>>", lambda _: self._offer_star())
 
     def _show_form(self) -> None:
         if self._running:
@@ -628,6 +634,48 @@ class CNKIBugApp:
         self._task_progress.pack_forget()
         self._task_form.show(self._footer)
         self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
+        self._offer_star()
+
+    def _offer_star(self) -> None:
+        if (
+            not self._star_prompt_pending
+            or self.runtime.config.get("star_prompt_shown", False)
+            or not self._current_results
+            or self._running
+            or self._close_when_done
+            or self._downloads_running()
+            or self.root.grab_current() is not None
+        ):
+            return
+        viewer = self._results_window
+        if viewer is not None and viewer.window.winfo_exists() and viewer.window.state() != "withdrawn":
+            return
+
+        self._star_prompt_pending = False
+        try:
+            config = read_config(self.runtime.paths.config_path)
+            if config.get("star_prompt_shown", False):
+                return
+            config = save_config(self.runtime.paths.config_path, {**config, "star_prompt_shown": True})
+        except (OSError, ValueError) as error:
+            _logger.warning("无法保存 Star 邀请状态，跳过邀请: %s", error)
+            return
+        self._apply_config(config)
+        if messagebox.askyesno(
+            "支持 CNKIBug",
+            "CNKIBug 已经帮你完成了一次文献任务\n\n"
+            "如果它对你有帮助，欢迎在 GitHub 给项目一个 Star，这会帮助更多人发现它",
+            parent=self.root, default=messagebox.NO, icon="info",
+            confirm="去 GitHub Star", decline="不了，谢谢",
+        ):
+            url = "https://github.com/KaffuAlcaid/CNKIBug"
+            try:
+                opened = webbrowser.open(url)
+            except (OSError, webbrowser.Error) as error:
+                _logger.warning("无法打开 GitHub 项目主页: %s", error)
+                opened = False
+            if not opened:
+                messagebox.showinfo("打开 GitHub", f"请在浏览器中访问\n\n{url}", parent=self.root)
 
     def _tick(self) -> None:
         self._task_progress.tick()
@@ -679,6 +727,7 @@ class CNKIBugApp:
                 response_queue.put(False)
 
     def _close_application(self) -> None:
+        self._star_prompt_pending = False
         viewer = getattr(self, "_results_window", None)
         if viewer is not None and viewer.alive:
             viewer.shutdown()

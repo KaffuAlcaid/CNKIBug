@@ -70,11 +70,11 @@ def showerror(title, message, *, parent=None):
     return OK
 
 
-def askyesno(title, message, *, parent=None, default=YES, icon="question"):
+def askyesno(title, message, *, parent=None, default=YES, icon="question", confirm="是", decline="否"):
     return _show(
-        title, message, ["否:secondary", "是:primary"], parent=parent,
-        default="否" if default == NO else "是", icon=icon,
-    ) == "是"
+        title, message, [f"{decline}:secondary", f"{confirm}:primary"], parent=parent,
+        default=decline if default == NO else confirm, icon=icon,
+    ) == confirm
 
 
 def askyesnocancel(title, message, *, parent=None, default=YES, icon="question"):

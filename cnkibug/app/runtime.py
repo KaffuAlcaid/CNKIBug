@@ -36,6 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "gui_theme": "litera",
     "update_source": "auto",
     "linux_setup_completed": False,
+    "star_prompt_shown": False,
     "output_dir": "",
 }
 
@@ -291,7 +292,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
     for key, default in DEFAULT_CONFIG.items():
         if key not in raw:
             changed = True
-            level = "INFO" if key in ("gui_theme", "update_source", "linux_setup_completed", "output_dir") or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
+            level = "INFO" if key in ("gui_theme", "update_source", "linux_setup_completed", "star_prompt_shown", "output_dir") or (raw_version == 1 and key == "detail_txt_export") else "WARNING"
             events.append((level, f"配置项缺失，已使用默认值: {key}={default!r}"))
             continue
         config[key] = raw[key]
@@ -336,6 +337,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
 
     bool_keys = (
         "linux_setup_completed",
+        "star_prompt_shown",
         "session_cache_enabled",
         "log_save_path",
         "log_keywords",
