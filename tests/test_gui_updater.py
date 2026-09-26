@@ -257,25 +257,40 @@ def test_update_check_does_not_use_stale_cdn_version(monkeypatch, source, github
     assert requests == [updater.RELEASE_API]
 
 
-def test_connection_probe_reads_only_the_beginning_of_the_executable(monkeypatch):
-    monkeypatch.setattr(updater, "_read_release", lambda *args, **kwargs: _release())
+@pytest.mark.parametrize("source,metadata_available,content,confirmed", [
+    ("auto", True, b"MIT License\n", True),
+    ("direct", False, b"MIT License\n", True),
+    ("ghfast.top", True, b"<html>Service unavailable</html>", False),
+    ("ghfast.top", True, b"MZexecutable", False),
+    ("ghfast.top", True, None, False),
+])
+def test_connection_probe_uses_repository_file_without_requesting_release_assets(
+    monkeypatch, source, metadata_available, content, confirmed,
+):
     requests = []
-    reads = []
 
     class Response(io.BytesIO):
-        status = 206
-
-        def read(self, size=-1):
-            reads.append(size)
-            return super().read(size)
+        status = 200
 
     def open_url(request, **kwargs):
         requests.append(request)
-        return Response(b"MZ" + b"x" * 2048)
+        if request.full_url == updater.RELEASE_API:
+            if not metadata_available:
+                raise URLError("offline")
+            return Response(json.dumps({"tag_name": "v0.9.0", "assets": []}).encode())
+        if content is None:
+            raise URLError("connection timed out")
+        return Response(content)
 
     monkeypatch.setattr(updater, "urlopen", open_url)
     results = []
-    updater.probe_connections("direct", Event(), results.append)
-    assert requests[0].get_header("Range") == "bytes=0-1023"
-    assert reads == [1024]
-    assert "文件下载）：可用" in results[-1]
+    updater.probe_connections(source, Event(), results.append)
+    target = "https://github.com/KaffuAlcaid/CNKIBug/raw/refs/heads/main/LICENSE"
+    routes = ("ghproxy.net", "ghfast.top", "gh-proxy.org", "direct") if source == "auto" else (source,)
+    assert [request.full_url for request in requests] == [updater.RELEASE_API] + [
+        target if route == "direct" else f"https://{route}/{target}" for route in routes
+    ]
+    assert all(request.get_method() == "GET" and request.get_header("Range") is None for request in requests)
+    assert len(results) == 1 + len(routes)
+    expected = "线路连接）：成功，响应耗时" if confirmed else "线路连接）：未确认"
+    assert all(expected in result for result in results[1:])

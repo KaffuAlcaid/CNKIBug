@@ -31,6 +31,7 @@ from ..browser.environment import system_process_environment
 
 REPOSITORY = "KaffuAlcaid/CNKIBug"
 RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+CONNECTION_CHECK_URL = f"https://github.com/{REPOSITORY}/raw/refs/heads/main/LICENSE"
 GUI_ASSET = "CNKIBug-GUI.exe"
 LINUX_GUI_ASSET = "CNKIBug-GUI-x86_64.AppImage"
 UPDATE_SCRIPT = Path(__file__).with_name("apply_update.ps1")
@@ -170,39 +171,34 @@ def _download_url(original: str, source: str) -> str:
 
 
 def probe_connections(source: str, cancelled: Event, on_result: Callable[[str], None]) -> None:
-    release = None
     for name, url in _metadata_sources(source):
         if cancelled.is_set():
             raise UpdateCancelled()
         started = time.monotonic()
         try:
-            release = _read_release(url, APP_VERSION, timeout=5)
+            _read_release(url, APP_VERSION, timeout=5)
         except UpdateError as error:
             on_result(f"{name}（更新信息）：不可用，{error}")
         else:
-            on_result(f"{name}（更新信息）：可用，延迟 {round((time.monotonic() - started) * 1000)} ms")
+            on_result(f"{name}（更新信息）：可用，响应耗时 {round((time.monotonic() - started) * 1000)} ms")
             break
-    if release is None or not release.ready:
-        on_result("未取得可用的 GUI 发布文件，无法检查文件下载。")
-        return
     for name in download_sources(source):
         if cancelled.is_set():
             raise UpdateCancelled()
-        request = Request(_download_url(release.download_url, name), headers={
-            "Range": "bytes=0-1023", "Accept-Encoding": "identity", "User-Agent": f"CNKIBug-GUI/{APP_VERSION}",
+        request = Request(_download_url(CONNECTION_CHECK_URL, name), headers={
+            "Accept-Encoding": "identity", "User-Agent": f"CNKIBug-GUI/{APP_VERSION}",
         })
         started = time.monotonic()
         try:
             with urlopen(request, timeout=5) as response:
                 data = response.read(1024)
-                expected_type = (data.startswith(b"\x7fELF") and data[8:11] == b"AI\x02") if release.asset_name.endswith(".AppImage") else data.startswith(b"MZ")
-                if response.status not in (200, 206) or not expected_type:
-                    raise UpdateError("返回文件与当前平台不匹配。")
+                if response.status != 200 or not data.startswith(b"MIT License\n"):
+                    raise UpdateError("未取得预期的检查文件")
         except (URLError, OSError, http.client.HTTPException, UpdateError) as error:
-            on_result(f"{SOURCE_LABELS[name]}（文件下载）：不可用，{error}")
+            on_result(f"{SOURCE_LABELS[name]}（线路连接）：未确认，{error}")
         else:
             elapsed = round((time.monotonic() - started) * 1000)
-            on_result(f"{SOURCE_LABELS[name]}（文件下载）：可用，延迟 {elapsed} ms")
+            on_result(f"{SOURCE_LABELS[name]}（线路连接）：成功，响应耗时 {elapsed} ms")
 
 
 def can_install_update() -> bool:
