@@ -99,6 +99,17 @@ class ResultsWindow:
         selection_menu = tk.Menu(self._selection_button, tearoff=False)
         selection_menu.add_command(label="全选筛选结果", command=self._select_visible)
         selection_menu.add_command(label="清空勾选", command=self._clear_checked)
+        selection_menu.add_separator()
+        for label, operation, failed in (
+            ("选择下载失败项", "download", True),
+            ("选择未下载项", "download", False),
+            ("选择详情补抓失败项", "details", True),
+            ("选择尚未补抓详情项", "details", False),
+        ):
+            selection_menu.add_command(
+                label=label,
+                command=lambda kind=operation, failures=failed: self._select_by_status(kind, failures),
+            )
         self._selection_button.configure(menu=selection_menu)
         self._download_button = ttk.Button(self._action_bar, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
         self._download_button.pack(side=tk.LEFT, padx=(8, 0))
@@ -300,6 +311,22 @@ class ResultsWindow:
         self._checked.clear()
         self._refresh_checks()
 
+    def _select_by_status(self, operation: str, failed: bool):
+        if self.busy:
+            return
+        statuses = self._statuses if operation == "download" else self._detail_statuses
+        excluded = {"已下载", "已关联 PDF", "下载中", "已停止"} if operation == "download" else {"详情已补齐", "无可补字段"}
+        self._checked.clear()
+        for index in self._visible:
+            status = statuses.get(index, "")
+            if failed:
+                matches = bool(status) and status not in excluded
+            else:
+                matches = not self._papers[index].pdf_path if operation == "download" else not status
+            if matches:
+                self._checked.add(index)
+        self._refresh_checks()
+
     def _refresh_checks(self):
         for index in self._visible:
             self.table.item(str(index), values=self._values(index))
@@ -307,6 +334,7 @@ class ResultsWindow:
 
     def _update_summary(self):
         self._summary.set(f"显示 {len(self._visible)} / {len(self._papers)} 篇，已勾选 {len(self._checked)} 篇")
+        self._selection_button.configure(state=tk.DISABLED if self.busy else tk.NORMAL)
         self._sync_export_types()
         self._download_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._paper_actions.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
@@ -452,7 +480,6 @@ class ResultsWindow:
             return
         self._statuses[index] = "已关联 PDF"
         self._row_statuses[index] = "已关联 PDF"
-        self._detail_statuses.pop(index, None)
         self._operation_status.set(f"已关联：{path.name}")
         self._populate()
 
@@ -583,7 +610,6 @@ class ResultsWindow:
                         self.cancel.set()
                 elif event.name == "paper_download":
                     index = payload["index"]
-                    self._detail_statuses.pop(index, None)
                     self._statuses[index] = payload["status"]
                     if payload["path"]:
                         self._papers[index].pdf_path = payload["path"]
