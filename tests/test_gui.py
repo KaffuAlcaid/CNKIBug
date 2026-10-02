@@ -147,6 +147,7 @@ def test_gui_confirmation_wait_ends_when_operation_is_cancelled():
 def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tmp_path):
     app = CNKIBugApp.__new__(CNKIBugApp)
     app._running = False
+    app._close_when_done = False
     app.root = object()
     app._set_running = Mock()
     errors = []
@@ -218,6 +219,8 @@ def _results_view():
     viewer._zotero_statuses = {}
     viewer._row_statuses = {}
     viewer._journal_infos = {}
+    viewer._unsaved_details = set()
+    viewer._unsaved_pdf_links = set()
     viewer.query = Mock(get=lambda: "query")
     viewer.table = Mock()
     viewer.table.selection.return_value = ()
@@ -489,6 +492,7 @@ def _settings_dialog(config=None):
     dialog.environment = Mock(busy=False)
     dialog.window = Mock()
     dialog._on_apply = Mock()
+    dialog._confirm_update = lambda _parent: True
     dialog._theme = Mock(get=lambda: "darkly")
     dialog._log_level = Mock(get=lambda: "INFO")
     dialog._update_source = Mock(get=lambda: "自动")

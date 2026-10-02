@@ -11,7 +11,7 @@ import ttkbootstrap as ttk
 from ..app.runtime import DEFAULT_CONFIG, read_config, save_config
 from ..core.version import APP_VERSION
 from .update_dialog import UpdateDialog
-from .updater import SOURCE_LABELS
+from .updater import SOURCE_LABELS, can_install_update
 from .environment import EnvironmentPanel
 from . import dialogs as messagebox
 from ..fileio.paths import get_real_desktop_path
@@ -38,6 +38,7 @@ class SettingsDialog:
         on_apply: Callable[[dict[str, Any]], None],
         *,
         on_restart: Callable[[], None],
+        confirm_update: Callable[[tk.Misc], bool] = lambda _parent: True,
         get_output_dir: Callable[[], Path] | None = None,
         can_check_environment: Callable[[], bool] = lambda: True,
         selected_tab: str | None = None,
@@ -46,6 +47,7 @@ class SettingsDialog:
         self._config_path = config_path
         self._on_apply = on_apply
         self._on_restart = on_restart
+        self._confirm_update = confirm_update
         self._closing = False
         self.window = ttk.Toplevel(title="设置", transient=parent, master=parent)
         self.window.withdraw()
@@ -269,6 +271,8 @@ class SettingsDialog:
     def _prepare_update(self, parent: tk.Misc) -> str | None:
         if self.environment.busy:
             messagebox.showinfo("运行环境正在处理", "请在环境检查或浏览器安装完成后更新程序。", parent=parent)
+            return None
+        if can_install_update() and not self._confirm_update(parent):
             return None
         try:
             config = self._collect()

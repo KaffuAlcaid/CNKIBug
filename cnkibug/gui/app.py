@@ -198,11 +198,12 @@ class CNKIBugApp:
             return False
 
     def _open_settings(self, *, selected_tab: str | None = None) -> None:
-        if self._running or self._downloads_running() or (selected_tab is None and not self._task_form.winfo_ismapped()):
+        if self._running or self._close_when_done or self._downloads_running() or (selected_tab is None and not self._task_form.winfo_ismapped()):
             return
         SettingsDialog(
             self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config,
             on_restart=self.root.destroy,
+            confirm_update=lambda parent: self._confirm_replace_results("更新并重启", parent=parent),
             get_output_dir=lambda: self._task_form.output_dir,
             can_check_environment=lambda: not (self._running or self._downloads_running()),
             selected_tab=selected_tab,
@@ -436,7 +437,7 @@ class CNKIBugApp:
         request: GuiTaskRequest | None = None,
         resume_state: dict[str, Any] | None = None,
     ) -> None:
-        if self._running:
+        if self._running or self._close_when_done:
             return
         if self._downloads_running():
             messagebox.showinfo("论文操作正在运行", "请在论文处理结束后开始抓取。", parent=self.root)
@@ -461,6 +462,8 @@ class CNKIBugApp:
                 search_options=SearchOptions.from_dict(resume_state.get("search_options")),
             )
         assert request is not None
+        if not self._confirm_replace_results("继续任务" if resume_state is not None else "开始新任务"):
+            return
 
         output_dir = request.output_dir or Path(get_real_desktop_path())
         try:
@@ -627,6 +630,16 @@ class CNKIBugApp:
         result = getattr(self, "_results_window", None)
         return bool(result is not None and result.busy)
 
+    def _confirm_replace_results(self, action: str, *, parent=None) -> bool:
+        viewer = getattr(self, "_results_window", None)
+        if viewer is None or not viewer.window.winfo_exists():
+            return True
+        confirmed = viewer.confirm_replace(action, parent=parent or self.root)
+        if not confirmed and parent is None:
+            viewer.window.deiconify()
+            viewer.window.lift()
+        return confirmed
+
     def _show_results(self) -> None:
         from .results import ResultsWindow
 
@@ -639,13 +652,13 @@ class CNKIBugApp:
             self.root, self._current_results, settings=self.settings, paths=self.runtime.paths,
             get_output_dir=lambda: self._task_form.output_dir,
             initial_format="csv" if self._task_form.output_format == "csv" else "xlsx",
-            can_run=lambda: not self._running,
+            can_run=lambda: not (self._running or self._close_when_done),
             prepare_browser=self._ensure_browser_ready,
         )
         self._results_window.window.bind("<<ResultsClosed>>", lambda _: self._offer_star())
 
     def _show_form(self) -> None:
-        if self._running:
+        if self._running or self._close_when_done:
             return
         self._task_progress.pack_forget()
         self._task_form.show(self._footer)
@@ -720,6 +733,8 @@ class CNKIBugApp:
             self._task_progress.append_log("已请求安全停止，请等待当前操作结束。", "warning")
 
     def _on_close(self) -> None:
+        if self._close_when_done:
+            return
         if self._downloads_running():
             if messagebox.askyesno("停止处理并退出", "停止当前论文处理并退出 CNKIBug？", parent=self.root):
                 self._close_application()
@@ -744,19 +759,25 @@ class CNKIBugApp:
 
     def _close_application(self) -> None:
         self._star_prompt_pending = False
+        self._close_when_done = True
         viewer = getattr(self, "_results_window", None)
-        if viewer is not None and viewer.alive:
-            viewer.shutdown()
+        if viewer is not None and (viewer.busy or viewer.alive):
+            viewer.cancel.set()
             self.root.after(200, self._exit_after_download)
-        else:
-            self.root.destroy()
+            return
+        if not self._confirm_replace_results("退出"):
+            self._close_when_done = False
+            return
+        if viewer is not None and viewer.window.winfo_exists():
+            viewer.shutdown()
+        self.root.destroy()
 
     def _exit_after_download(self) -> None:
         viewer = getattr(self, "_results_window", None)
-        if viewer is not None and viewer.alive:
+        if viewer is not None and (viewer.busy or viewer.alive):
             self.root.after(200, self._exit_after_download)
         else:
-            self.root.destroy()
+            self._close_application()
 
 
 def main(program_dir: Path, icon_path: Path | None = None) -> None:

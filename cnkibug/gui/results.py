@@ -58,6 +58,8 @@ class ResultsWindow:
         self._zotero_statuses: dict[int, str] = {}
         self._row_statuses: dict[int, str] = {}
         self._journal_infos: dict[int, dict] = {}
+        self._unsaved_details: set[int] = set()
+        self._unsaved_pdf_links: set[int] = set()
         self._sort_key = "publication_date"
         self._descending = True
         self._papers: list[Paper] = []
@@ -237,6 +239,8 @@ class ResultsWindow:
         self._zotero_statuses.clear()
         self._row_statuses.clear()
         self._journal_infos.clear()
+        self._unsaved_details.clear()
+        self._unsaved_pdf_links.clear()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
         self.search.set("")
@@ -408,13 +412,37 @@ class ResultsWindow:
     def open_file(self):
         if self.busy:
             return
+        if not self.can_run():
+            messagebox.showinfo("任务正在运行", "请在当前任务结束后打开其他结果文件", parent=self.window)
+            return
         path = filedialog.askopenfilename(parent=self.window, title="打开论文结果", filetypes=[("CNKIBug 结果", "*.xlsx *.csv"), ("Excel", "*.xlsx"), ("CSV", "*.csv")])
         if path:
             try:
-                self.set_papers(read_papers(path))
+                papers = read_papers(path)
+                if not self.confirm_replace("打开其他结果"):
+                    return
+                self.set_papers(papers)
                 self.window.title(f"CNKIBug - 论文结果 - {Path(path).name}")
             except Exception as error:
                 messagebox.showerror("无法打开结果文件", str(error), parent=self.window)
+
+    def confirm_replace(self, action: str, *, parent=None) -> bool:
+        if not self._unsaved_details and not self._unsaved_pdf_links:
+            return True
+        messages = []
+        if self._unsaved_details:
+            messages.append(f"有 {len(self._unsaved_details)} 篇文献的补抓详情尚未导出")
+        if self._unsaved_pdf_links:
+            messages.append(f"有 {len(self._unsaved_pdf_links)} 篇文献的 PDF 关联尚未导出")
+        messages.append(f"如果{action}，这些改动将丢失，PDF 文件不会被删除")
+        confirmed = messagebox.askyesno(
+            "尚未保存的结果", "\n\n".join(messages), parent=parent or self.window,
+            default=messagebox.NO, confirm=f"仍然{action}", decline="取消",
+        )
+        if not confirmed and parent is None:
+            self.window.deiconify()
+            self.window.lift()
+        return confirmed
 
     def _export(self):
         if not self._checked or self.busy:
@@ -422,7 +450,9 @@ class ResultsWindow:
         extensions = [extension for extension, value in self.export_formats.items() if value.get()]
         if not extensions:
             return
-        papers = [self._papers[i] for i in sorted(self._checked)]
+        indices = set(self._checked)
+        papers = [self._papers[i] for i in sorted(indices)]
+        include_pdf = self._include_pdf.get()
         try:
             directory = self._destination()
             base_name = datetime.now().strftime("cnki_selected_%Y%m%d_%H%M%S")
@@ -438,8 +468,14 @@ class ResultsWindow:
         for extension in extensions:
             path = directory / f"{name}.{extension}"
             try:
-                save_papers(path, papers, extension == "ris" and self._include_pdf.get())
+                save_papers(path, papers, extension == "ris" and include_pdf)
                 saved.append(path)
+                self._unsaved_details.difference_update(indices)
+                if extension == "ris" and include_pdf:
+                    self._unsaved_pdf_links.difference_update(
+                        index for index in indices
+                        if self._papers[index].pdf_path and Path(self._papers[index].pdf_path).is_file()
+                    )
             except Exception as error:
                 failures.append(f"{extension.upper()}：{error}")
         if saved:
@@ -473,11 +509,14 @@ class ResultsWindow:
         )
         if not filename:
             return
+        previous_path = paper.pdf_path
         try:
             path = associate_pdf(paper, filename)
         except (OSError, ValueError) as error:
             messagebox.showerror("无法关联 PDF", str(error), parent=self.window)
             return
+        if paper.pdf_path != previous_path:
+            self._unsaved_pdf_links.add(index)
         self._statuses[index] = "已关联 PDF"
         self._row_statuses[index] = "已关联 PDF"
         self._operation_status.set(f"已关联：{path.name}")
@@ -488,6 +527,7 @@ class ResultsWindow:
         if index is None:
             return
         self._papers[index].pdf_path = ""
+        self._unsaved_pdf_links.discard(index)
         self._statuses.pop(index, None)
         self._row_statuses.pop(index, None)
         self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
@@ -594,7 +634,9 @@ class ResultsWindow:
                 elif event.name == "paper_details":
                     index = payload["index"]
                     for key, value in payload["updates"].items():
-                        setattr(self._papers[index], key, value)
+                        if getattr(self._papers[index], key) != value:
+                            setattr(self._papers[index], key, value)
+                            self._unsaved_details.add(index)
                     self._detail_statuses[index] = payload["status"]
                     self._set_row_status(index, payload["status"])
                 elif event.name in {"paper_operation_progress", "activity_started"}:
@@ -611,8 +653,9 @@ class ResultsWindow:
                 elif event.name == "paper_download":
                     index = payload["index"]
                     self._statuses[index] = payload["status"]
-                    if payload["path"]:
+                    if payload["path"] and payload["path"] != self._papers[index].pdf_path:
                         self._papers[index].pdf_path = payload["path"]
+                        self._unsaved_pdf_links.add(index)
                     self._set_row_status(index, payload["status"])
                 elif event.name == "download_preparing":
                     remaining = payload["remaining"]
