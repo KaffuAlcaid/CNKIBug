@@ -301,6 +301,7 @@ class CNKIBugApp:
         self._task_form.pack(fill=tk.BOTH, expand=True)
         self._task_progress = TaskProgress(
             container, on_stop=self._request_stop, on_new_task=self._show_form,
+            on_resume=self._resume_task,
         )
         self._footer = ttk.Frame(container)
         self._footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
@@ -415,6 +416,20 @@ class CNKIBugApp:
                 f"断点文件仍然存在，尚未忽略该任务：\n{last_task_path}",
                 parent=self.root,
             )
+
+    def _resume_task(self) -> None:
+        if self._running or self._close_when_done:
+            return
+        if self._downloads_running():
+            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后继续任务。", parent=self.root)
+            return
+        state = load_last_task(self.runtime.paths)
+        if state is None:
+            self._task_progress.set_resume_available(False)
+            messagebox.showinfo("无法继续任务", "未找到可继续的任务断点。", parent=self.root)
+            return
+        self._task_form.populate_resume(state)
+        self._start_task(resume_state=state)
 
     def _start_task(
         self,
@@ -595,6 +610,7 @@ class CNKIBugApp:
             if viewer is not None and viewer.window.winfo_exists():
                 viewer.set_papers(self._current_results)
             self._set_running(False)
+            self._task_progress.set_resume_available(load_last_task(self.runtime.paths) is not None)
             if self._close_when_done:
                 self._close_application()
             elif getattr(self, "_result_prompt_pending", False):

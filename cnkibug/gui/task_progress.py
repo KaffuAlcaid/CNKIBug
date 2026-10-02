@@ -34,6 +34,7 @@ class TaskProgress(ttk.Frame):
         *,
         on_stop: Callable[[], None],
         on_new_task: Callable[[], None],
+        on_resume: Callable[[], None],
     ) -> None:
         super().__init__(parent, padding=(0, 8))
         self._task_started_at: float | None = None
@@ -119,6 +120,12 @@ class TaskProgress(ttk.Frame):
             bootstyle="secondary",
         )
         self._new_task_button.pack(side=tk.LEFT)
+        self._resume_button = ttk.Button(
+            stop_row,
+            text="继续未完成任务",
+            command=on_resume,
+            bootstyle="primary",
+        )
         self._stop_button = ttk.Button(
             stop_row,
             text="安全停止",
@@ -155,9 +162,16 @@ class TaskProgress(ttk.Frame):
     def set_running(self, running: bool) -> None:
         self._stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
         if running:
+            self.set_resume_available(False)
             self._stop_button.pack(side=tk.RIGHT)
         else:
             self._stop_button.pack_forget()
+
+    def set_resume_available(self, available: bool) -> None:
+        if available:
+            self._resume_button.pack(side=tk.LEFT, padx=(8, 0), after=self._new_task_button)
+        else:
+            self._resume_button.pack_forget()
 
     def disable_stop(self) -> None:
         self._stop_button.configure(state=tk.DISABLED)

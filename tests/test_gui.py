@@ -175,8 +175,9 @@ def test_gui_does_not_start_when_output_directory_is_unavailable(monkeypatch, tm
     app._set_running.assert_not_called()
 
 
-def test_finished_task_updates_existing_results_even_when_display_is_declined(monkeypatch):
+def test_finished_task_updates_existing_results_even_when_display_is_declined(monkeypatch, tmp_path):
     app = CNKIBugApp.__new__(CNKIBugApp)
+    app.runtime = SimpleNamespace(paths=get_runtime_paths(tmp_path))
     app.root = Mock()
     app._task_progress = Mock(spec=TaskProgress, completed=True)
     app._set_running = Mock()
