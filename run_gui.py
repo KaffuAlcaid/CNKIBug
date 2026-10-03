@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import traceback
@@ -145,6 +146,10 @@ def _resource_path(filename: str) -> Path:
 
 
 if __name__ == "__main__":
+    if sys.platform == "linux" and getattr(sys, "frozen", False):
+        from cnkibug.browser.environment import browser_cache_directory
+
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browser_cache_directory()))
     if sys.argv[1:] == ["--install-system-deps"]:
         from cnkibug.browser.environment import run_system_dependency_installer
 

@@ -15,6 +15,7 @@ trap 'rm -rf -- "$staging"' EXIT
 python -m PyInstaller --noconfirm --clean --onedir --windowed --noupx --strip \
     --name CNKIBug-GUI --copy-metadata cnkibug --copy-metadata ttkbootstrap \
     --copy-metadata playwright --collect-all ttkbootstrap \
+    --hidden-import PIL._tkinter_finder \
     --add-data "$project_dir/icon.ico:." --add-data "$project_dir/pyproject.toml:." \
     --add-data "$project_dir/cnkibug/gui/apply_update.sh:cnkibug/gui" \
     --distpath "$staging/dist" --workpath "$staging/work" --specpath "$staging" \
