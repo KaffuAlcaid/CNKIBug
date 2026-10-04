@@ -35,6 +35,8 @@ CNKIBug 能帮助你围绕研究主题在中国知网（CNKI）上批量查找�
 高级检索、PDF 下载、Zotero 直接发送和期刊信息查询属于实验性功能\
 下载全文需要对应文献的机构或个人访问权限
 
+![在论文结果窗口筛选文献、查看摘要和引文](docs/assets/results-filtering.gif)
+
 ## 开始使用
 
 Windows 10/11 用户可直接运行下载的 `CNKIBug-GUI.exe`，电脑需要安装 Microsoft Edge
@@ -52,20 +54,28 @@ Linux 提供实验性的 x86-64 AppImage，也可通过源码运行，安装步�
 <details>
 <summary>安排普通检索与高级检索任务</summary>
 
+![普通检索项与高级条件混合排列的任务设置窗口](docs/assets/task-setup.png)
+
 </details>
 
 <details>
 <summary>选择检索范围、排序和语种</summary>
+
+![检索范围、排序方式、资源语种和每页条数设置](docs/assets/search-options.png)
 
 </details>
 
 <details>
 <summary>补抓详情、关联 PDF、发送到 Zotero</summary>
 
+![论文结果窗口中的多格式导出选项与论文操作菜单](docs/assets/paper-actions.png)
+
 </details>
 
 <details>
 <summary>查看导出的文献字段</summary>
+
+![Excel 导出示例，展示题名、作者、来源、发表日期、文献类型、DOI 和统计字段](docs/assets/export-fields.png)
 
 [查看完整导出截图](docs/assets/export-full.png)
 
@@ -73,6 +83,8 @@ Linux 提供实验性的 x86-64 AppImage，也可通过源码运行，安装步�
 
 <details>
 <summary>设置抓取参数与运行环境</summary>
+
+![包含外观、抓取、会话、日志、运行环境和更新选项的设置窗口](docs/assets/settings.png)
 
 </details>
 
