@@ -5,7 +5,8 @@ from tkinter import font
 
 import ttkbootstrap as ttk
 from ttkbootstrap.utility import scale_size
-from ttkbootstrap.widgets.scrolled import ScrolledText
+from ttkbootstrap.style import Colors
+from ttkbootstrap.widgets.scrolled import ScrolledFrame, ScrolledText
 
 
 def apply_appearance(root: tk.Misc) -> None:
@@ -25,6 +26,47 @@ def apply_appearance(root: tk.Misc) -> None:
     style.configure("Results.Treeview", rowheight=row_height, borderwidth=0)
     style.configure("Results.Treeview.Heading", padding=scale_size(root, (8, 8)))
     style.configure("Settings.Treeview", rowheight=row_height + scale_size(root, 4), borderwidth=0)
+    colors = style.colors
+    light = style.theme.type == "light"
+    muted = "#5c6570" if light else "#b8bec8"
+    border = "#9da5b0" if light else "#767e89"
+    hover = "#edf1f5" if light else "#34383e"
+    disabled = Colors.make_transparent(0.30, colors.fg, colors.bg)
+    style.configure("secondary.TLabel", foreground=muted)
+    style.configure("secondary.Link.TButton", foreground=muted)
+    style.map("secondary.Link.TButton", foreground=[
+        ("disabled", disabled), ("pressed !disabled", colors.fg), ("hover !disabled", colors.fg),
+    ])
+    for name in ("secondary.Outline.TButton", "secondary.Outline.TMenubutton"):
+        style.configure(name, foreground=colors.fg, bordercolor=border, focuscolor=colors.primary)
+        style.map(
+            name,
+            foreground=[("disabled", disabled), ("!disabled", colors.fg)],
+            background=[("pressed !disabled", hover), ("hover !disabled", hover)],
+            bordercolor=[("disabled", disabled), ("focus !disabled", colors.primary),
+                         ("pressed !disabled", colors.primary), ("hover !disabled", border)],
+            focuscolor=[("!disabled", colors.primary)],
+            darkcolor=[("pressed !disabled", hover), ("hover !disabled", hover)],
+            lightcolor=[("pressed !disabled", hover), ("hover !disabled", hover)],
+        )
+    style.configure("secondary.Outline.TMenubutton", arrowcolor=colors.fg)
+    style.map("secondary.Outline.TMenubutton", arrowcolor=[("disabled", disabled), ("!disabled", colors.fg)])
+
+
+class ScrollView(ScrolledFrame):
+    def __init__(self, master: tk.Misc, **kwargs) -> None:
+        super().__init__(master, **kwargs)
+        self.vscroll.configure(bootstyle="secondary")
+        self.bind("<Configure>", lambda _event: self.yview(), add="+")
+
+    def yview_moveto(self, fraction: float) -> None:
+        super().yview_moveto(fraction)
+        first, last = self.vscroll.get()
+        needed = first > 0 or last < 1
+        if needed and not self.vscroll.winfo_manager():
+            self.show_scrollbars()
+        elif not needed and self.vscroll.winfo_manager():
+            self.hide_scrollbars()
 
 
 class TextView(ScrolledText):

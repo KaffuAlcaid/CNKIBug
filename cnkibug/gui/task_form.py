@@ -11,7 +11,6 @@ from typing import Any
 import ttkbootstrap as ttk
 from ttkbootstrap.utility import scale_size
 from ttkbootstrap.widgets import ToolTip
-from ttkbootstrap.widgets.scrolled import ScrolledFrame
 from . import dialogs as messagebox
 
 from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
@@ -25,6 +24,7 @@ from ..fileio.keyword_input import (
 from ..fileio.paths import get_real_desktop_path
 from ..fileio.search_plans import read_search_plan, write_search_plan
 from .advanced import AdvancedSearchDialog
+from .appearance import ScrollView
 from .search_options import SearchOptionsDialog
 
 
@@ -125,13 +125,11 @@ class TaskForm(ttk.Frame):
         self._advanced_button.pack(side=tk.LEFT, padx=(6, 0))
         self._import_button.pack(side=tk.LEFT, padx=(6, 0))
 
-        self._keyword_list = ScrolledFrame(
+        self._keyword_list = ScrollView(
             keyword_frame, height=1, width=1, padding=scale_size(self, (0, 0, 20, 0)),
-            bootstyle="secondary",
         )
         self._keyword_list.grid(row=2, column=0, sticky="nsew")
         self._keyword_list.disable_scrolling()
-        self._keyword_list.bind("<Configure>", lambda _event: self._keyword_list.yview())
         self._keyword_status_var = tk.StringVar(value="当前任务：0 项")
 
         self._column_separator = ttk.Separator(self._workspace, orient=tk.VERTICAL)
@@ -141,13 +139,11 @@ class TaskForm(ttk.Frame):
         ttk.Label(self._settings_panel, text="采集与保存", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", pady=(6, 18),
         )
-        settings_row = self._settings_view = ScrolledFrame(
+        settings_row = self._settings_view = ScrollView(
             self._settings_panel, height=1, width=1, padding=scale_size(self, (0, 0, 20, 0)),
-            bootstyle="secondary",
         )
         settings_row.grid(row=1, column=0, sticky="nsew")
         settings_row.disable_scrolling()
-        settings_row.bind("<Configure>", lambda _event: settings_row.yview())
         settings_row.columnconfigure(0, weight=1)
         ttk.Label(settings_row, text="每项页数", bootstyle="secondary").grid(row=0, column=0, sticky="w")
         scope = ttk.Frame(settings_row)
@@ -267,7 +263,9 @@ class TaskForm(ttk.Frame):
         self._workspace.rowconfigure(0, weight=3 if stacked else 1)
         self._workspace.rowconfigure(2, weight=2 if stacked else 0)
         self._keyword_panel.grid(row=0, column=0, sticky="nsew")
-        self._column_separator.configure(orient=tk.HORIZONTAL if stacked else tk.VERTICAL)
+        self._column_separator.configure(
+            orient=tk.HORIZONTAL if stacked else tk.VERTICAL, bootstyle="default",
+        )
         self._column_separator.grid(
             row=1 if stacked else 0, column=0 if stacked else 1,
             sticky="ew" if stacked else "ns",
@@ -523,7 +521,7 @@ class TaskForm(ttk.Frame):
         self._see_in_view(self._keyword_list, row.frame)
 
     @staticmethod
-    def _see_in_view(view: ScrolledFrame, widget: tk.Misc) -> None:
+    def _see_in_view(view: ScrollView, widget: tk.Misc) -> None:
         view.update_idletasks()
         top = widget.winfo_rooty() - view.winfo_rooty()
         bottom = top + widget.winfo_height()

@@ -6,9 +6,8 @@ from dataclasses import dataclass
 import ttkbootstrap as ttk
 from ttkbootstrap.utility import scale_size
 from ttkbootstrap.widgets import ToolTip
-from ttkbootstrap.widgets.scrolled import ScrolledFrame
 from . import dialogs as messagebox
-from .appearance import TextView
+from .appearance import ScrollView, TextView
 
 from ..core.search_query import (
     AdvancedQuery, MATCH_MODES, PUBLICATION_FILTERS, SEARCH_FIELDS, SearchCondition,
@@ -69,12 +68,11 @@ class AdvancedSearchDialog:
 
         body = ttk.Frame(outer)
         body.pack(fill=tk.BOTH, expand=True)
-        content = self._content = ScrolledFrame(
-            body, height=1, width=1, padding=scale_size(body, (0, 0, 20, 0)), bootstyle="secondary",
+        content = self._content = ScrollView(
+            body, height=1, width=1, padding=scale_size(body, (0, 0, 20, 0)),
         )
         content.pack(fill=tk.BOTH, expand=True)
         content.disable_scrolling()
-        content.bind("<Configure>", lambda _event: content.yview())
         for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.window.bind(event_name, self._scroll)
 
