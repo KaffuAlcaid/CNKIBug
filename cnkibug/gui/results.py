@@ -9,9 +9,9 @@ from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
 from tkinter import filedialog
-from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 from . import dialogs as messagebox
 
 from ..cnki.downloads import DownloadSession
@@ -23,6 +23,7 @@ from ..fileio.zotero import send_papers_to_zotero
 from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
 from .download_dialog import DownloadDialog
+from .appearance import TextView
 
 
 class ResultsWindow:
@@ -71,7 +72,7 @@ class ResultsWindow:
         self.window.after(150, lambda: self._panes.sashpos(0, int(height * .55)))
 
     def _build(self):
-        body = ttk.Frame(self.window, padding=12)
+        body = ttk.Frame(self.window, padding=18)
         body.pack(fill=tk.BOTH, expand=True)
         footer = ttk.Frame(body)
         footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
@@ -96,7 +97,14 @@ class ResultsWindow:
 
         self._action_bar = ttk.Frame(body)
         self._action_bar.pack(fill=tk.X, pady=(0, 10))
-        self._selection_button = ttk.Menubutton(self._action_bar, text="选择", bootstyle="secondary-outline")
+        self._action_bar.columnconfigure(0, weight=1)
+        self._selection_actions = ttk.Frame(self._action_bar)
+        self._selection_actions.grid(row=0, column=0, sticky="w")
+        self._export_actions = ttk.Frame(self._action_bar)
+        self._export_actions.grid(row=0, column=1, sticky="e")
+        self._actions_wrapped: bool | None = None
+        self._action_bar.bind("<Configure>", self._arrange_actions)
+        self._selection_button = ttk.Menubutton(self._selection_actions, text="选择", bootstyle="secondary-outline")
         self._selection_button.pack(side=tk.LEFT)
         selection_menu = tk.Menu(self._selection_button, tearoff=False)
         selection_menu.add_command(label="全选筛选结果", command=self._select_visible)
@@ -113,9 +121,9 @@ class ResultsWindow:
                 command=lambda kind=operation, failures=failed: self._select_by_status(kind, failures),
             )
         self._selection_button.configure(menu=selection_menu)
-        self._download_button = ttk.Button(self._action_bar, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
+        self._download_button = ttk.Button(self._selection_actions, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
         self._download_button.pack(side=tk.LEFT, padx=(8, 0))
-        self._paper_actions = ttk.Menubutton(self._action_bar, text="论文操作", bootstyle="secondary-outline")
+        self._paper_actions = ttk.Menubutton(self._selection_actions, text="论文操作", bootstyle="secondary-outline")
         self._paper_actions.pack(side=tk.LEFT, padx=(8, 0))
         self._paper_menu = tk.Menu(self._paper_actions, tearoff=False)
         self._paper_menu.add_command(label="补抓所选详情", command=self._fetch_details)
@@ -126,16 +134,16 @@ class ResultsWindow:
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="发送到 Zotero", command=self._send_zotero)
         self._paper_actions.configure(menu=self._paper_menu)
-        self._export_button = ttk.Button(self._action_bar, text="导出所选", command=self._export, bootstyle="primary")
+        self._export_button = ttk.Button(self._export_actions, text="导出所选", command=self._export, bootstyle="primary")
         self._export_button.pack(side=tk.RIGHT)
         self._include_pdf = tk.BooleanVar(self.window, value=False)
-        self._pdf_export_check = ttk.Checkbutton(self._action_bar, text="附带 PDF", variable=self._include_pdf)
+        self._pdf_export_check = ttk.Checkbutton(self._export_actions, text="附带 PDF", variable=self._include_pdf)
         self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 10), before=self._export_button)
         self.export_formats = {
             extension: tk.BooleanVar(self.window, value=extension == self._initial_format)
             for extension in ("xlsx", "csv", "ris")
         }
-        formats = ttk.Frame(self._action_bar)
+        formats = ttk.Frame(self._export_actions)
         formats.pack(side=tk.RIGHT, padx=10)
         for label, extension in (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris")):
             ttk.Checkbutton(
@@ -158,7 +166,6 @@ class ResultsWindow:
         listing.columnconfigure(0, weight=1)
         columns = ("checked", "title", "authors", "source", "publication_date", "status")
         self.table = ttk.Treeview(listing, columns=columns, show="headings", selectmode="browse", height=10)
-        self.window.style.configure("Results.Treeview", rowheight=30)
         self.table.configure(style="Results.Treeview")
         for key, label, size in (("checked", "勾选", 46), ("title", "论文标题", 470), ("authors", "作者", 130), ("source", "来源", 170), ("publication_date", "发表日期", 110), ("status", "状态", 120)):
             anchor = tk.CENTER if key == "checked" else tk.W
@@ -176,7 +183,7 @@ class ResultsWindow:
 
         self._details = ttk.Frame(self._panes, padding=(0, 8, 0, 0))
         self._panes.add(self._details, weight=2)
-        self._title = ttk.Label(self._details, text="", font=("TkDefaultFont", 11, "bold"), wraplength=900)
+        self._title = ttk.Label(self._details, text="", style="Section.TLabel", wraplength=900)
         self._title.pack(fill=tk.X)
         self._details.bind("<Configure>", lambda event: self._title.configure(wraplength=max(200, event.width - 16)))
         self._meta = ttk.Label(self._details, text="", wraplength=900)
@@ -187,10 +194,9 @@ class ResultsWindow:
         for name, label in (("abstract", "摘要与关键词"), ("info", "详细信息"), ("citation", "引用格式"), ("journal", "期刊信息")):
             frame = ttk.Frame(self._notebook)
             self._notebook.add(frame, text=label)
-            text = ScrolledText(frame, wrap=tk.WORD, height=7, font=("TkDefaultFont", 10), relief=tk.FLAT, padx=10, pady=8, spacing1=3, spacing3=3)
-            text.configure(background=self.window.style.colors.inputbg, foreground=self.window.style.colors.inputfg, state=tk.DISABLED)
-            text.pack(fill=tk.BOTH, expand=True)
-            self._texts[name] = text
+            text_view = TextView(frame, state=tk.DISABLED)
+            text_view.pack(fill=tk.BOTH, expand=True)
+            self._texts[name] = text_view.text
             if name == "journal":
                 ttk.Button(frame, text="查看期刊来源", command=self._open_journal_source, bootstyle="secondary-outline").pack(anchor=tk.E, pady=6)
         bottom = ttk.Frame(footer)
@@ -198,8 +204,8 @@ class ResultsWindow:
         self._summary = tk.StringVar(self.window)
         ttk.Label(bottom, textvariable=self._summary).pack(side=tk.LEFT)
         ttk.Checkbutton(bottom, text="显示详情", variable=self._show_detail, command=self._toggle_details).pack(side=tk.LEFT, padx=12)
-        ttk.Button(bottom, text="查看知网页面", command=self._open_url, bootstyle="secondary").pack(side=tk.RIGHT)
-        ttk.Button(bottom, text="打开 DOI", command=self._open_doi, bootstyle="secondary").pack(side=tk.RIGHT, padx=8)
+        ttk.Button(bottom, text="查看知网页面", command=self._open_url, bootstyle="secondary-outline").pack(side=tk.RIGHT)
+        ttk.Button(bottom, text="打开 DOI", command=self._open_doi, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=8)
         self._operation_status = tk.StringVar(self.window)
         self._operation_label = ttk.Label(footer, textvariable=self._operation_status, wraplength=1100)
         self._operation_label.pack(fill=tk.X, pady=(5, 0))
@@ -213,6 +219,19 @@ class ResultsWindow:
 
         body.bind("<Configure>", resize_footer)
         self._show_output_dir()
+
+    def _arrange_actions(self, event):
+        gap = scale_size(self.window, 12)
+        required = self._selection_actions.winfo_reqwidth() + self._export_actions.winfo_reqwidth() + gap
+        wrapped = event.width < required
+        if wrapped == self._actions_wrapped:
+            return
+        self._actions_wrapped = wrapped
+        self._export_actions.grid(
+            row=1 if wrapped else 0, column=0 if wrapped else 1,
+            columnspan=2 if wrapped else 1, sticky="w" if wrapped else "e",
+            pady=(gap, 0) if wrapped else 0,
+        )
 
     def _sync_export_types(self):
         self._pdf_export_check.configure(state=tk.NORMAL if self.export_formats["ris"].get() else tk.DISABLED)

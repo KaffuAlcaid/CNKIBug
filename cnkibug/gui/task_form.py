@@ -9,7 +9,9 @@ from tkinter import filedialog
 from typing import Any
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 from ttkbootstrap.widgets import ToolTip
+from ttkbootstrap.widgets.scrolled import ScrolledFrame
 from . import dialogs as messagebox
 
 from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
@@ -86,89 +88,70 @@ class TaskForm(ttk.Frame):
         self._advanced_queries: dict[str, AdvancedQuery] = {}
         self._search_options: SearchOptions | None = None
 
-        self._form_canvas = tk.Canvas(
-            self,
-            borderwidth=0,
-            highlightthickness=0,
-            yscrollincrement=20,
-        )
-        self._form_scrollbar = ttk.Scrollbar(
-            self,
-            orient=tk.VERTICAL,
-            command=self._form_canvas.yview,
-        )
-        self._form_canvas.configure(yscrollcommand=self._form_scrollbar.set)
-        self._form_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._form_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._form = ttk.Frame(self._form_canvas)
-        self._form_window = self._form_canvas.create_window(
-            (0, 0),
-            window=self._form,
-            anchor=tk.NW,
-        )
-        self._form.bind("<Configure>", self._update_form_scrollregion)
-        self._form_canvas.bind("<Configure>", self._resize_form_width)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self._workspace = ttk.Frame(self)
+        self._workspace.grid(row=0, column=0, sticky="nsew")
+        self._stacked: bool | None = None
+        self._workspace.bind("<Configure>", self._arrange_columns)
         self.root.bind("<MouseWheel>", self._scroll_form, add="+")
         self.root.bind("<Button-4>", self._scroll_form, add="+")
         self.root.bind("<Button-5>", self._scroll_form, add="+")
 
-        keyword_frame = ttk.Frame(self._form)
-        keyword_frame.pack(fill=tk.X, pady=(0, 12))
+        keyword_frame = self._keyword_panel = ttk.Frame(self._workspace)
+        keyword_frame.columnconfigure(0, weight=1)
+        keyword_frame.rowconfigure(2, weight=1)
         heading = ttk.Frame(keyword_frame)
-        heading.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(heading, text="检索项", font=("TkDefaultFont", 11, "bold")).pack(side=tk.LEFT)
-        actions = ttk.Frame(heading)
-        actions.pack(side=tk.LEFT, padx=(16, 0))
-        self._plan_button = ttk.Menubutton(actions, text="检索方案", bootstyle="secondary-outline")
-        self._plan_button.pack(side=tk.LEFT)
+        heading.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        ttk.Label(heading, text="检索项", style="Section.TLabel").pack(side=tk.LEFT)
+        self._plan_button = ttk.Menubutton(heading, text="检索方案", bootstyle="secondary-outline")
+        self._plan_button.pack(side=tk.RIGHT)
         plans = tk.Menu(self._plan_button, tearoff=False)
         plans.add_command(label="载入方案", command=self._load_plan)
         plans.add_command(label="保存方案", command=self._save_plan)
         self._plan_button.configure(menu=plans)
+        actions = ttk.Frame(keyword_frame)
+        actions.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         self._import_button = ttk.Button(
             actions, text="导入 TXT", command=self._import_txt, bootstyle="secondary-outline",
         )
-        self._import_button.pack(side=tk.LEFT, padx=(6, 0))
         self._add_keyword_button = ttk.Button(
             actions, text="+ 普通检索项", command=self._add_keyword, bootstyle="secondary-outline",
         )
-        self._add_keyword_button.pack(side=tk.LEFT, padx=(6, 0))
+        self._add_keyword_button.pack(side=tk.LEFT)
         self._advanced_button = ttk.Button(
             actions, text="高级检索", command=self._open_advanced, bootstyle="secondary-outline",
         )
         self._advanced_button.pack(side=tk.LEFT, padx=(6, 0))
+        self._import_button.pack(side=tk.LEFT, padx=(6, 0))
 
-        list_frame = ttk.Frame(keyword_frame)
-        list_frame.pack(fill=tk.X)
-        self._keyword_canvas = tk.Canvas(
-            list_frame, height=190, borderwidth=0, highlightthickness=0,
-            background=self.root.style.colors.bg, yscrollincrement=20,
+        self._keyword_list = ScrolledFrame(
+            keyword_frame, height=1, width=1, padding=scale_size(self, (0, 0, 20, 0)),
+            bootstyle="secondary",
         )
-        self._keyword_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        keyword_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._keyword_canvas.yview)
-        keyword_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._keyword_canvas.configure(yscrollcommand=keyword_scrollbar.set)
-        self._keyword_list = ttk.Frame(self._keyword_canvas)
-        keyword_window = self._keyword_canvas.create_window((0, 0), window=self._keyword_list, anchor=tk.NW)
-        self._keyword_list.bind(
-            "<Configure>",
-            lambda _event: self._keyword_canvas.configure(scrollregion=self._keyword_canvas.bbox("all")),
-        )
-        self._keyword_canvas.bind(
-            "<Configure>", lambda event: self._keyword_canvas.itemconfigure(keyword_window, width=event.width),
-        )
+        self._keyword_list.grid(row=2, column=0, sticky="nsew")
+        self._keyword_list.disable_scrolling()
+        self._keyword_list.bind("<Configure>", lambda _event: self._keyword_list.yview())
         self._keyword_status_var = tk.StringVar(value="当前任务：0 项")
-        ttk.Label(keyword_frame, textvariable=self._keyword_status_var, bootstyle="secondary").pack(
-            anchor=tk.E, pady=(6, 0),
-        )
 
-        ttk.Separator(self._form).pack(fill=tk.X, pady=(0, 12))
-        settings_row = ttk.Frame(self._form)
-        settings_row.pack(fill=tk.X)
-        settings_row.columnconfigure(1, weight=1)
-        ttk.Label(settings_row, text="每项页数").grid(row=0, column=0, sticky=tk.W, padx=(0, 12))
+        self._column_separator = ttk.Separator(self._workspace, orient=tk.VERTICAL)
+        self._settings_panel = ttk.Frame(self._workspace)
+        self._settings_panel.columnconfigure(0, weight=1)
+        self._settings_panel.rowconfigure(1, weight=1)
+        ttk.Label(self._settings_panel, text="采集与保存", style="Section.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(6, 18),
+        )
+        settings_row = self._settings_view = ScrolledFrame(
+            self._settings_panel, height=1, width=1, padding=scale_size(self, (0, 0, 20, 0)),
+            bootstyle="secondary",
+        )
+        settings_row.grid(row=1, column=0, sticky="nsew")
+        settings_row.disable_scrolling()
+        settings_row.bind("<Configure>", lambda _event: settings_row.yview())
+        settings_row.columnconfigure(0, weight=1)
+        ttk.Label(settings_row, text="每项页数", bootstyle="secondary").grid(row=0, column=0, sticky="w")
         scope = ttk.Frame(settings_row)
-        scope.grid(row=0, column=1, sticky="ew")
+        scope.grid(row=1, column=0, sticky="ew", pady=(6, 16))
         self._pages_var = tk.StringVar(value="1")
         self._pages_entry = ttk.Spinbox(scope, from_=1, to=100000, textvariable=self._pages_var, width=7)
         self._pages_entry.pack(side=tk.LEFT)
@@ -177,48 +160,51 @@ class TaskForm(ttk.Frame):
         )
         self._search_options_button.pack(side=tk.LEFT, padx=(8, 0))
 
+        ttk.Label(settings_row, text="输出格式", bootstyle="secondary").grid(row=2, column=0, sticky="w")
+        formats = ttk.Frame(settings_row)
+        formats.grid(row=3, column=0, sticky="ew", pady=(6, 16))
         self._format_var = tk.StringVar(value="excel")
         self._excel_radio = ttk.Radiobutton(
-            scope, text="Excel", variable=self._format_var, value="excel",
+            formats, text="Excel", variable=self._format_var, value="excel",
             command=self._sync_option_states, bootstyle="primary",
         )
         self._csv_radio = ttk.Radiobutton(
-            scope, text="CSV", variable=self._format_var, value="csv",
+            formats, text="CSV", variable=self._format_var, value="csv",
             command=self._sync_option_states, bootstyle="primary",
         )
-        self._csv_radio.pack(side=tk.RIGHT)
-        self._excel_radio.pack(side=tk.RIGHT, padx=(0, 16))
-        ttk.Label(scope, text="输出格式").pack(side=tk.RIGHT, padx=(0, 8))
+        self._excel_radio.pack(side=tk.LEFT, padx=(0, 16))
+        self._csv_radio.pack(side=tk.LEFT)
 
-        ttk.Label(settings_row, text="保存位置").grid(row=1, column=0, sticky=tk.W, padx=(0, 12), pady=(10, 0))
+        ttk.Label(settings_row, text="保存位置", bootstyle="secondary").grid(row=4, column=0, sticky="w")
         output_row = ttk.Frame(settings_row)
-        output_row.grid(row=1, column=1, sticky="ew", pady=(10, 0))
+        output_row.grid(row=5, column=0, sticky="ew", pady=(6, 16))
         output_row.columnconfigure(0, weight=1)
         self._output_var = tk.StringVar(value=output_dir or get_real_desktop_path())
         self._output_entry = ttk.Entry(output_row, textvariable=self._output_var)
         self._output_entry.grid(row=0, column=0, sticky="ew")
         self._browse_button = ttk.Button(
-            output_row, text="浏览", command=self._choose_output_dir, bootstyle="secondary-outline", width=7,
+            output_row, text="浏览", command=self._choose_output_dir, bootstyle="secondary-outline", width=5,
         )
         self._browse_button.grid(row=0, column=1, padx=(8, 0))
 
-        ttk.Label(settings_row, text="采集内容").grid(row=2, column=0, sticky=tk.W, padx=(0, 12), pady=(12, 0))
+        ttk.Label(settings_row, text="采集内容", bootstyle="secondary").grid(row=6, column=0, sticky="w")
         extras = ttk.Frame(settings_row)
-        extras.grid(row=2, column=1, sticky="ew", pady=(12, 0))
+        extras.grid(row=7, column=0, sticky="ew", pady=(6, 12))
         self._citation_var = tk.BooleanVar(value=False)
         self._details_var = tk.BooleanVar(value=False)
         self._txt_var = tk.BooleanVar(value=False)
         self._split_var = tk.BooleanVar(value=False)
         self._citation_check = ttk.Checkbutton(extras, text="GB/T 7714 引用", variable=self._citation_var)
-        self._citation_check.pack(side=tk.LEFT)
+        self._citation_check.pack(anchor=tk.W)
         self._details_check = ttk.Checkbutton(
             extras, text="摘要与关键词", variable=self._details_var, command=self._details_changed,
         )
-        self._details_check.pack(side=tk.LEFT, padx=(18, 0))
+        self._details_check.pack(anchor=tk.W, pady=(8, 0))
         self._show_more = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            extras, text="更多选项", variable=self._show_more, command=self._toggle_more_options,
-        ).pack(side=tk.RIGHT)
+        self._more_toggle = ttk.Checkbutton(
+            settings_row, text="更多选项", variable=self._show_more, command=self._toggle_more_options,
+        )
+        self._more_toggle.grid(row=8, column=0, sticky="w")
         self._more_options = ttk.Frame(settings_row, padding=(0, 10, 0, 0))
         self._split_check = ttk.Checkbutton(
             self._more_options, text="每个检索项独立保存 Excel", variable=self._split_var,
@@ -229,12 +215,21 @@ class TaskForm(ttk.Frame):
         )
         self._txt_check.pack(anchor=tk.W, pady=(6, 0))
 
-        action_row = ttk.Frame(self._form)
-        action_row.pack(fill=tk.X, pady=(16, 4))
+        ttk.Separator(self).grid(row=1, column=0, sticky="ew", pady=(16, 0))
+        action_row = ttk.Frame(self, padding=(0, 12, 0, 0))
+        action_row.grid(row=2, column=0, sticky="ew")
+        action_row.columnconfigure(0, weight=1)
+        self._keyword_status = ttk.Label(
+            action_row, textvariable=self._keyword_status_var, bootstyle="secondary", width=1,
+        )
+        self._keyword_status.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        self._keyword_status.bind(
+            "<Configure>", lambda event: self._keyword_status.configure(wraplength=max(1, event.width)),
+        )
         self._review_button = ttk.Button(
             action_row, text="检查并开始检索", command=on_review, bootstyle="primary", width=18,
         )
-        self._review_button.pack(side=tk.RIGHT)
+        self._review_button.grid(row=0, column=1, sticky="e")
 
         self._form_controls = [
             self._add_keyword_button,
@@ -250,10 +245,35 @@ class TaskForm(ttk.Frame):
             self._citation_check,
             self._details_check,
             self._txt_check,
+            self._more_toggle,
             self._review_button,
         ]
+        for control in (
+            self._pages_entry, self._search_options_button, self._excel_radio,
+            self._csv_radio, self._output_entry, self._browse_button,
+            self._citation_check, self._details_check, self._more_toggle, self._split_check, self._txt_check,
+        ):
+            control.bind("<FocusIn>", lambda event: self._see_in_view(self._settings_view, event.widget))
         self._set_keywords([])
         self._sync_option_states()
+
+    def _arrange_columns(self, event: tk.Event) -> None:
+        stacked = event.width < scale_size(self, 880)
+        if stacked == self._stacked:
+            return
+        self._stacked = stacked
+        self._workspace.columnconfigure(0, weight=3, uniform="" if stacked else "task")
+        self._workspace.columnconfigure(2, weight=0 if stacked else 2, uniform="" if stacked else "task")
+        self._workspace.rowconfigure(0, weight=3 if stacked else 1)
+        self._workspace.rowconfigure(2, weight=2 if stacked else 0)
+        self._keyword_panel.grid(row=0, column=0, sticky="nsew")
+        self._column_separator.configure(orient=tk.HORIZONTAL if stacked else tk.VERTICAL)
+        self._column_separator.grid(
+            row=1 if stacked else 0, column=0 if stacked else 1,
+            sticky="ew" if stacked else "ns",
+            padx=0 if stacked else 20, pady=12 if stacked else 0,
+        )
+        self._settings_panel.grid(row=2 if stacked else 0, column=0 if stacked else 2, sticky="nsew")
 
     def _save_plan(self) -> None:
         if self._running:
@@ -306,19 +326,15 @@ class TaskForm(ttk.Frame):
     def output_format(self) -> str:
         return self._format_var.get()
 
-    def apply_theme(self, style: ttk.Style) -> None:
-        self._form_canvas.configure(background=style.colors.bg)
-        self._keyword_canvas.configure(background=style.colors.bg)
-
     def _toggle_more_options(self) -> None:
         if self._show_more.get():
-            self._more_options.grid(row=3, column=1, sticky="ew")
+            self._more_options.grid(row=9, column=0, sticky="ew")
         else:
             self._more_options.grid_remove()
 
     def show(self, before: tk.Misc) -> None:
         self.pack(fill=tk.BOTH, expand=True, before=before)
-        self._form_canvas.yview_moveto(0)
+        self._settings_view.yview_moveto(0)
 
     def set_running(self, running: bool) -> None:
         self._running = running
@@ -398,14 +414,6 @@ class TaskForm(ttk.Frame):
         dialog = SearchOptionsDialog(self.root, self._search_options)
         self._search_options = dialog.result
 
-    def _update_form_scrollregion(self, _event: tk.Event | None = None) -> None:
-        bounds = self._form_canvas.bbox("all")
-        if bounds is not None:
-            self._form_canvas.configure(scrollregion=bounds)
-
-    def _resize_form_width(self, event: tk.Event) -> None:
-        self._form_canvas.itemconfigure(self._form_window, width=event.width)
-
     def _scroll_form(self, event: tk.Event) -> None:
         if not self.winfo_ismapped():
             return
@@ -414,17 +422,16 @@ class TaskForm(ttk.Frame):
         except KeyError:
             # Tcl-created controls such as Combobox popdowns have no Python widget.
             return
-        canvas = self._form_canvas
+        if isinstance(pointer, (ttk.Spinbox, ttk.Combobox)):
+            return
+        view = None
         current = pointer
-        while current is not None and current not in {
-            self._form,
-            self._form_canvas,
-            self,
-        }:
-            if current is self._keyword_canvas:
-                canvas = self._keyword_canvas
+        while current is not None and current is not self:
+            if current in {self._keyword_list.container, self._settings_view.container}:
+                view = self._keyword_list if current is self._keyword_list.container else self._settings_view
+                break
             current = getattr(current, "master", None)
-        if current is None:
+        if view is None:
             return
         event_number = getattr(event, "num", None)
         if event_number == 4:
@@ -436,7 +443,7 @@ class TaskForm(ttk.Frame):
             if not delta:
                 return
             units = -3 if delta > 0 else 3
-        canvas.yview_scroll(units, "units")
+        view.yview_scroll(units, "units")
 
     @property
     def _keywords(self) -> list[str]:
@@ -463,7 +470,7 @@ class TaskForm(ttk.Frame):
         self._keyword_rows.clear()
         for keyword in keywords or [""]:
             self._append_keyword_row(keyword, query_key=keyword if keyword in self._advanced_queries else None)
-        self._keyword_canvas.yview_moveto(0)
+        self._keyword_list.yview_moveto(0)
         self._sync_keyword_action_states()
         if status:
             self._keyword_status_var.set(status)
@@ -474,7 +481,8 @@ class TaskForm(ttk.Frame):
         frame.columnconfigure(2, weight=1)
         number = ttk.Label(frame, width=4, anchor=tk.CENTER)
         number.grid(row=0, column=0)
-        ttk.Label(frame, text="高级检索" if query_key else "普通检索", width=9).grid(row=0, column=1)
+        if query_key:
+            ttk.Label(frame, text="高级", bootstyle="secondary").grid(row=0, column=1, padx=(0, 6))
         text = tk.StringVar(value=self._advanced_queries[query_key].summary() if query_key else keyword)
         entry = ttk.Entry(frame, textvariable=text)
         entry.grid(row=0, column=2, columnspan=1 if query_key else 2, sticky="ew")
@@ -485,10 +493,11 @@ class TaskForm(ttk.Frame):
         ToolTip(delete, text="移除检索项")
         if query_key:
             row.edit_button = ttk.Button(
-                frame, text="编辑条件", width=8, command=lambda: self._open_advanced(row),
+                frame, text="编辑", width=4, command=lambda: self._open_advanced(row),
                 bootstyle="secondary-outline",
             )
             row.edit_button.grid(row=0, column=3, padx=(6, 0))
+            ToolTip(row.edit_button, text="编辑高级检索条件")
             entry.bind("<Double-1>", lambda _event: self._open_advanced(row))
         else:
             entry.bind("<Return>", lambda _event: self._next_keyword(row))
@@ -511,16 +520,20 @@ class TaskForm(ttk.Frame):
         self._keyword_status_var.set(f"当前任务：{len(self._keywords)} 项")
 
     def _see_keyword(self, row: _KeywordRow) -> None:
-        self._keyword_canvas.update_idletasks()
-        top = row.frame.winfo_y()
-        bottom = top + row.frame.winfo_height()
-        visible_top = self._keyword_canvas.canvasy(0)
-        visible_height = self._keyword_canvas.winfo_height()
-        height = max(1, self._keyword_list.winfo_height())
+        self._see_in_view(self._keyword_list, row.frame)
+
+    @staticmethod
+    def _see_in_view(view: ScrolledFrame, widget: tk.Misc) -> None:
+        view.update_idletasks()
+        top = widget.winfo_rooty() - view.winfo_rooty()
+        bottom = top + widget.winfo_height()
+        visible_top = -view.winfo_y()
+        visible_height = view.container.winfo_height()
+        height = max(1, view.winfo_height(), visible_height)
         if top < visible_top:
-            self._keyword_canvas.yview_moveto(top / height)
+            view.yview_moveto(top / height)
         elif bottom > visible_top + visible_height:
-            self._keyword_canvas.yview_moveto((bottom - visible_height) / height)
+            view.yview_moveto((bottom - visible_height) / height)
 
     def _focus_keyword(self, row: _KeywordRow) -> None:
         self._see_keyword(row)

@@ -14,6 +14,7 @@ from threading import Event, Thread
 from typing import Any
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 from PIL import Image
 
 from ..app.runtime import cleanup_runtime_history, init_runtime, read_config, save_config
@@ -42,6 +43,7 @@ from ..workflow.state import (
 from .events import GuiEvent, GuiEventSink
 from . import dialogs as messagebox
 from .advanced import confirm_advanced_task
+from .appearance import apply_appearance
 from .settings import SettingsDialog
 from .task_form import GuiTaskRequest, TaskForm
 from .task_progress import TaskProgress
@@ -55,9 +57,9 @@ _WINDOW_MARGIN = 80
 _EVENTS_PER_DRAIN = 100
 
 
-def _fit_window_geometry(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    width = min(_PREFERRED_WINDOW_WIDTH, max(1, screen_width - _WINDOW_MARGIN))
-    height = min(_PREFERRED_WINDOW_HEIGHT, max(1, screen_height - _WINDOW_MARGIN))
+def _fit_window_geometry(screen_width: int, screen_height: int, scale: float = 1.0) -> tuple[int, int, int, int]:
+    width = min(round(_PREFERRED_WINDOW_WIDTH * scale), max(1, screen_width - _WINDOW_MARGIN))
+    height = min(round(_PREFERRED_WINDOW_HEIGHT * scale), max(1, screen_height - _WINDOW_MARGIN))
     x = max(0, (screen_width - width) // 2)
     y = max(0, (screen_height - height) // 2)
     return width, height, x, y
@@ -89,9 +91,10 @@ class CNKIBugApp:
         width, height, x, y = _fit_window_geometry(
             self.root.winfo_screenwidth(),
             self.root.winfo_screenheight(),
+            scale=scale_size(self.root, 100) / 100,
         )
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(min(820, width), min(620, height))
+        self.root.minsize(min(scale_size(self.root, 820), width), min(scale_size(self.root, 620), height))
         self._icon_image: tk.PhotoImage | None = None
         self._set_window_icon(icon_path)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -218,8 +221,7 @@ class CNKIBugApp:
         style = self.root.style
         if style.theme_use() != config["gui_theme"]:
             style.theme_use(config["gui_theme"])
-        style.configure("TButton", padding=(10, 5))
-        self._task_form.apply_theme(style)
+        apply_appearance(self.root)
         self._task_progress.apply_theme(style)
         viewer = getattr(self, "_results_window", None)
         if viewer is not None:
@@ -267,12 +269,13 @@ class CNKIBugApp:
             messagebox.showinfo("清理完成", message, parent=self.root)
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=16)
+        apply_appearance(self.root)
+        container = ttk.Frame(self.root, padding=scale_size(self.root, (24, 18, 24, 12)))
         container.pack(fill=tk.BOTH, expand=True)
 
         header = ttk.Frame(container)
-        header.pack(fill=tk.X, pady=(0, 12))
-        ttk.Label(header, text="CNKIBug", font=("TkDefaultFont", 16, "bold")).pack(
+        header.pack(fill=tk.X, pady=(0, 20))
+        ttk.Label(header, text="CNKIBug", style="Title.TLabel").pack(
             side=tk.LEFT,
             anchor=tk.NW,
         )
@@ -292,7 +295,7 @@ class CNKIBugApp:
             toolbar, text="设置", command=self._open_settings, bootstyle="secondary-outline",
         )
         self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
-        ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="primary").pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=(0, 8))
 
         self._task_form = TaskForm(
             container,

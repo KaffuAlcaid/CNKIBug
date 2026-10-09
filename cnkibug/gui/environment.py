@@ -8,10 +8,10 @@ from queue import Empty, Queue
 from tempfile import TemporaryFile
 from threading import Event, Thread
 from tkinter import filedialog
-from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 from . import dialogs as messagebox
+from .appearance import TextView
 
 from ..app.runtime import save_config
 from ..browser.environment import (
@@ -46,10 +46,9 @@ class EnvironmentPanel(ttk.Frame):
             label = ttk.Label(row, text="未检查", bootstyle="secondary")
             label.pack(side=tk.RIGHT)
             self._labels[key] = label
-        self._details = ScrolledText(self, height=5, wrap=tk.WORD, font="TkDefaultFont", state=tk.DISABLED)
-        colors = ttk.Style().colors
-        self._details.configure(background=colors.inputbg, foreground=colors.inputfg)
-        self._details.grid(row=len(rows), column=0, sticky=tk.NSEW, pady=(8, 8))
+        details_view = TextView(self, height=5, state=tk.DISABLED)
+        details_view.grid(row=len(rows), column=0, sticky=tk.NSEW, pady=(8, 8))
+        self._details = details_view.text
         self.rowconfigure(len(rows), weight=1)
         self._status = tk.StringVar(self, "等待检查")
         ttk.Label(self, textvariable=self._status, wraplength=540).grid(row=len(rows) + 1, column=0, sticky=tk.W)
@@ -191,7 +190,7 @@ class InitializationDialog:
         body.pack(fill=tk.BOTH, expand=True)
         footer = ttk.Frame(body)
         footer.pack(side=tk.BOTTOM, fill=tk.X)
-        ttk.Label(body, text="初始化设置", font=("TkDefaultFont", 16, "bold")).pack(anchor=tk.W, pady=(0, 14))
+        ttk.Label(body, text="初始化设置", style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 14))
         paths = ttk.Labelframe(body, text="保存位置", padding=12)
         paths.pack(fill=tk.X)
         paths.columnconfigure(1, weight=1)

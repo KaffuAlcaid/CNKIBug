@@ -7,12 +7,12 @@ from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
 from tkinter import filedialog
-from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 
 from ..core.version import APP_VERSION
 from . import updater
+from .appearance import TextView
 
 
 class UpdateDialog:
@@ -58,17 +58,15 @@ class UpdateDialog:
         self._progress = ttk.Progressbar(outer, mode="indeterminate")
         self._progress.pack(fill=tk.X, pady=8)
         self._progress.start()
-        self._notes = ScrolledText(outer, wrap=tk.WORD, height=8, font="TkDefaultFont",
-                                   borderwidth=1, relief=tk.SOLID, state=tk.DISABLED)
-        self._notes.configure(background=ttk.Style().colors.inputbg,
-                              foreground=ttk.Style().colors.inputfg)
+        self._notes_view = TextView(outer, height=8, state=tk.DISABLED)
+        self._notes = self._notes_view.text
         self.window.geometry(f"{width}x{height}")
         self.window.minsize(min(400, width), min(280, height))
         self.window.position_center()
         self.window.deiconify()
         self.window.grab_set()
         if probe:
-            self._notes.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+            self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
             self._work(
                 lambda: updater.probe_connections(source, self._cancelled,
                     lambda text: self._queue.put(("probe_result", text))), "probed",
@@ -165,7 +163,7 @@ class UpdateDialog:
         self._status.set(text)
         self._progress.stop()
         self._progress.pack_forget()
-        self._notes.pack_forget()
+        self._notes_view.pack_forget()
         self._secondary.pack_forget()
         self._primary.configure(text="确定", state=tk.NORMAL, command=self._close)
 
@@ -192,7 +190,7 @@ class UpdateDialog:
         self._notes.configure(state=tk.NORMAL)
         self._notes.insert(tk.END, release.notes)
         self._notes.configure(state=tk.DISABLED)
-        self._notes.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         self._secondary.pack(side=tk.RIGHT, padx=(0, 8))
         available = release.ready or (not updater.can_install_update() and updater.appimage_path() is None)
         self._primary.configure(text="更新", command=self._update,
@@ -223,7 +221,7 @@ class UpdateDialog:
         self._source = source
         self._stage = "downloading"
         self._cancelled.clear()
-        self._notes.pack_forget()
+        self._notes_view.pack_forget()
         self._secondary.pack_forget()
         self._progress.configure(mode="determinate", maximum=100, value=0)
         self._progress.pack(fill=tk.X, pady=8)

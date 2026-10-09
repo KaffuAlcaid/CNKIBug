@@ -143,7 +143,6 @@ def _list_app(monkeypatch):
     app._keyword_rows = []
     app._advanced_queries = {}
     app._keyword_list = Mock()
-    app._keyword_canvas = Mock()
     app._keyword_status_var = Mock()
     app._focus_keyword = Mock()
     app._set_keywords(["ordinary"])

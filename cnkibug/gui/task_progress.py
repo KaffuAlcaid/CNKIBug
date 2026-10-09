@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 import tkinter as tk
 from collections.abc import Callable
-from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
 import ttkbootstrap as ttk
@@ -12,6 +11,7 @@ from ..cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_STOPPED, STATUS_SU
 from ..core.estimate import estimate_progress, estimate_seconds, estimate_work_seconds, format_eta
 from ..workflow.state import remaining_workload
 from .events import GuiEvent
+from .appearance import TextView
 from .task_form import GuiTaskRequest
 
 
@@ -61,7 +61,7 @@ class TaskProgress(ttk.Frame):
 
         progress_frame = self
         self._status_var = tk.StringVar(value="等待设置任务")
-        ttk.Label(progress_frame, textvariable=self._status_var, font=("TkDefaultFont", 13, "bold")).pack(anchor=tk.W, pady=(0, 8))
+        ttk.Label(progress_frame, textvariable=self._status_var, style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 8))
         self._progress_var = tk.IntVar(value=0)
         progress_row = ttk.Frame(progress_frame)
         progress_row.pack(fill=tk.X, pady=(8, 2))
@@ -104,11 +104,9 @@ class TaskProgress(ttk.Frame):
         ).pack(anchor=tk.W, pady=(0, 8))
         self._log_frame = ttk.Frame(progress_frame)
         self._log_frame.pack(fill=tk.BOTH, expand=True)
-        self._log = ScrolledText(
-            self._log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
-            relief=tk.FLAT, borderwidth=0, padx=10, pady=8,
-        )
-        self._log.pack(fill=tk.BOTH, expand=True)
+        log_view = TextView(self._log_frame, state=tk.DISABLED)
+        log_view.pack(fill=tk.BOTH, expand=True)
+        self._log = log_view.text
 
         stop_row = self._stop_row = ttk.Frame(progress_frame)
         stop_row.pack(fill=tk.X, pady=(8, 0))
@@ -117,7 +115,7 @@ class TaskProgress(ttk.Frame):
             text="返回任务设置",
             command=on_new_task,
             state=tk.DISABLED,
-            bootstyle="secondary",
+            bootstyle="secondary-outline",
         )
         self._new_task_button.pack(side=tk.LEFT)
         self._resume_button = ttk.Button(

@@ -465,10 +465,10 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     app.root.style.theme_use.return_value = "litera"
     app.root.style.theme.type = "dark"
     app._task_form = TaskForm.__new__(TaskForm)
-    app._task_form._form_canvas = Mock()
-    app._task_form._keyword_canvas = Mock()
     app._task_progress = TaskProgress.__new__(TaskProgress)
     app._task_progress._log = Mock()
+    appearance = Mock()
+    monkeypatch.setattr("cnkibug.gui.app.apply_appearance", appearance)
     logger = Mock()
     monkeypatch.setattr("cnkibug.gui.app.logging.getLogger", lambda: logger)
     config = {**DEFAULT_CONFIG, "gui_theme": "darkly", "log_level": "WARNING", "timeout_goto_ms": 45000}
@@ -480,8 +480,7 @@ def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, t
     assert app.settings.timeout_goto_ms == 45000
     logger.setLevel.assert_called_once_with("WARNING")
     app.root.style.theme_use.assert_called_with("darkly")
-    app._task_form._form_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
-    app._task_form._keyword_canvas.configure.assert_called_once_with(background=app.root.style.colors.bg)
+    appearance.assert_called_once_with(app.root)
     app._task_progress._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
 
 

@@ -156,7 +156,7 @@ def test_installer_handoff_waits_for_ready_and_keeps_current_executable(monkeypa
 def test_update_result_buttons_match_release_state(monkeypatch, newer, ready, label):
     monkeypatch.setattr(updater, "can_install_update", lambda: True)
     dialog = UpdateDialog.__new__(UpdateDialog)
-    for name in ("_status", "_progress", "_notes", "_primary", "_secondary"):
+    for name in ("_status", "_progress", "_notes", "_notes_view", "_primary", "_secondary"):
         setattr(dialog, name, Mock())
     release = _release(newer=newer, download_url="https://example.test/gui.exe" if ready else "")
 

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
-from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 from ttkbootstrap.widgets import ToolTip
+from ttkbootstrap.widgets.scrolled import ScrolledFrame
 from . import dialogs as messagebox
+from .appearance import TextView
 
 from ..core.search_query import (
     AdvancedQuery, MATCH_MODES, PUBLICATION_FILTERS, SEARCH_FIELDS, SearchCondition,
@@ -40,7 +42,7 @@ class _ConditionRow:
 class AdvancedSearchDialog:
     def __init__(self, parent: tk.Misc, query: AdvancedQuery | None = None) -> None:
         self.result: AdvancedQuery | None = None
-        self.window = tk.Toplevel(parent)
+        self.window = ttk.Toplevel(master=parent)
         self.window.withdraw()
         self.window.title("高级检索（实验性）")
         self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
@@ -50,7 +52,7 @@ class AdvancedSearchDialog:
         outer.pack(fill=tk.BOTH, expand=True)
         header = ttk.Frame(outer)
         header.pack(fill=tk.X, pady=(0, 18))
-        ttk.Label(header, text="高级检索", font=("TkDefaultFont", 16, "bold")).pack(side=tk.LEFT)
+        ttk.Label(header, text="高级检索", style="Heading.TLabel").pack(side=tk.LEFT)
         ttk.Label(header, text="实验性", bootstyle="warning").pack(side=tk.RIGHT)
 
         footer = ttk.Frame(outer)
@@ -67,16 +69,12 @@ class AdvancedSearchDialog:
 
         body = ttk.Frame(outer)
         body.pack(fill=tk.BOTH, expand=True)
-        self._canvas = tk.Canvas(body, highlightthickness=0, borderwidth=0,
-                                 background=ttk.Style().colors.bg, yscrollincrement=20)
-        scrollbar = ttk.Scrollbar(body, command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        content = ttk.Frame(self._canvas)
-        content_id = self._canvas.create_window((0, 0), window=content, anchor=tk.NW)
-        content.bind("<Configure>", lambda _event: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
-        self._canvas.bind("<Configure>", lambda event: self._canvas.itemconfigure(content_id, width=event.width))
+        content = self._content = ScrolledFrame(
+            body, height=1, width=1, padding=scale_size(body, (0, 0, 20, 0)), bootstyle="secondary",
+        )
+        content.pack(fill=tk.BOTH, expand=True)
+        content.disable_scrolling()
+        content.bind("<Configure>", lambda _event: content.yview())
         for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.window.bind(event_name, self._scroll)
 
@@ -147,7 +145,7 @@ class AdvancedSearchDialog:
             units = 3
         else:
             units = -3 if getattr(event, "delta", 0) > 0 else 3
-        self._canvas.yview_scroll(units, "units")
+        self._content.yview_scroll(units, "units")
 
     def _add_row(self, condition: SearchCondition | None = None) -> None:
         if len(self._rows) >= 10:
@@ -216,7 +214,7 @@ class AdvancedSearchDialog:
         self._synonym.set(False)
         self._date_from.entry.delete(0, tk.END)
         self._date_to.entry.delete(0, tk.END)
-        self._canvas.yview_moveto(0)
+        self._content.yview_moveto(0)
 
     def _accept(self) -> None:
         fields = {label: key for key, label in SEARCH_FIELDS.items()}
@@ -244,7 +242,7 @@ class AdvancedSearchDialog:
 
 def confirm_advanced_task(parent: tk.Misc, summary: str, queries: dict[str, AdvancedQuery]) -> bool:
     accepted = False
-    window = tk.Toplevel(parent)
+    window = ttk.Toplevel(master=parent)
     window.withdraw()
     window.title("开始前确认")
     outer = ttk.Frame(window, padding=18)
@@ -259,13 +257,9 @@ def confirm_advanced_task(parent: tk.Misc, summary: str, queries: dict[str, Adva
 
     ttk.Button(footer, text="开始抓取", command=accept, bootstyle="primary").pack(side=tk.RIGHT)
     ttk.Button(footer, text="返回", command=window.destroy, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=10)
-    colors = ttk.Style().colors
-    text = ScrolledText(
-        outer, wrap=tk.WORD, font="TkDefaultFont", padx=12, pady=12,
-        background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.inputfg,
-        selectbackground=colors.selectbg, selectforeground=colors.selectfg,
-    )
-    text.pack(fill=tk.BOTH, expand=True)
+    text_view = TextView(outer)
+    text_view.pack(fill=tk.BOTH, expand=True)
+    text = text_view.text
     text.insert(tk.END, summary)
     for name, query in queries.items():
         text.insert(tk.END, f"\n\n{name}\n{query.summary()}")
