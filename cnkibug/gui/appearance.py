@@ -14,14 +14,41 @@ def apply_appearance(root: tk.Misc) -> None:
     default = font.nametofont("TkDefaultFont", root=root)
     fonts = getattr(root, "_cnkibug_fonts", None)
     if fonts is None:
+        available = set(font.families(root=root))
+        family = next((name for name in (
+            "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Micro Hei",
+        ) if name in available), default.actual("family"))
+        named_fonts = set(font.names(root=root))
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkTooltipFont"):
+            if name in named_fonts:
+                font.nametofont(name, root=root).configure(
+                    family=family, size=10, weight="bold" if name == "TkHeadingFont" else "normal",
+                )
+        root.option_add("*TCombobox*Listbox.font", "TkTextFont")
         fonts = root._cnkibug_fonts = {}
         for role, size in (("Title", 16), ("Heading", 12), ("Section", 11)):
             fonts[role] = font.Font(root=root, **default.actual())
             fonts[role].configure(size=size, weight="bold")
     for role, heading in fonts.items():
         style.configure(f"{role}.TLabel", font=heading)
-    style.configure("TButton", padding=scale_size(root, (10, 5)))
-    style.configure("TNotebook.Tab", padding=scale_size(root, (12, 7)))
+    style.configure(".", font=default)
+    control_padding = (
+        scale_size(root, 10),
+        max(scale_size(root, 5), (scale_size(root, 34) - default.metrics("linespace") - 2) // 2),
+    )
+    for name in (
+        "TButton", "primary.TButton", "secondary.TButton", "secondary.Outline.TButton",
+        "danger.Outline.TButton", "secondary.Link.TButton", "TMenubutton", "secondary.Outline.TMenubutton",
+    ):
+        vertical = control_padding[1] - 1 if name.endswith("TButton") else control_padding[1]
+        style.configure(name, font=default, padding=(control_padding[0], vertical), borderwidth=1)
+    for name in ("TEntry", "TCombobox", "TSpinbox"):
+        style.configure(name, padding=control_padding)
+    tab_padding = scale_size(root, (12, 7))
+    style.configure("TNotebook.Tab", font=default, padding=tab_padding)
+    style.map("TNotebook.Tab", padding=[("selected", tab_padding), ("!selected", tab_padding)])
+    style.configure("Treeview", font=default)
+    style.configure("Treeview.Heading", font="TkHeadingFont")
     row_height = max(default.metrics("linespace") + scale_size(root, 12), scale_size(root, 32))
     style.configure("Results.Treeview", rowheight=row_height, borderwidth=0)
     style.configure("Results.Treeview.Heading", padding=scale_size(root, (8, 8)))
