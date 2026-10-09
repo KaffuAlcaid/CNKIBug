@@ -130,6 +130,14 @@ class TaskForm(ttk.Frame):
         )
         self._keyword_list.grid(row=2, column=0, sticky="nsew")
         self._keyword_list.disable_scrolling()
+        self._keyword_hint = ttk.Label(
+            self._keyword_list, text="输入关键词，或导入 TXT 批量添加", bootstyle="secondary",
+        )
+        self._keyword_list.container.bind(
+            "<Configure>",
+            lambda event: self._keyword_hint.configure(wraplength=max(1, event.width - scale_size(self, 40))),
+            add="+",
+        )
         self._keyword_status_var = tk.StringVar(value="当前任务：0 项")
 
         self._column_separator = ttk.Separator(self._workspace, orient=tk.VERTICAL)
@@ -499,7 +507,7 @@ class TaskForm(ttk.Frame):
             entry.bind("<Double-1>", lambda _event: self._open_advanced(row))
         else:
             entry.bind("<Return>", lambda _event: self._next_keyword(row))
-            text.trace_add("write", lambda *_args: self._keyword_status_var.set(f"当前任务：{len(self._keywords)} 项"))
+            text.trace_add("write", lambda *_args: self._update_keyword_summary())
         entry.bind("<FocusIn>", lambda _event: self._see_keyword(row))
         if row.edit_button:
             row.edit_button.bind("<FocusIn>", lambda _event: self._see_keyword(row))
@@ -515,7 +523,17 @@ class TaskForm(ttk.Frame):
             row.delete_button.configure(state=state)
             if row.edit_button:
                 row.edit_button.configure(state=state)
-        self._keyword_status_var.set(f"当前任务：{len(self._keywords)} 项")
+        self._update_keyword_summary()
+
+    def _update_keyword_summary(self) -> None:
+        count = len(self._keywords)
+        self._keyword_status_var.set(f"当前任务：{count} 项")
+        if count:
+            self._keyword_hint.pack_forget()
+        elif self._keyword_rows:
+            self._keyword_hint.pack(
+                fill=tk.X, pady=(12, 0), padx=(8, 0), after=self._keyword_rows[-1].frame,
+            )
 
     def _see_keyword(self, row: _KeywordRow) -> None:
         self._see_in_view(self._keyword_list, row.frame)

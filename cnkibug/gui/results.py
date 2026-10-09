@@ -69,14 +69,14 @@ class ResultsWindow:
         self.set_papers(papers)
         self.window.bind("<FocusIn>", lambda _: self._show_output_dir())
         self.window.after(100, self._drain)
-        self.window.after(150, lambda: self._panes.sashpos(0, int(height * .55)))
+        self.window.after(150, self._position_details)
 
     def _build(self):
         body = ttk.Frame(self.window, padding=18)
         body.pack(fill=tk.BOTH, expand=True)
         footer = ttk.Frame(body)
         footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
-        toolbar = ttk.Frame(body)
+        toolbar = self._toolbar = ttk.Frame(body)
         toolbar.pack(fill=tk.X, pady=(0, 10))
         toolbar.columnconfigure(2, weight=1)
         self._open_button = ttk.Button(toolbar, text="打开文件", command=self.open_file, bootstyle="secondary-outline")
@@ -158,8 +158,25 @@ class ResultsWindow:
         self._stop_button = ttk.Button(self._operation_bar, text="停止下载", command=self.cancel.set, state=tk.DISABLED, bootstyle="danger-outline")
         self._show_detail = tk.BooleanVar(self.window, value=True)
 
-        self._panes = ttk.Panedwindow(body, orient=tk.VERTICAL)
-        self._panes.pack(fill=tk.BOTH, expand=True)
+        self._results_area = ttk.Frame(body)
+        self._results_area.pack(fill=tk.BOTH, expand=True)
+        self._results_area.columnconfigure(0, weight=1)
+        self._results_area.rowconfigure(0, weight=1)
+        self._empty_results = ttk.Frame(self._results_area)
+        self._empty_results.grid(row=0, column=0, sticky="nsew")
+        empty_content = ttk.Frame(self._empty_results)
+        empty_content.place(relx=.5, rely=.45, anchor=tk.CENTER)
+        self._empty_title = ttk.Label(empty_content, text="尚无论文结果", style="Heading.TLabel")
+        self._empty_title.pack()
+        self._empty_action = ttk.Button(
+            empty_content, text="打开结果文件", command=self.open_file, bootstyle="primary",
+        )
+        self._empty_action.pack(pady=(16, 0))
+        self._panes = ttk.Panedwindow(self._results_area, orient=tk.VERTICAL)
+        self._panes.grid(row=0, column=0, sticky="nsew")
+        self._detail_split_pending = True
+        self._panes.bind("<Map>", self._position_details)
+        self._panes.bind("<Configure>", self._position_details)
         listing = ttk.Frame(self._panes)
         self._panes.add(listing, weight=3)
         listing.rowconfigure(0, weight=1)
@@ -170,7 +187,11 @@ class ResultsWindow:
         for key, label, size in (("checked", "勾选", 46), ("title", "论文标题", 470), ("authors", "作者", 130), ("source", "来源", 170), ("publication_date", "发表日期", 110), ("status", "状态", 120)):
             anchor = tk.CENTER if key == "checked" else tk.W
             self.table.heading(key, text=label, anchor=anchor, command=(lambda name=key: self._sort(name)))
-            self.table.column(key, width=size, minwidth=40 if key == "checked" else 90, stretch=key == "title", anchor=anchor)
+            self.table.column(
+                key, width=scale_size(self.window, size),
+                minwidth=scale_size(self.window, 40 if key == "checked" else 90),
+                stretch=key == "title", anchor=anchor,
+            )
         self.table.grid(row=0, column=0, sticky="nsew")
         vertical = ttk.Scrollbar(listing, orient=tk.VERTICAL, command=self.table.yview)
         vertical.grid(row=0, column=1, sticky="ns")
@@ -185,9 +206,14 @@ class ResultsWindow:
         self._panes.add(self._details, weight=2)
         self._title = ttk.Label(self._details, text="", style="Section.TLabel", wraplength=900)
         self._title.pack(fill=tk.X)
-        self._details.bind("<Configure>", lambda event: self._title.configure(wraplength=max(200, event.width - 16)))
         self._meta = ttk.Label(self._details, text="", wraplength=900)
         self._meta.pack(fill=tk.X, pady=(4, 6))
+        def resize_details(event):
+            width = max(200, event.width - 16)
+            self._title.configure(wraplength=width)
+            self._meta.configure(wraplength=width)
+
+        self._details.bind("<Configure>", resize_details)
         self._notebook = ttk.Notebook(self._details)
         self._notebook.pack(fill=tk.BOTH, expand=True)
         self._texts = {}
@@ -203,9 +229,14 @@ class ResultsWindow:
         bottom.pack(fill=tk.X)
         self._summary = tk.StringVar(self.window)
         ttk.Label(bottom, textvariable=self._summary).pack(side=tk.LEFT)
-        ttk.Checkbutton(bottom, text="显示详情", variable=self._show_detail, command=self._toggle_details).pack(side=tk.LEFT, padx=12)
-        ttk.Button(bottom, text="查看知网页面", command=self._open_url, bootstyle="secondary-outline").pack(side=tk.RIGHT)
-        ttk.Button(bottom, text="打开 DOI", command=self._open_doi, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=8)
+        self._detail_toggle = ttk.Checkbutton(
+            bottom, text="显示详情", variable=self._show_detail, command=self._toggle_details,
+        )
+        self._detail_toggle.pack(side=tk.LEFT, padx=12)
+        self._paper_links = ttk.Frame(bottom)
+        self._paper_links.pack(side=tk.RIGHT)
+        ttk.Button(self._paper_links, text="查看知网页面", command=self._open_url, bootstyle="secondary-outline").pack(side=tk.RIGHT)
+        ttk.Button(self._paper_links, text="打开 DOI", command=self._open_doi, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=8)
         self._operation_status = tk.StringVar(self.window)
         self._operation_label = ttk.Label(footer, textvariable=self._operation_status, wraplength=1100)
         self._operation_label.pack(fill=tk.X, pady=(5, 0))
@@ -289,8 +320,39 @@ class ResultsWindow:
             self.table.selection_set(selected[0])
         elif self._visible:
             self.table.selection_set(str(self._visible[0]))
+        self._sync_empty_results()
         self._update_summary()
         self._show_paper()
+
+    def _sync_empty_results(self):
+        if self._papers:
+            self._toolbar.pack(fill=tk.X, pady=(0, 10), before=self._results_area)
+            self._action_bar.pack(fill=tk.X, pady=(0, 10), before=self._results_area)
+            self._detail_toggle.pack(side=tk.LEFT, padx=12)
+            self._detail_toggle.configure(state=tk.NORMAL if self._visible else tk.DISABLED)
+        else:
+            self._toolbar.pack_forget()
+            self._action_bar.pack_forget()
+            self._detail_toggle.pack_forget()
+        if self._visible:
+            self._empty_results.grid_remove()
+            self._panes.grid()
+            self._paper_links.pack(side=tk.RIGHT)
+        else:
+            self._panes.grid_remove()
+            self._empty_results.grid()
+            self._paper_links.pack_forget()
+            self._empty_title.configure(text="没有匹配的论文" if self._papers else "尚无论文结果")
+            self._empty_action.configure(
+                text="清除筛选" if self._papers else "打开结果文件",
+                command=self._clear_filters if self._papers else self.open_file,
+            )
+        self._toggle_details()
+
+    def _clear_filters(self):
+        self.query.set("全部检索项")
+        self.kind.set("全部类型")
+        self.search.set("")
 
     def _set_row_status(self, index: int, status: str) -> None:
         self._row_statuses[index] = status
@@ -422,11 +484,19 @@ class ResultsWindow:
             text.configure(state=tk.DISABLED)
 
     def _toggle_details(self):
-        if self._show_detail.get():
+        visible = any(str(pane) == str(self._details) for pane in self._panes.panes())
+        if self._visible and self._show_detail.get() and not visible:
             self._panes.add(self._details, weight=2)
-            self._panes.sashpos(0, int(self._panes.winfo_height() * .55))
-        else:
+            self._detail_split_pending = True
+            self.window.after_idle(self._position_details)
+        elif (not self._visible or not self._show_detail.get()) and visible:
             self._panes.forget(self._details)
+
+    def _position_details(self, _event=None):
+        if (self._detail_split_pending and self._panes.winfo_ismapped()
+                and self._panes.winfo_height() > 1 and len(self._panes.panes()) > 1):
+            self._panes.sashpos(0, int(self._panes.winfo_height() * .55))
+            self._detail_split_pending = False
 
     def open_file(self):
         if self.busy:
