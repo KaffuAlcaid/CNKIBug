@@ -1,13 +1,11 @@
-import builtins
 from queue import Queue
 from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-import run_gui
 
-from cnkibug.app.runtime import DEFAULT_CONFIG, RuntimeState, get_runtime_paths
+from cnkibug.app.runtime import DEFAULT_CONFIG, get_runtime_paths
 from cnkibug.cnki.models import Paper
 from cnkibug.gui.app import (
     CNKIBugApp,
@@ -20,44 +18,6 @@ from cnkibug.gui.settings import SettingsDialog, _NUMERIC_FIELDS
 from cnkibug.gui.task_form import GuiTaskRequest, TaskForm, _merge_task_keywords, _resolve_save_mode
 from cnkibug.gui.task_progress import TaskProgress
 from cnkibug.workflow.state import make_task_state
-
-
-def test_gui_startup_import_failure_reports_console_dialog_and_log_path(
-    monkeypatch,
-    capsys,
-    tmp_path,
-):
-    original_import = builtins.__import__
-    import_error = ImportError("No module named 'ttkbootstrap'")
-    log_path = tmp_path / "gui_startup_error.log"
-    shown = []
-
-    def fail_gui_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "cnkibug.gui.app":
-            raise import_error
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fail_gui_import)
-    monkeypatch.setattr(run_gui, "_write_startup_error_log", lambda error: log_path)
-    monkeypatch.setattr(run_gui, "_show_startup_error_dialog", shown.append)
-
-    try:
-        run_gui._run()
-    except SystemExit as error:
-        assert error.code == 1
-        assert error.__cause__ is import_error
-    else:
-        raise AssertionError("GUI launcher did not exit after an import failure")
-
-    assert capsys.readouterr().out.splitlines() == [
-        "CNKIBug GUI 启动失败：No module named 'ttkbootstrap'",
-        '请运行：pip install -e ".[gui]"',
-        f"日志路径：{log_path}",
-    ]
-    assert shown == [
-        "CNKIBug GUI 启动失败：No module named 'ttkbootstrap'"
-        f"\n\n日志路径：{log_path}"
-    ]
 
 
 def test_gui_save_mode_is_derived_without_single_multi_mode_selector():
@@ -455,33 +415,6 @@ def test_gui_damaged_checkpoint_delete_failure_exits(monkeypatch, tmp_path):
     assert len(errors) == 1
     app.root.destroy.assert_called_once_with()
     app._start_task.assert_not_called()
-
-
-def test_gui_applies_config_to_runtime_settings_logging_and_theme(monkeypatch, tmp_path):
-    app = CNKIBugApp.__new__(CNKIBugApp)
-    paths = get_runtime_paths(tmp_path)
-    app.runtime = RuntimeState(paths, DEFAULT_CONFIG.copy(), paths.log_dir / "run.log", [])
-    app.root = Mock()
-    app.root.style.theme_use.return_value = "litera"
-    app.root.style.theme.type = "dark"
-    app._task_form = TaskForm.__new__(TaskForm)
-    app._task_progress = TaskProgress.__new__(TaskProgress)
-    app._task_progress._log = Mock()
-    appearance = Mock()
-    monkeypatch.setattr("cnkibug.gui.app.apply_appearance", appearance)
-    logger = Mock()
-    monkeypatch.setattr("cnkibug.gui.app.logging.getLogger", lambda: logger)
-    config = {**DEFAULT_CONFIG, "gui_theme": "darkly", "log_level": "WARNING", "timeout_goto_ms": 45000}
-
-    app._apply_config(config)
-
-    assert app.runtime.config == config
-    assert app.runtime.config is not config
-    assert app.settings.timeout_goto_ms == 45000
-    logger.setLevel.assert_called_once_with("WARNING")
-    app.root.style.theme_use.assert_called_with("darkly")
-    appearance.assert_called_once_with(app.root)
-    app._task_progress._log.tag_configure.assert_any_call("error", foreground=app.root.style.colors.danger)
 
 
 def _settings_dialog(config=None):

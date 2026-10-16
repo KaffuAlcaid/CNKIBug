@@ -8,7 +8,7 @@ from cnkibug.app.runtime import DEFAULT_CONFIG, get_runtime_paths
 from cnkibug.browser.session import ScrapeSession
 from cnkibug.cnki import search
 from cnkibug.core.events import NULL_EVENTS
-from cnkibug.core.search_query import AdvancedQuery, SearchCondition, load_advanced_queries
+from cnkibug.core.search_query import AdvancedQuery, SearchCondition, SearchOptions, load_advanced_queries
 from cnkibug.core.settings import get_scraper_settings
 from cnkibug.workflow import keyword_run, state
 from cnkibug.workflow.task import initialize_task
@@ -25,6 +25,15 @@ def test_query_json_roundtrip_preserves_all_conditions_and_filters():
     assert restored == query
     assert restored.conditions[1].operator == "NOT"
     assert "2020-01-01" in restored.summary()
+
+
+def test_search_options_serialization_and_old_checkpoint():
+    options = SearchOptions(resources=("学术期刊",), page_size=50)
+    task = state.make_task_state(["查询"], 3, "single", "TS", search_options=options)
+    assert SearchOptions.from_dict(task["search_options"]) == options
+    assert SearchOptions.from_dict(None) is None
+    with pytest.raises(ValueError):
+        SearchOptions(page_size=100)
 
 
 @pytest.mark.parametrize("raw", [
