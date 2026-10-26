@@ -11,7 +11,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.settings import ScraperSettings
-from ..core.search_query import AdvancedQuery
+from ..core.search_query import AdvancedQuery, ProfessionalQuery
 from ..browser.session import ScrapeSession, require_page
 from .guard import (
     handle_verify,
@@ -26,6 +26,9 @@ from .selectors import (
     SELECTOR_SEARCH_INPUT,
 )
 from .advanced import submit_advanced_search
+from .professional import (
+    ProfessionalSearchError, prepare_professional_search, professional_error, submit_professional_search,
+)
 
 
 CNKI_HOME_URL = "https://www.cnki.net/"
@@ -241,7 +244,7 @@ def submit_search(
         _wait_without_session(events, random.uniform(1, 2))
 
 
-def wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
+def wait_search_outcome(page: Any, settings: ScraperSettings, *, professional: bool = False) -> str:
     return page.wait_for_function(
         """(selectors) => {
             const href = location.href.toLowerCase();
@@ -251,6 +254,15 @@ def wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
             if (href.includes('oversea.cnki.net')) return 'oversea';
             if (isCnki && (path.includes('/verify') ||
                 (document.title || '').includes('安全验证'))) return 'verify';
+            if (selectors.professional) {
+                const errors = document.querySelectorAll('.layui-layer-content, .search-error, [role="alert"]');
+                for (const element of errors) {
+                    if (element.getClientRects().length &&
+                        /(检索式|表达式|括号|运算符).*(错误|不正确|无效|不合法)|请输入.*(检索|内容)/.test(element.textContent || '')) {
+                        return 'invalid_query';
+                    }
+                }
+            }
             if (document.querySelector(selectors.resultRows)) return 'has_results';
             if (document.querySelector(selectors.noContent)) return 'no_content';
             return false;
@@ -258,6 +270,7 @@ def wait_search_outcome(page: Any, settings: ScraperSettings) -> str:
         arg={
             "resultRows": SELECTOR_RESULT_ROWS,
             "noContent": SELECTOR_NO_CONTENT,
+            "professional": professional,
         },
         timeout=settings.timeout_selector_ms,
     ).json_value()
@@ -270,7 +283,10 @@ def run_keyword_search(
     keyword_ref: str,
     *,
     advanced_query: AdvancedQuery | None = None,
+    professional_query: ProfessionalQuery | None = None,
 ) -> SearchResult:
+    if advanced_query is not None and professional_query is not None:
+        raise ValueError("一个检索项不能同时使用高级检索与专业检索。")
     if session.acknowledge_stop_request():
         return _stopped_result(session)
     page = require_page(session)
@@ -306,7 +322,7 @@ def run_keyword_search(
     if session.acknowledge_stop_request():
         return _stopped_result(session)
     try:
-        if advanced_query is None:
+        if advanced_query is None and professional_query is None:
             open_search_page(page, settings, events)
         else:
             open_search_page(page, settings, events, advanced=True)
@@ -342,13 +358,19 @@ def run_keyword_search(
         page.wait_for_load_state("load", timeout=settings.timeout_load_ms)
         if session.acknowledge_stop_request():
             return _stopped_result(session)
+        if professional_query is not None:
+            prepare_professional_search(page, settings, events)
         if settings.search_options is not None:
             from .search_options import apply_search_options
             apply_search_options(page, settings.search_options, settings, events)
-        if advanced_query is None:
+        if professional_query is not None:
+            submit_professional_search(page, professional_query, settings, events)
+        elif advanced_query is None:
             submit_search(page, keyword, settings, events)
         else:
             submit_advanced_search(page, advanced_query, settings, events)
+    except ProfessionalSearchError as error:
+        return SearchResult(SEARCH_FAILED, str(error))
     except PlaywrightError:
         if session.acknowledge_stop_request():
             return _stopped_result(session)
@@ -371,7 +393,9 @@ def run_keyword_search(
             return _stopped_result(session)
         try:
             _ensure_supported_site(page, "关键词结果页")
-            outcome = wait_search_outcome(page, settings)
+            outcome = wait_search_outcome(
+                page, settings, **({"professional": True} if professional_query is not None else {}),
+            )
         except PlaywrightTimeoutError:
             if session.acknowledge_stop_request():
                 return _stopped_result(session)
@@ -390,6 +414,8 @@ def run_keyword_search(
             return _stopped_result(session)
         if outcome == SEARCH_OVERSEA:
             _ensure_supported_site(page, "关键词结果页")
+        if outcome == "invalid_query":
+            return SearchResult(SEARCH_FAILED, professional_error(page))
         if outcome != "verify":
             if outcome == "has_results" and settings.search_options is not None:
                 from .search_options import apply_page_size

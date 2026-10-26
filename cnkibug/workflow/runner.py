@@ -15,7 +15,7 @@ from ..cnki.search import CNKIOverseaRedirectError, warmup
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
-from ..core.search_query import AdvancedQuery, SearchOptions
+from ..core.search_query import AdvancedQuery, ProfessionalQuery, SearchOptions
 from .finalize import finalize_task
 from .keyword_run import run_keywords, start_progress
 from .task import TaskContext, initialize_task
@@ -40,6 +40,7 @@ def scrape_cnki(
     cancel_event: Event | None = None,
     advanced_queries: dict[str, AdvancedQuery] | None = None,
     search_options: SearchOptions | None = None,
+    professional_queries: dict[str, ProfessionalQuery] | None = None,
 ) -> None:
     if not keywords:
         events.emit("message", text="[!] 未提供任何关键词，已跳过抓取。", level="warning")
@@ -61,6 +62,7 @@ def scrape_cnki(
         output_dir=output_dir,
         cancel_event=cancel_event,
         **({"advanced_queries": advanced_queries} if advanced_queries else {}),
+        **({"professional_queries": professional_queries} if professional_queries else {}),
         **({"search_options": search_options} if search_options is not None else {}),
     )
     _logger.info(

@@ -10,7 +10,7 @@ from . import dialogs as messagebox
 from .appearance import ScrollView, TextView
 
 from ..core.search_query import (
-    AdvancedQuery, MATCH_MODES, PUBLICATION_FILTERS, SEARCH_FIELDS, SearchCondition,
+    AdvancedQuery, ProfessionalQuery, MATCH_MODES, PUBLICATION_FILTERS, SEARCH_FIELDS, SearchCondition,
 )
 
 
@@ -238,7 +238,7 @@ class AdvancedSearchDialog:
         self.window.destroy()
 
 
-def confirm_advanced_task(parent: tk.Misc, summary: str, queries: dict[str, AdvancedQuery]) -> bool:
+def confirm_advanced_task(parent: tk.Misc, summary: str, queries: dict[str, AdvancedQuery | ProfessionalQuery]) -> bool:
     accepted = False
     window = ttk.Toplevel(master=parent)
     window.withdraw()

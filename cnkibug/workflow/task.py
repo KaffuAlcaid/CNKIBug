@@ -13,7 +13,7 @@ from ..cnki.models import STATUS_FAILED, make_keyword_result
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
-from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
+from ..core.search_query import AdvancedQuery, ProfessionalQuery, SearchOptions, load_advanced_queries, load_professional_queries
 from .report import TaskReport
 from .state import (
     completed_results,
@@ -48,6 +48,7 @@ class TaskContext:
     browser_context: Any | None = None
     detail_fetcher: ArticleDetailFetcher | None = None
     advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
+    professional_queries: dict[str, ProfessionalQuery] = field(default_factory=dict)
 
     @property
     def total_records(self) -> int:
@@ -70,6 +71,7 @@ def initialize_task(
     cancel_event: Event | None = None,
     advanced_queries: dict[str, AdvancedQuery] | None = None,
     search_options: SearchOptions | None = None,
+    professional_queries: dict[str, ProfessionalQuery] | None = None,
 ) -> TaskContext:
     if resume_state is not None:
         keywords = list(resume_state["keywords"])
@@ -83,6 +85,7 @@ def initialize_task(
         ts = str(resume_state["ts"])
         state = resume_state
         advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
+        professional_queries = load_professional_queries(state.get("professional_queries", {}), keywords, advanced_queries)
         search_options = SearchOptions.from_dict(state.get("search_options"))
         all_results = stored_results(state)
         terminal_results = completed_results(state)
@@ -123,6 +126,7 @@ def initialize_task(
             output_dir=output_dir,
             advanced_queries=advanced_queries,
             search_options=search_options,
+            professional_queries=professional_queries,
         )
         persist_task_state(state, "创建新任务", paths, events)
 
@@ -164,4 +168,5 @@ def initialize_task(
         session=ScrapeSession(events, cancel_event),
         output_dir=output_dir,
         advanced_queries=dict(advanced_queries or {}),
+        professional_queries=dict(professional_queries or {}),
     )

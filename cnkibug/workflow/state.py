@@ -9,12 +9,12 @@ from typing import Any
 from ..cnki.models import STATUS_EMPTY, STATUS_SUCCESS, KeywordResult
 from ..core.events import EventSink, NULL_EVENTS
 from ..core.runtime import RuntimePaths
-from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
+from ..core.search_query import AdvancedQuery, ProfessionalQuery, SearchOptions, load_advanced_queries, load_professional_queries
 
 
 LAST_TASK_FILENAME = "last_task.json"
-TASK_STATE_VERSION = 7
-_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3, 4, 5, 6}
+TASK_STATE_VERSION = 8
+_LEGACY_TASK_STATE_VERSIONS = {1, 2, 3, 4, 5, 6, 7}
 
 _logger = logging.getLogger("cnkibug.task_state")
 _TERMINAL_STATUSES = {STATUS_SUCCESS, STATUS_EMPTY}
@@ -55,9 +55,12 @@ def make_task_state(
     output_dir: Path | None = None,
     advanced_queries: dict[str, AdvancedQuery] | None = None,
     search_options: SearchOptions | None = None,
+    professional_queries: dict[str, ProfessionalQuery] | None = None,
 ) -> dict[str, Any]:
     if any(key not in keywords for key in (advanced_queries or {})):
         raise ValueError("高级检索与任务列表不一致。")
+    if any(key not in keywords or key in (advanced_queries or {}) for key in (professional_queries or {})):
+        raise ValueError("专业检索与任务列表或高级检索条件不一致。")
     return {
         "version": TASK_STATE_VERSION,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -70,6 +73,7 @@ def make_task_state(
         "output_dir": str(output_dir) if output_dir is not None else None,
         "keywords": list(keywords),
         "advanced_queries": {key: query.to_dict() for key, query in (advanced_queries or {}).items()},
+        "professional_queries": {key: query.to_dict() for key, query in (professional_queries or {}).items()},
         "search_options": search_options.to_dict() if search_options else None,
         "completed": {},
     }
@@ -277,7 +281,7 @@ def describe_task(state: dict[str, Any]) -> str:
             else:
                 retryable_count += 1
     retry_text = f"，待重试 {retryable_count} 个" if retryable_count else ""
-    item_name = "检索项" if state.get("advanced_queries") else "关键词"
+    item_name = "检索项" if state.get("advanced_queries") or state.get("professional_queries") else "关键词"
     return (
         f"{item_name} {keyword_count} 个，已完成 {completed_count} 个{retry_text}，"
         f"每词 {state.get('max_pages')} 页，保存方式 {state.get('save_mode')}，"
@@ -306,10 +310,15 @@ def _is_valid_task_state(raw: Any) -> bool:
         return False
     try:
         load_advanced_queries(raw.get("advanced_queries", {}), keywords)
+        load_professional_queries(raw.get("professional_queries", {}), keywords, raw.get("advanced_queries", {}))
         SearchOptions.from_dict(raw.get("search_options"))
     except ValueError:
         return False
     if version == TASK_STATE_VERSION and "advanced_queries" not in raw:
+        return False
+    if version == TASK_STATE_VERSION and "professional_queries" not in raw:
+        return False
+    if version in _LEGACY_TASK_STATE_VERSIONS and raw.get("professional_queries"):
         return False
     if version in _LEGACY_TASK_STATE_VERSIONS:
         return True
@@ -322,6 +331,7 @@ def _is_valid_task_state(raw: Any) -> bool:
 def _upgrade_legacy_task_state(raw: dict[str, Any]) -> dict[str, Any]:
     raw["version"] = TASK_STATE_VERSION
     raw.setdefault("advanced_queries", {})
+    raw.setdefault("professional_queries", {})
     for key in ("include_citation", "include_details", "detail_txt_export"):
         if not isinstance(raw.get(key), bool):
             raw[key] = False

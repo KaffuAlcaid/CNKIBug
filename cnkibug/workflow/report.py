@@ -178,6 +178,8 @@ def build_task_report(
         }
         if keyword in task_state.get("advanced_queries", {}):
             keyword_report["advanced_query"] = task_state["advanced_queries"][keyword]
+        if keyword in task_state.get("professional_queries", {}):
+            keyword_report["professional_query"] = task_state["professional_queries"][keyword]
         if include_citation:
             keyword_report["citation"] = collect_citation_stats(records)
         if include_details:

@@ -13,7 +13,7 @@ from ttkbootstrap.utility import scale_size
 from ttkbootstrap.widgets import ToolTip
 from . import dialogs as messagebox
 
-from ..core.search_query import AdvancedQuery, SearchOptions, load_advanced_queries
+from ..core.search_query import AdvancedQuery, ProfessionalQuery, SearchOptions, load_advanced_queries, load_professional_queries
 from ..fileio.keyword_input import (
     MAX_KEYWORDS,
     KeywordImportError,
@@ -26,6 +26,7 @@ from ..fileio.search_plans import read_search_plan, write_search_plan
 from .advanced import AdvancedSearchDialog
 from .appearance import ScrollView
 from .search_options import SearchOptionsDialog
+from .professional import ProfessionalSearchDialog
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class GuiTaskRequest:
     output_dir: Path | None
     advanced_queries: dict[str, AdvancedQuery] = field(default_factory=dict)
     search_options: SearchOptions | None = None
+    professional_queries: dict[str, ProfessionalQuery] = field(default_factory=dict)
 
 
 @dataclass
@@ -86,6 +88,7 @@ class TaskForm(ttk.Frame):
         self._running = False
         self._keyword_rows: list[_KeywordRow] = []
         self._advanced_queries: dict[str, AdvancedQuery] = {}
+        self._professional_queries: dict[str, ProfessionalQuery] = {}
         self._search_options: SearchOptions | None = None
 
         self.columnconfigure(0, weight=1)
@@ -123,6 +126,10 @@ class TaskForm(ttk.Frame):
             actions, text="高级检索", command=self._open_advanced, bootstyle="secondary-outline",
         )
         self._advanced_button.pack(side=tk.LEFT, padx=(6, 0))
+        self._professional_button = ttk.Button(
+            actions, text="专业检索", command=self._open_professional, bootstyle="secondary-outline",
+        )
+        self._professional_button.pack(side=tk.LEFT, padx=(6, 0))
         self._import_button.pack(side=tk.LEFT, padx=(6, 0))
 
         self._keyword_list = ScrollView(
@@ -238,6 +245,7 @@ class TaskForm(ttk.Frame):
         self._form_controls = [
             self._add_keyword_button,
             self._advanced_button,
+            self._professional_button,
             self._import_button,
             self._plan_button,
             self._pages_entry,
@@ -393,12 +401,14 @@ class TaskForm(ttk.Frame):
             output_dir=output_dir,
             advanced_queries=dict(self._advanced_queries),
             search_options=getattr(self, "_search_options", None),
+            professional_queries=dict(getattr(self, "_professional_queries", {})),
         )
 
     def populate_resume(self, state: dict[str, Any]) -> None:
         self._search_options = SearchOptions.from_dict(state.get("search_options"))
         keywords = state.get("keywords", [])
         self._advanced_queries = load_advanced_queries(state.get("advanced_queries", {}), keywords)
+        self._professional_queries = load_professional_queries(state.get("professional_queries", {}), keywords, self._advanced_queries)
         self._set_keywords([str(item) for item in keywords])
         self._pages_var.set(str(state.get("max_pages", 1)))
         save_mode = str(state.get("save_mode", "single"))
@@ -471,11 +481,12 @@ class TaskForm(ttk.Frame):
 
     def _set_keywords(self, keywords: list[str], status: str | None = None) -> None:
         self._advanced_queries = {key: query for key, query in self._advanced_queries.items() if key in keywords}
+        self._professional_queries = {key: query for key, query in getattr(self, "_professional_queries", {}).items() if key in keywords}
         for row in self._keyword_rows:
             row.frame.destroy()
         self._keyword_rows.clear()
         for keyword in keywords or [""]:
-            self._append_keyword_row(keyword, query_key=keyword if keyword in self._advanced_queries else None)
+            self._append_keyword_row(keyword, query_key=keyword if keyword in self._advanced_queries or keyword in self._professional_queries else None)
         self._keyword_list.yview_moveto(0)
         self._sync_keyword_action_states()
         if status:
@@ -487,9 +498,14 @@ class TaskForm(ttk.Frame):
         frame.columnconfigure(2, weight=1)
         number = ttk.Label(frame, width=4, anchor=tk.CENTER)
         number.grid(row=0, column=0)
+        professional = query_key in getattr(self, "_professional_queries", {})
+        queries = self._professional_queries if professional else self._advanced_queries
         if query_key:
-            ttk.Label(frame, text="高级", bootstyle="secondary").grid(row=0, column=1, padx=(0, 6))
-        text = tk.StringVar(value=self._advanced_queries[query_key].summary() if query_key else keyword)
+            ttk.Label(frame, text="专业" if professional else "高级", bootstyle="secondary").grid(row=0, column=1, padx=(0, 6))
+        display = queries[query_key].summary() if query_key else keyword
+        if professional:
+            display = f"{query_key}：{' '.join(display.splitlines())}"
+        text = tk.StringVar(value=display)
         entry = ttk.Entry(frame, textvariable=text)
         entry.grid(row=0, column=2, columnspan=1 if query_key else 2, sticky="ew")
         delete = ttk.Button(frame, text="-", width=3, bootstyle="secondary-outline")
@@ -498,13 +514,14 @@ class TaskForm(ttk.Frame):
         delete.configure(command=lambda: self._delete_keyword(row))
         ToolTip(delete, text="移除检索项")
         if query_key:
+            edit = self._open_professional if professional else self._open_advanced
             row.edit_button = ttk.Button(
-                frame, text="编辑", width=4, command=lambda: self._open_advanced(row),
+                frame, text="编辑", width=4, command=lambda: edit(row),
                 bootstyle="secondary-outline",
             )
             row.edit_button.grid(row=0, column=3, padx=(6, 0))
-            ToolTip(row.edit_button, text="编辑高级检索条件")
-            entry.bind("<Double-1>", lambda _event: self._open_advanced(row))
+            ToolTip(row.edit_button, text="编辑专业检索式" if professional else "编辑高级检索条件")
+            entry.bind("<Double-1>", lambda _event: edit(row))
         else:
             entry.bind("<Return>", lambda _event: self._next_keyword(row))
             text.trace_add("write", lambda *_args: self._update_keyword_summary())
@@ -609,6 +626,42 @@ class TaskForm(ttk.Frame):
         self._sync_keyword_action_states()
         self._focus_keyword(row)
 
+    def _open_professional(self, row: _KeywordRow | None = None) -> None:
+        if self._running:
+            return
+        if row is None and len(self._keywords) >= MAX_KEYWORDS:
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
+            return
+        previous = row.query_key if row else None
+        name = previous
+        if name is None:
+            number = 1
+            while f"专业检索 {number}" in self._keywords:
+                number += 1
+            name = f"专业检索 {number}"
+        result = ProfessionalSearchDialog(
+            self.root, name, self._professional_queries.get(previous), self._search_options,
+        ).show()
+        if result is None:
+            return
+        name, query = result
+        if name != previous and name in self._keywords:
+            messagebox.showwarning("重复检索项", "该名称已在当前任务中，请使用不同名称。", parent=self.root)
+            return
+        if any(key != previous and value == query for key, value in self._professional_queries.items()):
+            messagebox.showwarning("重复检索项", "相同的专业检索式已在当前任务中。", parent=self.root)
+            return
+        if previous is not None:
+            self._professional_queries.pop(previous)
+        self._professional_queries[name] = query
+        if row is None:
+            row = self._append_keyword_row(name, query_key=name)
+        else:
+            row.query_key = name
+            row.text.set(f"{name}：{' '.join(query.expression.splitlines())}")
+        self._sync_keyword_action_states()
+        self._focus_keyword(row)
+
     def _delete_keyword(self, row: _KeywordRow) -> None:
         if self._running:
             return
@@ -617,6 +670,7 @@ class TaskForm(ttk.Frame):
         row.frame.destroy()
         if row.query_key is not None:
             self._advanced_queries.pop(row.query_key, None)
+            getattr(self, "_professional_queries", {}).pop(row.query_key, None)
         if not self._keyword_rows:
             self._append_keyword_row("")
         self._sync_keyword_action_states()
@@ -664,6 +718,7 @@ class TaskForm(ttk.Frame):
         duplicate_text = f"；跳过 {duplicate_count} 个重复项" if duplicate_count else ""
         if not append:
             self._advanced_queries.clear()
+            self._professional_queries.clear()
         self._set_keywords(
             merged.keywords,
             f"已从 TXT 载入 {len(imported.keywords)} 项；当前任务：{len(merged.keywords)} 项"

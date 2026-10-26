@@ -29,7 +29,7 @@ from ..core.estimate import (
 )
 from ..core.memory import MemorySampler, format_memory
 from ..core.settings import get_scraper_settings
-from ..core.search_query import SearchOptions, load_advanced_queries
+from ..core.search_query import SearchOptions, load_advanced_queries, load_professional_queries
 from ..core.version import APP_VERSION
 from ..fileio.paths import get_real_desktop_path, open_directory
 from ..workflow.runner import scrape_cnki
@@ -355,8 +355,12 @@ class CNKIBugApp:
         summary += _long_task_warning(high)
         summary += "确认无误后才会启动浏览器和抓取任务。"
         confirmed = (
-            confirm_advanced_task(self.root, summary, request.advanced_queries)
-            if request.advanced_queries
+            confirm_advanced_task(
+                self.root, summary,
+                {key: request.advanced_queries.get(key) or request.professional_queries[key]
+                 for key in request.keywords if key in request.advanced_queries or key in request.professional_queries},
+            )
+            if request.advanced_queries or request.professional_queries
             else messagebox.askokcancel("开始前确认", summary, parent=self.root)
         )
         if confirmed:
@@ -463,6 +467,9 @@ class CNKIBugApp:
                 ),
                 advanced_queries=load_advanced_queries(resume_state.get("advanced_queries", {}), resume_state["keywords"]),
                 search_options=SearchOptions.from_dict(resume_state.get("search_options")),
+                professional_queries=load_professional_queries(
+                    resume_state.get("professional_queries", {}), resume_state["keywords"], resume_state.get("advanced_queries", {}),
+                ),
             )
         assert request is not None
         if not self._confirm_replace_results("继续任务" if resume_state is not None else "开始新任务"):
@@ -522,6 +529,7 @@ class CNKIBugApp:
                     output_dir=request.output_dir,
                     cancel_event=self._cancel_event,
                     **({"advanced_queries": request.advanced_queries} if request.advanced_queries else {}),
+                    **({"professional_queries": request.professional_queries} if request.professional_queries else {}),
                     **({"search_options": request.search_options} if request.search_options is not None else {}),
                 )
             except Exception as error:

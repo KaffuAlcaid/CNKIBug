@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
@@ -139,3 +140,32 @@ def load_advanced_queries(raw: Any, keywords: list[str]) -> dict[str, AdvancedQu
     if not isinstance(raw, dict) or any(key not in keywords for key in raw):
         raise ValueError("高级检索与任务列表不一致。")
     return {key: AdvancedQuery.from_dict(value) for key, value in raw.items()}
+
+
+@dataclass(frozen=True)
+class ProfessionalQuery:
+    expression: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.expression, str) or not self.expression.strip():
+            raise ValueError("请输入专业检索式。")
+        if any(unicodedata.category(character) in {"Cc", "Cs"} and character not in "\t\r\n" for character in self.expression):
+            raise ValueError("专业检索式包含无法提交的控制字符。")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"expression": self.expression}
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> ProfessionalQuery:
+        if not isinstance(raw, dict) or set(raw) != {"expression"}:
+            raise ValueError("专业检索条件格式无效。")
+        return cls(raw["expression"])
+
+    def summary(self) -> str:
+        return self.expression
+
+
+def load_professional_queries(raw: Any, keywords: list[str], advanced: Any = ()) -> dict[str, ProfessionalQuery]:
+    if not isinstance(raw, dict) or any(key not in keywords or key in advanced for key in raw):
+        raise ValueError("专业检索与任务列表或高级检索条件不一致。")
+    return {key: ProfessionalQuery.from_dict(value) for key, value in raw.items()}
