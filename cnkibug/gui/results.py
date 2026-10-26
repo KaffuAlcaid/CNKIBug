@@ -141,11 +141,11 @@ class ResultsWindow:
         self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 10), before=self._export_button)
         self.export_formats = {
             extension: tk.BooleanVar(self.window, value=extension == self._initial_format)
-            for extension in ("xlsx", "csv", "ris")
+            for extension in ("xlsx", "csv", "ris", "bib")
         }
         formats = ttk.Frame(self._export_actions)
         formats.pack(side=tk.RIGHT, padx=10)
-        for label, extension in (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris")):
+        for label, extension in (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris"), ("BibTeX", "bib")):
             ttk.Checkbutton(
                 formats, text=label, variable=self.export_formats[extension],
                 command=self._sync_export_types, bootstyle="primary",

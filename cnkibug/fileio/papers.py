@@ -209,5 +209,9 @@ def save_papers(path: str | Path, papers: list[Paper], include_pdf: bool = False
         _write_atomically(str(path), lambda temporary: write_csv(temporary, papers))
     elif path.suffix.lower() == ".ris":
         _write_atomically(str(path), lambda temporary: write_ris(temporary, papers, include_pdf))
+    elif path.suffix.lower() == ".bib":
+        from .bibtex import write_bibtex
+
+        _write_atomically(str(path), lambda temporary: write_bibtex(temporary, papers))
     else:
-        raise ValueError("保存格式应为 XLSX、CSV 或 RIS。")
+        raise ValueError("保存格式应为 XLSX、CSV、RIS 或 BibTeX。")
