@@ -18,6 +18,9 @@ class EventSink:
     def cancel_requested(self) -> bool:
         return False
 
+    def request(self, name: str, **payload: Any) -> Any:
+        return None
+
     @contextmanager
     def activity(self, message: str) -> Iterator[None]:
         yield

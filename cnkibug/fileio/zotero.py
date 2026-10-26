@@ -9,6 +9,9 @@ from uuid import uuid4
 from ..cnki.models import Paper, document_type_family, normalize_doi, split_authors
 from ..core.events import EventSink
 from .papers import split_values
+from .zotero_library import (
+    ZoteroReadCancelled, check_library_unchanged, library_prefix, read_library, review_papers,
+)
 
 
 _ITEM_TYPES = {
@@ -91,17 +94,36 @@ def send_papers_to_zotero(items: list[tuple[int, Paper]], events: EventSink) -> 
     if not items or events.cancel_requested():
         return "没有需要发送的论文"
     target, selected = _selected_target()
+    destination = f"{selected['libraryName']} / {selected['name']}" if selected.get("id") else selected["libraryName"]
+    events.emit("paper_operation_progress", message="正在读取 Zotero 文库并检查重复文献")
+    try:
+        snapshot = read_library(library_prefix(selected, events), events)
+        rows = review_papers(items, snapshot.papers)
+        chosen = events.request("zotero_review_requested", destination=destination, rows=rows)
+        if chosen is None or events.cancel_requested():
+            return "发送已取消"
+        eligible = {row.index for row in rows if row.status != "duplicate"}
+        if not isinstance(chosen, list) or any(type(index) is not int or index not in eligible for index in chosen):
+            raise RuntimeError("待发送文献选择无效，未发送任何条目。")
+        check_library_unchanged(snapshot, events)
+    except ZoteroReadCancelled:
+        return "发送已取消"
+    current, current_selection = _selected_target()
+    if current != target or current_selection["libraryID"] != selected["libraryID"]:
+        raise RuntimeError("Zotero 的目标分类已变化，请确认分类后重新发送。")
+    chosen = set(chosen)
+    for row in rows:
+        if row.index not in chosen:
+            status = "文库已有，已跳过" if row.status == "duplicate" else "未选择发送"
+            if row.reason.startswith("本次列表"):
+                status = "本次列表重复，已跳过"
+            events.emit("paper_zotero", index=row.index, status=status)
+    skipped = len(items) - len(chosen)
+    items = [(index, paper) for index, paper in items if index in chosen]
+    if not items or events.cancel_requested():
+        return f"Zotero：未发送条目，跳过 {skipped} 篇"
     pdf_items = [(index, paper) for index, paper in items if paper.pdf_path]
     pdf_count = len(pdf_items)
-    destination = f"{selected['libraryName']} / {selected['name']}" if selected.get("id") else selected["libraryName"]
-    if not events.confirm(
-        f"将 {len(items)} 篇论文和 {pdf_count} 个已关联 PDF 发送到 Zotero：\n{destination}\n\n"
-        "重复发送会创建新条目。是否继续？",
-    ) or events.cancel_requested():
-        return "发送已取消"
-    current, _ = _selected_target()
-    if current != target:
-        raise RuntimeError("Zotero 的目标分类已变化，请确认分类后重新发送。")
     session_id = uuid4().hex
     documents = [build_zotero_item(paper, f"paper-{index}") for index, paper in items]
     events.emit("paper_operation_progress", message=f"正在向 Zotero 发送 {len(items)} 篇论文")
@@ -147,4 +169,4 @@ def send_papers_to_zotero(items: list[tuple[int, Paper]], events: EventSink) -> 
     pending = pdf_count - uploaded - failed
     for index, _ in pdf_items[uploaded + failed:]:
         events.emit("paper_zotero", index=index, status="条目已发送，PDF 未处理（已停止）")
-    return f"Zotero：已发送 {len(items)} 篇论文；PDF 成功 {uploaded}，失败 {failed}，未处理 {pending}"
+    return f"Zotero：已发送 {len(items)} 篇论文，跳过 {skipped} 篇；PDF 成功 {uploaded}，失败 {failed}，未处理 {pending}"

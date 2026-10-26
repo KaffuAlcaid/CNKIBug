@@ -24,6 +24,7 @@ from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
 from .download_dialog import DownloadDialog
 from .appearance import TextView
+from .zotero_review import ZoteroLibraryDialog, ZoteroReviewDialog
 
 
 class ResultsWindow:
@@ -766,6 +767,19 @@ class ResultsWindow:
                 elif event.name == "confirm_requested":
                     answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("请确认", payload["prompt"], parent=self.window)
                     payload["response_queue"].put(answer)
+                elif event.name in {"zotero_review_requested", "zotero_library_requested"}:
+                    answer = None
+                    try:
+                        if not (self._closing or self.cancel.is_set()):
+                            if event.name == "zotero_review_requested":
+                                dialog = ZoteroReviewDialog(self.window, payload["destination"], payload["rows"], self.cancel)
+                            else:
+                                dialog = ZoteroLibraryDialog(self.window, payload["destination"], payload["libraries"], self.cancel)
+                            answer = dialog.show()
+                    except Exception:
+                        logging.getLogger("cnkibug.gui.results").exception("无法显示 Zotero 确认窗口")
+                    finally:
+                        payload["response_queue"].put(answer)
                 elif event.name in {"download_error", "paper_task_error"} and not (self._closing or self._hide_when_done):
                     messagebox.showerror("论文处理结束", payload["error"], parent=self.window)
                 elif event.name in {"download_finished", "paper_task_finished"}:

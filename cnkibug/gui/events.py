@@ -43,6 +43,16 @@ class GuiEventSink(EventSink):
     def cancel_requested(self) -> bool:
         return self._cancel_event.is_set()
 
+    def request(self, name: str, **payload: Any) -> Any:
+        response_queue: Queue[Any] = Queue()
+        self.emit(name, response_queue=response_queue, **payload)
+        while not self.cancel_requested():
+            try:
+                return response_queue.get(timeout=0.2)
+            except Empty:
+                pass
+        return None
+
     @contextmanager
     def activity(self, message: str) -> Iterator[None]:
         self.emit("activity_started", message=message)
