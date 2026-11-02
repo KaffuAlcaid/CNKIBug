@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-from dataclasses import replace
+from collections import defaultdict
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path, PureWindowsPath
 from time import time_ns
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from ..cnki.models import Paper, document_type_family, normalize_doi, split_authors
+from ..core.events import EventSink
 
 
 INDEX_NAME = ".cnkibug-downloads.json"
@@ -189,3 +192,137 @@ def restore_pdf_links(papers: list[Paper], directories: list[Path], *, table_upd
         paper.pdf_path = "" if entry["outcome"] == "unlinked" else resolve_pdf_path(entry["path"], store.directory)
         restored[index] = entry
     return restored, errors
+
+
+@dataclass
+class PdfMatch:
+    index: int
+    paper: Paper
+    candidates: list[Path]
+    status: str
+    reason: str
+
+
+def scan_pdf_folder(papers: list[Paper], selected: set[int], directory: Path, recursive: bool,
+                    events: EventSink) -> tuple[list[PdfMatch], list[str]]:
+    directory = directory.expanduser().resolve()
+    if not directory.is_dir():
+        raise ValueError(f"文件夹不存在：{directory}")
+    files: set[Path] = set()
+    directories, warnings = [], []
+    for current, subdirs, names in os.walk(directory, onerror=lambda error: warnings.append(str(error))):
+        if events.cancel_requested():
+            return [], warnings
+        current_path = Path(current)
+        if INDEX_NAME in names:
+            directories.append(current_path)
+        subdirs[:] = sorted(name for name in subdirs if not (current_path / name).is_symlink()) if recursive else []
+        files.update((current_path / name).resolve() for name in names if Path(name).suffix.lower() == ".pdf")
+    events.emit("paper_operation_progress", message=f"正在匹配 {len(files)} 个 PDF 文件")
+    recovered = [replace(paper) for paper in papers]
+    entries, errors = restore_pdf_links(recovered, directories)
+    warnings.extend(errors)
+    stems: dict[str, set[int]] = defaultdict(set)
+    for index, paper in enumerate(papers):
+        stems[pdf_filename_stem(paper.title).casefold()].add(index)
+    candidates: dict[int, list[Path]] = defaultdict(list)
+    owners: dict[Path, set[int]] = {}
+    for path in sorted(files):
+        if events.cancel_requested():
+            return [], warnings
+        stem = path.stem.casefold()
+        matches = set(stems.get(stem, ()))
+        numbered = re.fullmatch(r"(.+)_([2-9]|[1-9]\d+)", stem)
+        if numbered:
+            matches.update(stems.get(numbered[1], ()))
+        owners[path] = matches
+        for index in matches & selected:
+            candidates[index].append(path)
+    checked: dict[Path, str] = {}
+
+    def problem(path: Path) -> str:
+        if path not in checked:
+            checked[path] = pdf_problem(path)
+        return checked[path]
+
+    rows = []
+    for index in sorted(selected):
+        if events.cancel_requested():
+            return [], warnings
+        paper = papers[index]
+        if not pdf_problem(paper.pdf_path):
+            rows.append(PdfMatch(index, paper, [Path(paper.pdf_path)], "existing", "已关联有效 PDF"))
+            continue
+        entry = entries.get(index)
+        indexed = Path(recovered[index].pdf_path) if recovered[index].pdf_path else None
+        if entry and entry["outcome"] != "unlinked" and indexed in files and not problem(indexed):
+            rows.append(PdfMatch(index, paper, [indexed], "indexed", "文献标识与下载索引一致"))
+            continue
+        valid = [path for path in candidates[index] if not problem(path)]
+        if not valid:
+            reason = "未找到同名 PDF"
+            if candidates[index]:
+                reason = "；".join(dict.fromkeys(problem(path) for path in candidates[index]))
+            rows.append(PdfMatch(index, paper, [], "missing", reason))
+            continue
+        exact = len(valid) == 1 and valid[0].stem.casefold() == pdf_filename_stem(paper.title).casefold()
+        unique = exact and len(owners[valid[0]]) == 1
+        reason = "文件名与文献标题一致"
+        if entry and entry["outcome"] == "unlinked":
+            unique, reason = False, "此文献曾解除 PDF 关联"
+        elif len(valid) > 1:
+            reason = f"找到 {len(valid)} 个候选文件"
+        elif len(owners[valid[0]]) > 1:
+            reason = "文件名对应多篇文献"
+        elif not exact:
+            reason = "文件名带重复下载编号"
+        rows.append(PdfMatch(index, paper, valid, "unique" if unique else "review", reason))
+    # A file proposed for multiple selected records always requires a choice.
+    proposed: dict[Path, list[PdfMatch]] = defaultdict(list)
+    for row in rows:
+        for path in row.candidates:
+            proposed[path].append(row)
+    for matches in proposed.values():
+        if len(matches) > 1:
+            for row in matches:
+                if row.status in {"indexed", "unique"}:
+                    row.status, row.reason = "review", "同一文件对应多篇文献"
+    return rows, warnings
+
+
+def associate_pdf_folder(items: list[tuple[int, Paper]], papers: list[Paper], directory: Path,
+                         recursive: bool, destination: Path, events: EventSink) -> str:
+    rows, warnings = scan_pdf_folder(papers, {index for index, _ in items}, directory, recursive, events)
+    if events.cancel_requested():
+        return "文件夹扫描已停止"
+    selected = events.request("pdf_links_review_requested", directory=str(directory), rows=rows, warnings=warnings)
+    if not selected or events.cancel_requested():
+        return "未更改 PDF 关联"
+    store = PdfIndex(destination)
+    originals = {index: paper for index, paper in items}
+    linked, failures = 0, []
+    used = {Path(paper.pdf_path).resolve() for paper in papers if not pdf_problem(paper.pdf_path)}
+    for position, (index, value) in enumerate(selected.items(), start=1):
+        if events.cancel_requested():
+            break
+        events.emit("paper_operation_progress", message=f"正在关联 PDF：{position}/{len(selected)}")
+        path = Path(value).resolve()
+        issue = pdf_problem(path)
+        if issue or path in used:
+            failures.append(f"{originals[index].title}：{issue or '文件已关联另一篇文献'}")
+            continue
+        used.add(path)
+        paper = replace(originals[index], pdf_path=str(path))
+        error = ""
+        try:
+            store.record(paper, outcome="linked", source="manual")
+        except (OSError, ValueError) as failure:
+            error = str(failure)
+        events.emit("paper_pdf_link", index=index, path=str(path), saved=not error)
+        linked += 1
+        if error:
+            failures.append(f"关联已更新，但无法自动保存：{error}。请导出 Excel 或 CSV 保存关联。")
+            break
+    if failures:
+        events.emit("paper_task_error", error="\n".join(failures))
+    return f"已关联 {linked} 篇文献" + (f"，{len(failures)} 项未完成" if failures else "")

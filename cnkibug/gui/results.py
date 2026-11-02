@@ -19,11 +19,12 @@ from ..cnki.details import fetch_selected_details
 from ..cnki.journals import fetch_journal_info
 from ..cnki.models import Paper, deduplicate_papers
 from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
-from ..fileio.pdf_links import PdfIndex, pdf_problem, restore_pdf_links
+from ..fileio.pdf_links import PdfIndex, associate_pdf_folder, pdf_problem, restore_pdf_links
 from ..fileio.zotero import send_papers_to_zotero
 from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
 from .download_dialog import DownloadDialog
+from .pdf_links import PdfFolderDialog, PdfLinksReviewDialog
 from .appearance import TextView
 from .zotero_review import ZoteroLibraryDialog, ZoteroReviewDialog
 
@@ -138,6 +139,7 @@ class ResultsWindow:
         self._paper_menu.add_command(label="查询所选期刊信息", command=self._query_journals)
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="关联本地 PDF", command=self._associate_pdf)
+        self._paper_menu.add_command(label="从文件夹批量关联 PDF", command=self._associate_pdf_folder)
         self._paper_menu.add_command(label="解除 PDF 关联", command=self._unlink_pdf)
         self._paper_menu.add_command(label="重新下载所选 PDF", command=lambda: self._download(force=True))
         self._paper_menu.add_separator()
@@ -655,6 +657,27 @@ class ResultsWindow:
         self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
         self._populate()
 
+    def _associate_pdf_folder(self):
+        if self.busy or not self._checked:
+            return
+        if not self.can_run():
+            messagebox.showinfo("任务正在运行", "请在当前任务结束后关联 PDF。", parent=self.window)
+            return
+        selection = PdfFolderDialog(self.window, Path(self.get_output_dir())).show()
+        if selection is None:
+            return
+        directory, recursive = selection
+        try:
+            destination = self._destination()
+        except (OSError, ValueError) as error:
+            messagebox.showerror("保存位置不可用", str(error), parent=self.window)
+            return
+        papers = copy.deepcopy(self._papers)
+        self._start_operation(
+            lambda items: associate_pdf_folder(items, papers, directory, recursive, destination, self._events),
+            label="正在扫描 PDF 文件夹",
+        )
+
     def _pdf_status(self, index: int) -> str:
         if not self._papers[index].pdf_path:
             return ""
@@ -834,6 +857,18 @@ class ResultsWindow:
                     if payload.get("saved"):
                         self._unsaved_pdf_links.discard(index)
                     self._set_row_status(index, payload["status"])
+                elif event.name == "paper_pdf_link":
+                    index = payload["index"]
+                    self._papers[index].pdf_path = payload["path"]
+                    self._pdf_overrides.add(index)
+                    self._pdf_sources[index] = "manual"
+                    self._pdf_errors[index] = pdf_problem(payload["path"])
+                    self._statuses[index] = "已关联 PDF"
+                    if payload["saved"]:
+                        self._unsaved_pdf_links.discard(index)
+                    else:
+                        self._unsaved_pdf_links.add(index)
+                    self._set_row_status(index, "已关联 PDF")
                 elif event.name == "download_preparing":
                     remaining = payload["remaining"]
                     self._continue_button.configure(text="立即继续")
@@ -854,17 +889,21 @@ class ResultsWindow:
                 elif event.name == "confirm_requested":
                     answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("请确认", payload["prompt"], parent=self.window)
                     payload["response_queue"].put(answer)
-                elif event.name in {"zotero_review_requested", "zotero_library_requested"}:
+                elif event.name in {"zotero_review_requested", "zotero_library_requested", "pdf_links_review_requested"}:
                     answer = None
                     try:
                         if not (self._closing or self.cancel.is_set()):
-                            if event.name == "zotero_review_requested":
+                            if event.name == "pdf_links_review_requested":
+                                dialog = PdfLinksReviewDialog(self.window, payload["directory"], payload["rows"], payload["warnings"], self.cancel)
+                            elif event.name == "zotero_review_requested":
                                 dialog = ZoteroReviewDialog(self.window, payload["destination"], payload["rows"], self.cancel)
                             else:
                                 dialog = ZoteroLibraryDialog(self.window, payload["destination"], payload["libraries"], self.cancel)
                             answer = dialog.show()
                     except Exception:
-                        logging.getLogger("cnkibug.gui.results").exception("无法显示 Zotero 确认窗口")
+                        logging.getLogger("cnkibug.gui.results").exception("无法显示论文操作确认窗口")
+                        if not self._closing:
+                            messagebox.showerror("无法显示确认窗口", "本次操作已取消，请查看日志。", parent=self.window)
                     finally:
                         payload["response_queue"].put(answer)
                 elif event.name in {"download_error", "paper_task_error"} and not (self._closing or self._hide_when_done):
