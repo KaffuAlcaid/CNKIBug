@@ -43,7 +43,9 @@ def test_batch_saves_isolated_cookies_and_closes_browser(monkeypatch, tmp_path, 
             session.close()
         if outcome in {"failure", "cancel"}:
             raise RuntimeError("Local batch stopped")
-        return tmp_path / "local.pdf"
+        path = tmp_path / "local.pdf"
+        path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        return path
 
     class Events(EventSink):
         def emit(self, name, **payload):
@@ -62,7 +64,7 @@ def test_batch_saves_isolated_cookies_and_closes_browser(monkeypatch, tmp_path, 
     for _ in range(2 if outcome == "success" else 1):
         done.clear()
         settings = get_scraper_settings({**DEFAULT_CONFIG, "download_auth_wait_sec": 0})
-        session.submit([(0, Paper(title="Local paper"))], tmp_path, settings, webvpn_url)
+        session.submit([(0, Paper(title="Local paper", doi="10.1234/local"))], tmp_path, settings, webvpn_url, skip_existing=False)
         worker = session._thread
         assert done.wait(30), events
         worker.join(timeout=5)

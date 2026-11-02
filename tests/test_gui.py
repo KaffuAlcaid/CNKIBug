@@ -181,6 +181,9 @@ def _results_view():
     viewer._journal_infos = {}
     viewer._unsaved_details = set()
     viewer._unsaved_pdf_links = set()
+    viewer._pdf_errors = {}
+    viewer._pdf_sources = {}
+    viewer._pdf_overrides = set()
     viewer.query = Mock(get=lambda: "query")
     viewer.table = Mock()
     viewer.table.selection.return_value = ()
