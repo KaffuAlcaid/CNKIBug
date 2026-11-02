@@ -1,24 +1,24 @@
 {
   "schema_version": 1,
-  "tag_name": "v1.1.0",
-  "published_at": "2026-10-26T12:30:13Z",
-  "body": "1. 支持导出 BibTeX，可将选中的文献用于 LaTeX 引用\n2. 支持发送到 Zotero 前查重，可比较重复与疑似重复条目，确认后选择发送\n3. 提供实验性专业检索式输入，支持与普通、高级检索混合执行，并保存方案和断点续跑\n4. 调整任务窗口与结果窗口布局，统一字体、控件尺寸和主题颜色\n5. 完善空任务、无结果和筛选无匹配时的界面显示",
+  "tag_name": "v1.1.1",
+  "published_at": "2026-11-02T05:43:27Z",
+  "body": "1. 修复 PDF 关联和下载进度丢失的问题，支持保存恢复并跳过已下载文献\n2. 支持从文件夹批量关联 PDF，预览匹配结果后确认关联",
   "draft": false,
   "prerelease": false,
   "assets": [
     {
       "name": "CNKIBug-GUI-x86_64.AppImage",
       "state": "uploaded",
-      "size": 65337848,
-      "digest": "sha256:8375225f735d5570c58d99b3c2c52e9b82222c532eb8b95729d8e97408c5c300",
-      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v1.1.0/CNKIBug-GUI-x86_64.AppImage"
+      "size": 65362424,
+      "digest": "sha256:ac339b1e9008be200b053f041ddf3e47b60ad850fddfc716a6ce12f95e78e859",
+      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v1.1.1/CNKIBug-GUI-x86_64.AppImage"
     },
     {
       "name": "CNKIBug-GUI.exe",
       "state": "uploaded",
-      "size": 64336895,
-      "digest": "sha256:7b95aa3b7673600b1e11cefd58df87b6910bf2b0abe7b211d22f71fa0ecaed82",
-      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v1.1.0/CNKIBug-GUI.exe"
+      "size": 64366893,
+      "digest": "sha256:3e8a9700a9b72d78a20649a8f55f718024bcb835ced6b61913c7f7c7b7252dd1",
+      "browser_download_url": "https://github.com/KaffuAlcaid/CNKIBug/releases/download/v1.1.1/CNKIBug-GUI.exe"
     }
   ]
 }
