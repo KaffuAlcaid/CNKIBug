@@ -22,6 +22,7 @@ from ..cnki.models import Paper
 from ..core.events import EventSink
 from ..core.runtime import RuntimePaths
 from ..core.settings import ScraperSettings
+from ..fileio.pdf_links import PdfIndex, pdf_filename_stem, pdf_problem, resolve_pdf_path
 from .search import CNKI_HOME_URL
 
 
@@ -64,23 +65,23 @@ class DownloadSession:
         return self._thread is not None and self._thread.is_alive()
 
     def submit(self, items: list[tuple[int, Paper]], destination: Path, settings: ScraperSettings,
-               webvpn_url: str = "") -> None:
+               webvpn_url: str = "", *, skip_existing: bool = True) -> None:
         if self.alive:
             raise RuntimeError("已有下载任务正在运行")
         if webvpn_url:
             validate_webvpn_url(webvpn_url)
         self.cancel.clear()
         self.continue_event.clear()
-        self._thread = Thread(target=self._run, args=(items, destination, settings, webvpn_url),
+        self._thread = Thread(target=self._run, args=(items, destination, settings, webvpn_url, skip_existing),
                               name="cnkibug-download", daemon=True)
         self._thread.start()
 
     def close(self) -> None:
         self.cancel.set()
 
-    def _run(self, items, destination, settings, webvpn_url) -> None:
+    def _run(self, items, destination, settings, webvpn_url, skip_existing=True) -> None:
         try:
-            asyncio.run(self._serve(items, destination, settings, webvpn_url))
+            asyncio.run(self._serve(items, destination, settings, webvpn_url, skip_existing=skip_existing))
         except Exception as error:
             if not self.cancel.is_set():
                 _logger.exception("下载浏览器运行失败")
@@ -89,12 +90,44 @@ class DownloadSession:
             self._thread = None
             self.events.emit("download_finished", stopped=self.cancel.is_set())
 
-    async def _serve(self, items, destination, settings, webvpn_url="") -> None:
+    def _save_result(self, store: PdfIndex, index: int, paper: Paper, outcome: str, status: str,
+                     *, source: str = "download") -> bool:
+        error = ""
+        try:
+            store.record(paper, outcome=outcome, source=source, error=status if outcome in {"failed", "stopped"} else "")
+        except (OSError, ValueError) as failure:
+            error = str(failure)
+        self.events.emit("paper_download", index=index, status=status, path=paper.pdf_path, saved=not error, source=source)
+        if error:
+            self.events.emit(
+                "download_error", error=f"本批下载已结束，已下载的 PDF 文件仍保留，但进度无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存当前关联。",
+            )
+        return not error
+
+    async def _serve(self, items, destination, settings, webvpn_url="", *, skip_existing=True) -> None:
         if webvpn_url:
             validate_webvpn_url(webvpn_url)
         if self.cancel.is_set():
             return
+        destination = Path(destination).expanduser().resolve()
         destination.mkdir(parents=True, exist_ok=True)
+        store = PdfIndex(destination)
+        pending = []
+        for index, paper in items:
+            if self.cancel.is_set():
+                return
+            entry = store.find(paper)
+            if not paper.pdf_path and entry and entry["outcome"] != "unlinked":
+                paper.pdf_path = resolve_pdf_path(entry["path"], destination)
+            if skip_existing and not pdf_problem(paper.pdf_path):
+                source = entry["source"] if entry else "manual"
+                if not self._save_result(store, index, paper, "linked", "已有 PDF", source=source):
+                    return
+            else:
+                pending.append((index, paper))
+        if not pending:
+            return
+        items = pending
         async with async_playwright() as playwright:
             with TemporaryDirectory(prefix="cnkibug-download-") as profile:
                 browser = context = None
@@ -175,10 +208,16 @@ class DownloadSession:
                         try:
                             path = await _download_one(home_page, paper, destination, settings, self.cancel, self.events, self.continue_event, webvpn_url)
                             _logger.info("PDF 下载完成: paper=%d/%d", position, len(items))
-                            self.events.emit("paper_download", index=index, status="已下载", path=str(path))
                         except Exception as error:
                             _logger.warning("PDF 下载结束: paper=%d/%d error=%s", position, len(items), error)
-                            self.events.emit("paper_download", index=index, status=str(error), path="")
+                            stopped = self.cancel.is_set()
+                            if not self._save_result(store, index, paper, "stopped" if stopped else "failed",
+                                                     "已停止" if stopped else str(error), source=""):
+                                break
+                        else:
+                            paper.pdf_path = str(path)
+                            if not self._save_result(store, index, paper, "downloaded", "已下载"):
+                                break
                 finally:
                     try:
                         if context is not None and settings.session_cache_enabled:
@@ -381,9 +420,7 @@ async def _download_one(home_page, paper, destination, settings, cancel, events,
                     ), cancel)
                 except asyncio.TimeoutError:
                     pass
-        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", paper.title).strip(" .")[:100] or "论文"
-        if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
-            name = "_" + name
+        name = pdf_filename_stem(paper.title)
         target = destination / f"{name}.pdf"
         number = 2
         while target.exists():

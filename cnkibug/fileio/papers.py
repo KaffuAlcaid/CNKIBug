@@ -9,6 +9,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font
 
 from ..cnki.models import Paper, deduplicate_papers, document_type_family, normalize_doi, split_authors
+from .pdf_links import pdf_problem, portable_papers, resolve_pdf_path
 
 
 COLUMNS = (
@@ -19,6 +20,7 @@ COLUMNS = (
     ("institutions", "作者单位"), ("funds", "基金"), ("classification", "分类号"),
     ("volume", "卷"), ("issue", "期"), ("pages", "页码"),
     ("citation", "引用格式"), ("detail_url", "详情链接"), ("queries", "命中检索项"),
+    ("pdf_path", "PDF 路径"),
 )
 DETAIL_FIELDS = {"paper_keywords", "abstract", "institutions", "funds", "classification", "volume", "issue", "pages"}
 ALIASES = {label: key for key, label in COLUMNS} | {key: key for key, _ in COLUMNS}
@@ -89,6 +91,7 @@ def paper_workbook(papers: list[Paper], include_citation: bool = True, include_d
 
 
 def write_csv(path: str | Path, papers: list[Paper], include_citation: bool = True, include_details: bool = True) -> None:
+    papers = portable_papers(papers, Path(path).resolve().parent)
     columns = paper_columns(include_citation, include_details)
     with open(path, "w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
@@ -96,7 +99,7 @@ def write_csv(path: str | Path, papers: list[Paper], include_citation: bool = Tr
         writer.writerows(paper_values(paper, columns) for paper in papers)
 
 
-def _read_rows(rows, query: str = "") -> list[Paper]:
+def _read_rows(rows, query: str = "", directory: Path | None = None) -> list[Paper]:
     header = next(rows, ())
     keys = [ALIASES.get(str(value or "").strip(), "") for value in header]
     if "title" not in keys:
@@ -110,15 +113,17 @@ def _read_rows(rows, query: str = "") -> list[Paper]:
         paper = Paper(**values)
         paper.queries = [value.strip() for value in raw_queries.splitlines() if value.strip()] or ([query] if query else [])
         paper.doi = normalize_doi(paper.doi)
+        if directory is not None:
+            paper.pdf_path = resolve_pdf_path(paper.pdf_path, directory)
         papers.append(paper)
     return papers
 
 
 def read_papers(path: str | Path) -> list[Paper]:
-    path = Path(path)
+    path = Path(path).expanduser().resolve()
     if path.suffix.lower() == ".csv":
         with path.open(encoding="utf-8-sig", newline="") as stream:
-            return deduplicate_papers(_read_rows(iter(csv.reader(stream))))
+            return deduplicate_papers(_read_rows(iter(csv.reader(stream)), directory=path.parent))
     if path.suffix.lower() != ".xlsx":
         raise ValueError("请选择 XLSX 或 CSV 文件。")
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -127,7 +132,7 @@ def read_papers(path: str | Path) -> list[Paper]:
         for sheet in workbook.worksheets:
             if sheet.max_row == 0:
                 continue
-            papers.extend(_read_rows(iter(sheet.values), sheet.title if len(workbook.worksheets) > 1 else ""))
+            papers.extend(_read_rows(iter(sheet.values), sheet.title if len(workbook.worksheets) > 1 else "", path.parent))
         return deduplicate_papers(papers)
     finally:
         workbook.close()
@@ -135,9 +140,9 @@ def read_papers(path: str | Path) -> list[Paper]:
 
 def associate_pdf(paper: Paper, path: str | Path) -> Path:
     path = Path(path).expanduser().resolve()
-    with path.open("rb") as stream:
-        if path.suffix.lower() != ".pdf" or b"%PDF-" not in stream.read(1024):
-            raise ValueError("请选择有效的 PDF 文件。")
+    problem = pdf_problem(path)
+    if problem:
+        raise ValueError(f"{problem}：{path}")
     paper.pdf_path = str(path)
     return path
 
@@ -198,9 +203,9 @@ def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) 
 def save_papers(path: str | Path, papers: list[Paper], include_pdf: bool = False) -> None:
     from .exporter import _write_atomically
 
-    path = Path(path)
+    path = Path(path).expanduser().resolve()
     if path.suffix.lower() == ".xlsx":
-        workbook = paper_workbook(papers)
+        workbook = paper_workbook(portable_papers(papers, path.parent))
         try:
             _write_atomically(str(path), workbook.save)
         finally:

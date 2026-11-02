@@ -19,6 +19,7 @@ from ..cnki.details import fetch_selected_details
 from ..cnki.journals import fetch_journal_info
 from ..cnki.models import Paper, deduplicate_papers
 from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
+from ..fileio.pdf_links import PdfIndex, pdf_problem, restore_pdf_links
 from ..fileio.zotero import send_papers_to_zotero
 from ..fileio.paths import get_real_desktop_path
 from .events import GuiEvent, GuiEventSink
@@ -62,6 +63,12 @@ class ResultsWindow:
         self._journal_infos: dict[int, dict] = {}
         self._unsaved_details: set[int] = set()
         self._unsaved_pdf_links: set[int] = set()
+        self._pdf_errors: dict[int, str] = {}
+        self._pdf_sources: dict[int, str] = {}
+        self._pdf_overrides: set[int] = set()
+        self._source_path: Path | None = None
+        self._source_updated_ns = 0
+        self._index_warnings: set[str] = set()
         self._sort_key = "publication_date"
         self._descending = True
         self._papers: list[Paper] = []
@@ -132,6 +139,7 @@ class ResultsWindow:
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="关联本地 PDF", command=self._associate_pdf)
         self._paper_menu.add_command(label="解除 PDF 关联", command=self._unlink_pdf)
+        self._paper_menu.add_command(label="重新下载所选 PDF", command=lambda: self._download(force=True))
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="发送到 Zotero", command=self._send_zotero)
         self._paper_actions.configure(menu=self._paper_menu)
@@ -279,7 +287,7 @@ class ResultsWindow:
         self._output_text.set(f"保存位置：{directory}")
         return directory
 
-    def set_papers(self, papers: list[Paper]) -> None:
+    def set_papers(self, papers: list[Paper], *, source_path: Path | None = None) -> None:
         if self.busy:
             return
         self.window.title("CNKIBug - 论文结果")
@@ -292,6 +300,12 @@ class ResultsWindow:
         self._journal_infos.clear()
         self._unsaved_details.clear()
         self._unsaved_pdf_links.clear()
+        self._pdf_sources.clear()
+        self._pdf_overrides.clear()
+        self._index_warnings.clear()
+        self._source_path = source_path
+        self._source_updated_ns = source_path.stat().st_mtime_ns if source_path is not None else 0
+        self._restore_pdf_links()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
         self.search.set("")
@@ -303,7 +317,11 @@ class ResultsWindow:
         paper = self._papers[index]
         authors = split_values(paper.authors)
         display_authors = "、".join(authors[:2]) + (" 等" if len(authors) > 2 else "")
-        status = self._row_statuses.get(index, "已下载" if paper.pdf_path else "")
+        attachment = self._pdf_status(index)
+        operation = self._row_statuses.get(index, self._statuses.get(index, ""))
+        status = attachment
+        if operation and operation not in {attachment, "已下载", "已关联 PDF", "已有 PDF"}:
+            status = f"{attachment}；{operation}" if attachment else operation
         return ("☑" if index in self._checked else "☐", paper.title, display_authors, paper.source, paper.publication_date[:10], status)
 
     def _populate(self):
@@ -400,15 +418,17 @@ class ResultsWindow:
     def _select_by_status(self, operation: str, failed: bool):
         if self.busy:
             return
+        if operation == "download":
+            self._restore_pdf_links()
         statuses = self._statuses if operation == "download" else self._detail_statuses
-        excluded = {"已下载", "已关联 PDF", "下载中", "已停止"} if operation == "download" else {"详情已补齐", "无可补字段"}
+        excluded = {"已下载", "已关联 PDF", "已有 PDF", "下载中", "已停止"} if operation == "download" else {"详情已补齐", "无可补字段"}
         self._checked.clear()
         for index in self._visible:
             status = statuses.get(index, "")
             if failed:
                 matches = bool(status) and status not in excluded
             else:
-                matches = not self._papers[index].pdf_path if operation == "download" else not status
+                matches = bool(self._pdf_errors[index]) if operation == "download" else not status
             if matches:
                 self._checked.add(index)
         self._refresh_checks()
@@ -455,6 +475,8 @@ class ResultsWindow:
                 ("本地 PDF", paper.pdf_path),
             ))
             selected = self.table.selection()
+            if selected and paper.pdf_path:
+                content["info"] += f"\n\n附件状态：{self._pdf_status(int(selected[0]))}"
             status = self._statuses.get(int(selected[0]), "") if selected else ""
             if status:
                 content["info"] += f"\n\n下载状态：{status}"
@@ -511,7 +533,7 @@ class ResultsWindow:
                 papers = read_papers(path)
                 if not self.confirm_replace("打开其他结果"):
                     return
-                self.set_papers(papers)
+                self.set_papers(papers, source_path=Path(path).resolve())
                 self.window.title(f"CNKIBug - 论文结果 - {Path(path).name}")
             except Exception as error:
                 messagebox.showerror("无法打开结果文件", str(error), parent=self.window)
@@ -523,7 +545,7 @@ class ResultsWindow:
         if self._unsaved_details:
             messages.append(f"有 {len(self._unsaved_details)} 篇文献的补抓详情尚未导出")
         if self._unsaved_pdf_links:
-            messages.append(f"有 {len(self._unsaved_pdf_links)} 篇文献的 PDF 关联尚未导出")
+            messages.append(f"有 {len(self._unsaved_pdf_links)} 篇文献的 PDF 关联尚未保存")
         messages.append(f"如果{action}，这些改动将丢失，PDF 文件不会被删除")
         confirmed = messagebox.askyesno(
             "尚未保存的结果", "\n\n".join(messages), parent=parent or self.window,
@@ -561,7 +583,9 @@ class ResultsWindow:
                 save_papers(path, papers, extension == "ris" and include_pdf)
                 saved.append(path)
                 self._unsaved_details.difference_update(indices)
-                if extension == "ris" and include_pdf:
+                if extension in {"xlsx", "csv"}:
+                    self._unsaved_pdf_links.difference_update(indices)
+                elif extension == "ris" and include_pdf:
                     self._unsaved_pdf_links.difference_update(
                         index for index in indices
                         if self._papers[index].pdf_path and Path(self._papers[index].pdf_path).is_file()
@@ -607,6 +631,10 @@ class ResultsWindow:
             return
         if paper.pdf_path != previous_path:
             self._unsaved_pdf_links.add(index)
+        self._pdf_overrides.add(index)
+        self._pdf_sources[index] = "manual"
+        self._pdf_errors[index] = ""
+        self._save_pdf_link(index, "linked")
         self._statuses[index] = "已关联 PDF"
         self._row_statuses[index] = "已关联 PDF"
         self._operation_status.set(f"已关联：{path.name}")
@@ -617,11 +645,54 @@ class ResultsWindow:
         if index is None:
             return
         self._papers[index].pdf_path = ""
-        self._unsaved_pdf_links.discard(index)
+        self._pdf_overrides.add(index)
+        self._unsaved_pdf_links.add(index)
+        self._pdf_errors[index] = "未关联 PDF"
+        self._pdf_sources.pop(index, None)
+        self._save_pdf_link(index, "unlinked")
         self._statuses.pop(index, None)
         self._row_statuses.pop(index, None)
         self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
         self._populate()
+
+    def _pdf_status(self, index: int) -> str:
+        if not self._papers[index].pdf_path:
+            return ""
+        return self._pdf_errors.get(index, "") or ("已下载" if self._pdf_sources.get(index) == "download" else "已关联 PDF")
+
+    def _restore_pdf_links(self) -> None:
+        directories = [Path(self.get_output_dir())]
+        if self._source_path is not None:
+            directories.append(self._source_path.parent)
+        papers = copy.deepcopy(self._papers)
+        restored, errors = restore_pdf_links(papers, directories, table_updated_ns=self._source_updated_ns)
+        for index, entry in restored.items():
+            if index in self._pdf_overrides:
+                continue
+            self._papers[index].pdf_path = papers[index].pdf_path
+            self._pdf_sources[index] = entry["source"]
+            if entry["outcome"] in {"failed", "stopped"}:
+                self._statuses[index] = entry["error"] or ("已停止" if entry["outcome"] == "stopped" else "下载失败")
+            else:
+                self._statuses.pop(index, None)
+        self._pdf_errors = {index: pdf_problem(paper.pdf_path) for index, paper in enumerate(self._papers)}
+        unseen = set(errors) - self._index_warnings
+        if unseen:
+            self._index_warnings.update(unseen)
+            messagebox.showwarning("无法恢复部分 PDF 关联", "\n\n".join(sorted(unseen)), parent=self.window)
+
+    def _save_pdf_link(self, index: int, outcome: str) -> bool:
+        try:
+            PdfIndex(self._destination()).record(
+                self._papers[index], outcome=outcome, source=self._pdf_sources.get(index, ""),
+            )
+        except (OSError, ValueError) as error:
+            messagebox.showwarning(
+                "PDF 关联尚未保存", f"当前关联已更新，但无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存这些关联。", parent=self.window,
+            )
+            return False
+        self._unsaved_pdf_links.discard(index)
+        return True
 
     @property
     def alive(self) -> bool:
@@ -682,11 +753,21 @@ class ResultsWindow:
         if url.startswith(("https://", "http://")):
             webbrowser.open(url)
 
-    def _download(self):
+    def _download(self, *, force: bool = False):
         if self.busy or not self._checked:
             return
         if not self.can_run():
             messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后下载论文。", parent=self.window)
+            return
+        self._restore_pdf_links()
+        indices = [index for index in sorted(self._checked) if force or self._pdf_errors[index]]
+        self._refresh_checks()
+        if not indices:
+            self._operation_status.set("所选文献均已关联有效 PDF，已跳过下载。")
+            return
+        if force and not messagebox.askyesno(
+            "重新下载 PDF", f"重新下载所选 {len(indices)} 篇文献？已有 PDF 文件将保留。", parent=self.window,
+        ):
             return
         if not self.prepare_browser():
             return
@@ -700,14 +781,14 @@ class ResultsWindow:
         except (OSError, ValueError) as error:
             messagebox.showerror("保存位置不可用", str(error), parent=self.window)
             return
-        items = [(i, copy.deepcopy(self._papers[i])) for i in sorted(self._checked)]
+        items = [(i, copy.deepcopy(self._papers[i])) for i in indices]
         self.busy = True
         self._stop_button.configure(text="停止下载", state=tk.NORMAL)
         self._stop_button.pack(side=tk.RIGHT)
         self._open_button.configure(state=tk.DISABLED)
         self._update_summary()
 
-        self._download_session.submit(items, directory, self.settings, dialog.webvpn_url)
+        self._download_session.submit(items, directory, self.settings, dialog.webvpn_url, skip_existing=not force)
 
     def _drain(self):
         try:
@@ -746,6 +827,12 @@ class ResultsWindow:
                     if payload["path"] and payload["path"] != self._papers[index].pdf_path:
                         self._papers[index].pdf_path = payload["path"]
                         self._unsaved_pdf_links.add(index)
+                    if payload["path"]:
+                        self._pdf_overrides.add(index)
+                        self._pdf_sources[index] = payload.get("source", "download")
+                        self._pdf_errors[index] = pdf_problem(payload["path"])
+                    if payload.get("saved"):
+                        self._unsaved_pdf_links.discard(index)
                     self._set_row_status(index, payload["status"])
                 elif event.name == "download_preparing":
                     remaining = payload["remaining"]
