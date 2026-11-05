@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from threading import Event
+from tkinter import font
 
 import ttkbootstrap as ttk
 
@@ -51,13 +52,22 @@ class ZoteroReviewDialog:
         comparison = ttk.Frame(body)
         comparison.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
         comparison.columnconfigure((0, 1), weight=1, uniform="comparison")
+        default_font = font.nametofont("TkDefaultFont", root=self.window)
+        field_offset = default_font.measure("发表日期  ")
+        muted_color = ttk.Style().lookup("secondary.TLabel", "foreground")
         self.comparison = []
         for column, title in enumerate(("本次文献", "匹配条目")):
             panel = ttk.Frame(comparison)
             panel.grid(row=0, column=column, sticky="nsew", padx=(0, 12) if column == 0 else 0)
             ttk.Label(panel, text=title, style="Section.TLabel").pack(anchor=tk.W, pady=(0, 5))
-            view = TextView(panel, height=5, state=tk.DISABLED)
+            view = TextView(panel, height=9, state=tk.DISABLED)
             view.pack(fill=tk.BOTH, expand=True)
+            view.text.tag_configure(
+                "paper-title", font="TkHeadingFont", spacing3=default_font.metrics("linespace") // 2,
+            )
+            view.text.tag_configure("field", tabs=(field_offset,), lmargin2=field_offset)
+            view.text.tag_configure("field-label", foreground=muted_color)
+            view.text.tag_raise(tk.SEL)
             self.comparison.append(view.text)
         self.notebook = ttk.Notebook(body)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -130,14 +140,18 @@ class ZoteroReviewDialog:
             return
         row = self.rows[int(selected[0])]
         for text, paper in zip(self.comparison, (row.paper, row.existing)):
-            value = "未发现匹配条目" if paper is None else "\n".join((
-                paper.title, f"{paper.authors or '作者未收录'} · {paper.publication_date or '年份未收录'}",
-                f"{paper.source or '来源未收录'} · {paper.document_type or '类型未收录'}",
-                f"DOI：{paper.doi or '未收录'}",
-            ))
             text.configure(state=tk.NORMAL)
             text.delete("1.0", tk.END)
-            text.insert("1.0", value)
+            if paper is None:
+                text.insert(tk.END, "未发现匹配条目")
+            else:
+                text.insert(tk.END, f"{paper.title}\n", ("paper-title",))
+                for label, value in (
+                    ("作者", paper.authors), ("发表日期", paper.publication_date),
+                    ("来源", paper.source), ("文献类型", paper.document_type), ("DOI", paper.doi),
+                ):
+                    text.insert(tk.END, f"{label}\t", ("field", "field-label"))
+                    text.insert(tk.END, f"{value or '未收录'}\n", ("field",))
             text.configure(state=tk.DISABLED)
 
     def _tab_changed(self, _event=None) -> None:
