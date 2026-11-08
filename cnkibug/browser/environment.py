@@ -147,7 +147,7 @@ def system_dependency_command() -> str | None:
 
 def run_system_dependency_installer() -> int:
     if sys.platform != "linux":
-        raise RuntimeError("系统组件安装入口适用于 Linux。")
+        raise RuntimeError("系统组件安装入口适用于 Linux")
     if not linux_distribution().intersection({"debian", "ubuntu"}):
         command = system_dependency_command()
         print(f"请在终端执行：{command}" if command else "请通过系统软件包管理器安装 Chromium 及其运行组件。")
@@ -241,11 +241,11 @@ def check_environment(data_dir: Path, output_dir: Path, cancelled: Event,
                             missing.extend(_missing_shared_libraries(candidate.executable))
                         except (OSError, subprocess.TimeoutExpired):
                             pass
-            guidance = "请安装 Microsoft Edge 或 Playwright Chromium。"
+            guidance = "请安装 Microsoft Edge 或 Playwright Chromium"
             if sys.platform == "linux":
                 command = system_dependency_command()
-                guidance = "请安装系统 Chrome、Chromium，或点击安装 Chromium。"
-                guidance += f"\n系统安装命令：\n{command}" if command else "\n系统组件可通过软件包管理器安装。"
+                guidance = "请安装系统 Chrome、Chromium，或点击安装 Chromium"
+                guidance += f"\n系统安装命令：\n{command}" if command else "\n系统组件可通过软件包管理器安装"
             record("system", "系统组件", "error" if installed else "pending",
                    "缺少：" + "、".join(dict.fromkeys(missing)) if missing else "浏览器启动后确认")
             cached = Path(playwright.chromium.executable_path).is_file()
@@ -258,7 +258,7 @@ def check_environment(data_dir: Path, output_dir: Path, cancelled: Event,
 
 def install_chromium(cancelled: Event, on_output: Callable[[str], None]) -> None:
     if sys.platform != "linux":
-        raise RuntimeError("浏览器自动安装适用于 Linux。")
+        raise RuntimeError("浏览器自动安装适用于 Linux")
     browser_cache_directory().mkdir(parents=True, exist_ok=True)
     command, env = playwright_install_command()
     lines: Queue[str] = Queue()

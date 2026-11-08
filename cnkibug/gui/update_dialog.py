@@ -116,7 +116,7 @@ class UpdateDialog:
                     self._notes.see(tk.END)
                 elif event == "probed":
                     self._stage = "result"
-                    self._status.set("连接检查完成。")
+                    self._status.set("连接检查完成")
                     self._progress.stop()
                     self._progress.pack_forget()
                     self._primary.configure(text="确定", command=self._close)
@@ -128,9 +128,9 @@ class UpdateDialog:
                             value.unlink(missing_ok=True)
                             value.parent.rmdir()
                         except OSError:
-                            self._show_message(f"下载已取消。临时文件未能删除：\n{value}")
+                            self._show_message(f"下载已取消；临时文件未能删除：\n{value}")
                         else:
-                            self._show_message("下载已取消。")
+                            self._show_message("下载已取消")
                     elif self._save_destination is not None:
                         self._stage = "saving"
                         self._status.set("正在保存新版本...")
@@ -148,9 +148,9 @@ class UpdateDialog:
                     self._on_restart()
                     return
                 elif event == "saved":
-                    self._show_message(f"新版本已保存：\n{value}\n\n运行该文件即可使用新版本，原有用户数据继续保留。")
+                    self._show_message(f"新版本已保存：\n{value}\n\n运行该文件即可使用新版本，原有用户数据继续保留")
                 elif event == "cancelled":
-                    self._show_message("下载已取消。")
+                    self._show_message("下载已取消")
                 elif event == "error":
                     self._show_message(value)
         except Empty:
@@ -170,20 +170,20 @@ class UpdateDialog:
     def _show_release(self, release: updater.ReleaseInfo) -> None:
         self._release = release
         if not release.newer:
-            self._show_message(f"最新正式发布：{release.version}\n当前版本没有可用更新。")
+            self._show_message(f"最新正式发布：{release.version}\n当前版本没有可用更新")
             return
         self._stage = "result"
         text = f"可用版本：{release.version}\n发布时间：{release.published_at[:10]}"
         if updater.can_install_update():
-            text += "\n更新完成后将重启程序，尚未开始的检索项不会保留。"
+            text += "\n更新完成后将重启程序，尚未开始的检索项不会保留"
             if not release.ready:
-                text += "\n该版本的 GUI 文件或校验信息尚未就绪。"
+                text += "\n该版本的 GUI 文件或校验信息尚未就绪"
         elif updater.appimage_path() is not None:
-            text += "\n当前程序文件无法直接替换，更新文件将另存到你选择的位置。"
+            text += "\n当前程序文件无法直接替换，更新文件将另存到你选择的位置"
             if not release.ready:
-                text += "\n该版本的 AppImage 文件尚未就绪。"
+                text += "\n该版本的 AppImage 文件尚未就绪"
         else:
-            text += "\n当前运行方式需手动更新，将打开发布页面。"
+            text += "\n当前运行方式需手动更新，将打开发布页面"
         self._status.set(text)
         self._progress.stop()
         self._progress.pack_forget()

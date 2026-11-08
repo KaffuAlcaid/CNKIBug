@@ -35,10 +35,10 @@ def apply_search_options(page, options: SearchOptions, settings: ScraperSettings
     for name, value in (("order", options.sort), ("lang", options.language)):
         panel.locator(f'input[name="{name}"][value="{value}"]').check(timeout=timeout)
         if not panel.locator(f'input[name="{name}"][value="{value}"]').is_checked():
-            raise RuntimeError("知网排序或语种设置未能正确填写。")
+            raise RuntimeError("知网排序或语种设置未能正确填写")
     actual = {value.strip() for value in panel.locator(".haschecked-list .item").all_inner_texts()}
     if actual != set(options.resources):
-        raise RuntimeError("知网检索范围与任务设置不一致。")
+        raise RuntimeError("知网检索范围与任务设置不一致")
     panel.locator("#ctrl-s").click(timeout=timeout)
     panel.wait_for(state="hidden", timeout=timeout)
 

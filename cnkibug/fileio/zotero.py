@@ -73,9 +73,9 @@ def _request(endpoint: str, data: dict | None = None, *, body=None, headers=None
             raise RuntimeError(f"Zotero {endpoint} 失败（HTTP {response.status}）：{str(detail)[:300]}")
         return result
     except ConnectionRefusedError as error:
-        raise RuntimeError("无法连接 Zotero，请确认 Zotero 桌面端已启动。") from error
+        raise RuntimeError("无法连接 Zotero，请确认 Zotero 桌面端已启动") from error
     except (OSError, http.client.HTTPException) as error:
-        raise RuntimeError("Zotero 连接中断或响应超时。请先检查文献库中的结果，再决定是否重新发送。") from error
+        raise RuntimeError("Zotero 连接中断或响应超时；请先检查文献库中的结果，再决定是否重新发送") from error
     finally:
         connection.close()
 
@@ -83,9 +83,9 @@ def _request(endpoint: str, data: dict | None = None, *, body=None, headers=None
 def _selected_target() -> tuple[str, dict]:
     data = _request("getSelectedCollection")
     if not isinstance(data, dict) or not data.get("libraryID"):
-        raise RuntimeError("无法读取 Zotero 的目标文库。")
+        raise RuntimeError("无法读取 Zotero 的目标文库")
     if not data.get("libraryEditable") or not data.get("editable"):
-        raise RuntimeError("Zotero 当前分类不可写，请选择可写的文库或分类。")
+        raise RuntimeError("Zotero 当前分类不可写，请选择可写的文库或分类")
     target = f"C{data['id']}" if data.get("id") else f"L{data['libraryID']}"
     return target, data
 
@@ -104,13 +104,13 @@ def send_papers_to_zotero(items: list[tuple[int, Paper]], events: EventSink) -> 
             return "发送已取消"
         eligible = {row.index for row in rows if row.status != "duplicate"}
         if not isinstance(chosen, list) or any(type(index) is not int or index not in eligible for index in chosen):
-            raise RuntimeError("待发送文献选择无效，未发送任何条目。")
+            raise RuntimeError("待发送文献选择无效，未发送任何条目")
         check_library_unchanged(snapshot, events)
     except ZoteroReadCancelled:
         return "发送已取消"
     current, current_selection = _selected_target()
     if current != target or current_selection["libraryID"] != selected["libraryID"]:
-        raise RuntimeError("Zotero 的目标分类已变化，请确认分类后重新发送。")
+        raise RuntimeError("Zotero 的目标分类已变化，请确认分类后重新发送")
     chosen = set(chosen)
     for row in rows:
         if row.index not in chosen:

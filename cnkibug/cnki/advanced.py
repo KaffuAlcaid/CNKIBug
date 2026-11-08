@@ -67,7 +67,7 @@ def submit_advanced_search(
             input.dispatchEvent(new Event('change', {bubbles: true}));
         }""", value, timeout=timeout)
         if dates.nth(index).input_value(timeout=timeout) != value:
-            raise RuntimeError("高级检索发表日期未能正确填写。")
+            raise RuntimeError("高级检索发表日期未能正确填写")
 
     for index, condition in enumerate(query.conditions):
         if events.cancel_requested():
@@ -81,9 +81,9 @@ def submit_advanced_search(
         if index:
             correct = correct and row.locator(".logical .sort-default span").get_attribute("value") == condition.operator
         if not correct:
-            raise RuntimeError(f"高级检索第 {index + 1} 条条件未能正确填写。")
+            raise RuntimeError(f"高级检索第 {index + 1} 条条件未能正确填写")
     for selector, checked in checks:
         if form.locator(selector).is_checked() != checked:
-            raise RuntimeError("知网页面的筛选或扩展选项与任务条件不一致。")
+            raise RuntimeError("知网页面的筛选或扩展选项与任务条件不一致")
     if not events.cancel_requested():
         form.locator(".search-buttons input.btn-search").click(timeout=timeout)

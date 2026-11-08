@@ -380,7 +380,7 @@ def test_gui_ignore_checkpoint_deletes_file(monkeypatch, tmp_path):
     app._offer_resume()
 
     assert not checkpoint.exists()
-    app._task_progress.append_log.assert_called_once_with("已忽略并删除上次任务断点。", "warning")
+    app._task_progress.append_log.assert_called_once_with("已忽略并删除上次任务断点", "warning")
     app._start_task.assert_not_called()
     app.root.destroy.assert_not_called()
 

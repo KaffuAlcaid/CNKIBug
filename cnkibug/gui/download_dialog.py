@@ -20,11 +20,11 @@ class DownloadDialog:
         self.window.bind("<Escape>", lambda _: self.window.destroy())
         body = ttk.Frame(self.window, padding=20)
         body.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(body, text="下载需要有效的机构或个人全文访问权限。机构用户请先连接学校或机构提供的访问网络。",
+        ttk.Label(body, text="下载需要有效的机构或个人全文访问权限；机构用户请先连接学校或机构提供的访问网络",
                   wraplength=570).pack(fill=tk.X, pady=(0, 16))
-        ttk.Label(body, text="PDF 下载为实验性功能，可能出现安全验证或下载中断。请留意浏览器窗口，及时完成验证后继续。",
+        ttk.Label(body, text="PDF 下载为实验性功能，可能出现安全验证或下载中断；请留意浏览器窗口，及时完成验证后继续",
                   wraplength=570, bootstyle="warning").pack(fill=tk.X, pady=(0, 16))
-        ttk.Label(body, text=f"知网首页准备时间：{wait_seconds} 秒。").pack(anchor=tk.W)
+        ttk.Label(body, text=f"知网首页准备时间：{wait_seconds} 秒").pack(anchor=tk.W)
         buttons = ttk.Frame(body)
         buttons.pack(fill=tk.X, pady=(24, 0))
         ttk.Button(buttons, text="取消", command=self.window.destroy, bootstyle="secondary-outline", width=8).pack(side=tk.RIGHT)

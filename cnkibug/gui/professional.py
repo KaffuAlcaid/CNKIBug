@@ -61,10 +61,10 @@ class ProfessionalSearchDialog:
     def _accept(self) -> None:
         name = self.name.get().strip()
         if not name:
-            self.error.set("请输入检索项名称。")
+            self.error.set("请输入检索项名称")
             return
         if "\n" in name or "\r" in name:
-            self.error.set("检索项名称应为单行文字。")
+            self.error.set("检索项名称应为单行文字")
             return
         try:
             query = ProfessionalQuery(self.expression.get("1.0", "end-1c"))

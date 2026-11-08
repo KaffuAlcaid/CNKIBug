@@ -79,17 +79,17 @@ def gui_asset_name() -> str:
 
 def parse_release(payload: dict, current_version: str, *, asset_name: str | None = None) -> ReleaseInfo:
     if not isinstance(payload, dict) or payload.get("draft") or payload.get("prerelease"):
-        raise UpdateError("未找到可用的正式发布。")
+        raise UpdateError("未找到可用的正式发布")
     tag = payload.get("tag_name")
     if not isinstance(tag, str):
-        raise UpdateError("发布信息缺少版本号。")
+        raise UpdateError("发布信息缺少版本号")
     newer = version_numbers(tag) > version_numbers(current_version)
     release_root = f"https://github.com/{REPOSITORY}/releases"
     selected_asset = gui_asset_name() if asset_name is None else asset_name
     download_url = f"{release_root}/download/{quote(tag, safe='')}/{selected_asset}"
     assets = payload.get("assets")
     if not isinstance(assets, list):
-        raise UpdateError("发布信息缺少附件列表。")
+        raise UpdateError("发布信息缺少附件列表")
     asset = next((item for item in assets
                   if isinstance(item, dict) and item.get("name") == selected_asset), {})
     size = asset.get("size", 0)
@@ -105,7 +105,7 @@ def parse_release(payload: dict, current_version: str, *, asset_name: str | None
         version=tag.removeprefix("v"),
         page_url=f"{release_root}/tag/{quote(tag, safe='')}",
         published_at=str(payload.get("published_at") or ""),
-        notes=str(payload.get("body") or "暂无发布说明。"),
+        notes=str(payload.get("body") or "暂无发布说明"),
         newer=newer,
         download_url=download_url if ready else "",
         size=size if ready else 0,
@@ -125,14 +125,14 @@ def _read_release(url: str, current_version: str, timeout: int) -> ReleaseInfo:
         return parse_release(payload, current_version)
     except HTTPError as error:
         if error.code in (403, 429):
-            raise UpdateError("服务暂时限制了请求，请稍后再试。") from error
+            raise UpdateError("服务暂时限制了请求，请稍后再试") from error
         if error.code == 404:
-            raise UpdateError("未找到可用的正式发布。") from error
+            raise UpdateError("未找到可用的正式发布") from error
         raise UpdateError(f"更新检查失败：HTTP {error.code}") from error
     except (URLError, OSError, http.client.HTTPException) as error:
         raise UpdateError(f"连接失败：{error}") from error
     except (ValueError, TypeError) as error:
-        raise UpdateError("无法读取服务返回的发布信息。") from error
+        raise UpdateError("无法读取服务返回的发布信息") from error
 
 
 def download_sources(source: str) -> tuple[str, ...]:
@@ -163,7 +163,7 @@ def check_release(
             return _read_release(url, current_version, timeout=8)
         except UpdateError as error:
             failures.append(f"{name}：{error}")
-    raise UpdateError("无法取得更新信息。\n" + "\n".join(failures))
+    raise UpdateError("无法取得更新信息\n" + "\n".join(failures))
 
 
 def _download_url(original: str, source: str) -> str:
@@ -261,7 +261,7 @@ def download_release(
     on_source: Callable[[str], None] | None = None,
 ) -> Path:
     if not release.newer or not release.ready:
-        raise UpdateError("该版本的 GUI 文件或校验信息尚未就绪。")
+        raise UpdateError("该版本的 GUI 文件或校验信息尚未就绪")
     sources = download_sources(source)
     update_dir = data_dir / "update"
     update_dir.mkdir(parents=True, exist_ok=True)
@@ -296,7 +296,7 @@ def download_release(
                             break
                         received += len(chunk)
                         if received > release.size:
-                            raise UpdateError(f"{SOURCE_LABELS[name]}：文件大小与发布信息不一致。")
+                            raise UpdateError(f"{SOURCE_LABELS[name]}：文件大小与发布信息不一致")
                         output.write(chunk)
                         digest.update(chunk)
                         on_progress(received, release.size)
@@ -307,12 +307,12 @@ def download_release(
             if cancelled.is_set():
                 raise UpdateCancelled()
             if received != release.size or digest.hexdigest() != release.sha256:
-                raise UpdateError(f"{SOURCE_LABELS[name]}：文件校验失败，当前程序未被替换。")
+                raise UpdateError(f"{SOURCE_LABELS[name]}：文件校验失败，当前程序未被替换")
             partial.replace(candidate)
             return candidate
         if cancelled.is_set():
             raise UpdateCancelled()
-        raise UpdateError("所有选定线路均下载失败。\n" + "\n".join(failures))
+        raise UpdateError("所有选定线路均下载失败\n" + "\n".join(failures))
     except OSError as error:
         raise UpdateError(f"无法写入更新文件：{error}") from error
     finally:
@@ -323,7 +323,7 @@ def download_release(
 
 def start_installer(candidate: Path, release: ReleaseInfo) -> None:
     if not can_install_update():
-        raise UpdateError("当前运行方式或程序所在目录不支持自动替换。")
+        raise UpdateError("当前运行方式或程序所在目录不支持自动替换")
     if appimage_path() is not None:
         _start_appimage_installer(candidate, release)
         return
@@ -343,7 +343,7 @@ def start_installer(candidate: Path, release: ReleaseInfo) -> None:
         "backup": str(update_dir / f"{target.name}.bak"),
         "process_ids": process_ids, "size": release.size, "sha256": release.sha256,
         "error_title": "CNKIBug 更新失败",
-        "error_message": "未能完成更新。请保留当前程序，稍后重试。",
+        "error_message": "未能完成更新；请保留当前程序，稍后重试",
     }
     plan_path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8", newline="\n")
     powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -364,13 +364,13 @@ def start_installer(candidate: Path, release: ReleaseInfo) -> None:
         if process.poll() is not None:
             error_path = job_dir / "error.log"
             details = error_path.read_text(encoding="utf-8-sig") if error_path.is_file() else ""
-            raise UpdateError(f"更新脚本未能启动，当前程序仍在运行。\n{details}".strip())
+            raise UpdateError(f"更新脚本未能启动，当前程序仍在运行\n{details}".strip())
         if ready_path.is_file():
             return
         time.sleep(0.1)
     process.terminate()
     process.wait(timeout=5)
-    raise UpdateError("更新脚本启动超时，当前程序仍在运行。")
+    raise UpdateError("更新脚本启动超时，当前程序仍在运行")
 
 
 def save_appimage(candidate: Path, destination: Path) -> Path:
@@ -426,12 +426,12 @@ def _start_appimage_installer(candidate: Path, release: ReleaseInfo) -> None:
             if process.poll() is not None:
                 error_file = job_dir / "error.log"
                 details = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
-                raise UpdateError(f"更新脚本未能启动，当前程序仍在运行。\n{details}".strip())
+                raise UpdateError(f"更新脚本未能启动，当前程序仍在运行\n{details}".strip())
             if (job_dir / "ready").is_file():
                 handed_off = True
                 return
             time.sleep(0.1)
-        raise UpdateError("更新脚本启动超时，当前程序仍在运行。")
+        raise UpdateError("更新脚本启动超时，当前程序仍在运行")
     finally:
         if not handed_off:
             if process is not None and process.poll() is None:

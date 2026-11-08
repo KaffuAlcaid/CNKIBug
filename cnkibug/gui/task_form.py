@@ -322,7 +322,7 @@ class TaskForm(ttk.Frame):
             messagebox.showerror("无法载入检索方案", str(error), parent=self.root)
             return
         if self._keywords and not messagebox.askyesno(
-            "载入检索方案", "载入方案将替换当前检索项和输出选项。继续？", parent=self.root,
+            "载入检索方案", "载入方案将替换当前检索项和输出选项；继续？", parent=self.root,
         ):
             return
         self.populate_resume(task)
@@ -367,22 +367,22 @@ class TaskForm(ttk.Frame):
         if keywords is None:
             return None
         if not keywords:
-            messagebox.showerror("任务设置错误", "请至少输入一个关键词或检索句。", parent=self.root)
+            messagebox.showerror("任务设置错误", "请至少输入一个关键词或检索句", parent=self.root)
             return None
         try:
             max_pages = int(self._pages_var.get().strip())
         except ValueError:
             max_pages = 0
         if max_pages <= 0:
-            messagebox.showerror("任务设置错误", "抓取页数必须是大于 0 的整数。", parent=self.root)
+            messagebox.showerror("任务设置错误", "抓取页数必须是大于 0 的整数", parent=self.root)
             return None
         output_text = os.path.expanduser(os.path.expandvars(self._output_var.get().strip()))
         if not output_text:
-            messagebox.showerror("任务设置错误", "请选择保存位置。", parent=self.root)
+            messagebox.showerror("任务设置错误", "请选择保存位置", parent=self.root)
             return None
         output_dir = Path(output_text).resolve()
         if output_dir.exists() and not output_dir.is_dir():
-            messagebox.showerror("任务设置错误", "保存位置不是文件夹。", parent=self.root)
+            messagebox.showerror("任务设置错误", "保存位置不是文件夹", parent=self.root)
             return None
 
         save_mode = _resolve_save_mode(
@@ -473,7 +473,7 @@ class TaskForm(ttk.Frame):
             return None
         if merged.duplicates:
             keyword = merged.duplicates[0]
-            messagebox.showwarning("重复检索项", f"“{keyword}”在任务列表中重复，请编辑或移除。", parent=self.root)
+            messagebox.showwarning("重复检索项", f"“{keyword}”在任务列表中重复，请编辑或移除", parent=self.root)
             rows = [row for row in self._keyword_rows if row.keyword == keyword]
             self._focus_keyword(rows[-1])
             return None
@@ -586,7 +586,7 @@ class TaskForm(ttk.Frame):
         if self._running:
             return
         if row is None and len(self._keywords) >= MAX_KEYWORDS:
-            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个", parent=self.root)
             return
         keyword = row.query_key if row is not None else None
         original = self._advanced_queries.get(keyword) if keyword is not None else None
@@ -595,7 +595,7 @@ class TaskForm(ttk.Frame):
             return
         for existing, value in self._advanced_queries.items():
             if existing != keyword and value == query:
-                messagebox.showwarning("重复检索项", "相同的高级检索条件已在当前任务中。", parent=self.root)
+                messagebox.showwarning("重复检索项", "相同的高级检索条件已在当前任务中", parent=self.root)
                 self._focus_keyword(next(item for item in self._keyword_rows if item.query_key == existing))
                 return
         if keyword is None:
@@ -620,7 +620,7 @@ class TaskForm(ttk.Frame):
                 self._focus_keyword(row)
                 return
         if len(self._keyword_rows) >= MAX_KEYWORDS:
-            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个", parent=self.root)
             return
         row = self._append_keyword_row("")
         self._sync_keyword_action_states()
@@ -630,7 +630,7 @@ class TaskForm(ttk.Frame):
         if self._running:
             return
         if row is None and len(self._keywords) >= MAX_KEYWORDS:
-            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个。", parent=self.root)
+            messagebox.showerror("任务列表已满", f"检索项不能超过 {MAX_KEYWORDS} 个", parent=self.root)
             return
         previous = row.query_key if row else None
         name = previous
@@ -646,10 +646,10 @@ class TaskForm(ttk.Frame):
             return
         name, query = result
         if name != previous and name in self._keywords:
-            messagebox.showwarning("重复检索项", "该名称已在当前任务中，请使用不同名称。", parent=self.root)
+            messagebox.showwarning("重复检索项", "该名称已在当前任务中，请使用不同名称", parent=self.root)
             return
         if any(key != previous and value == query for key, value in self._professional_queries.items()):
-            messagebox.showwarning("重复检索项", "相同的专业检索式已在当前任务中。", parent=self.root)
+            messagebox.showwarning("重复检索项", "相同的专业检索式已在当前任务中", parent=self.root)
             return
         if previous is not None:
             self._professional_queries.pop(previous)
@@ -696,7 +696,7 @@ class TaskForm(ttk.Frame):
         if self._keywords:
             choice = messagebox.askyesnocancel(
                 "导入 TXT",
-                "当前任务中已有检索项。\n\n选择“是”追加导入，选择“否”替换当前列表。",
+                "当前任务中已有检索项\n\n选择“是”追加导入，选择“否”替换当前列表",
                 parent=self.root,
             )
             if choice is None:

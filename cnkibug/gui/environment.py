@@ -80,7 +80,7 @@ class EnvironmentPanel(ttk.Frame):
         if self.busy:
             return
         if not self.can_run():
-            messagebox.showinfo("任务正在运行", "请在抓取和下载任务结束后检查运行环境。", parent=self.winfo_toplevel())
+            messagebox.showinfo("任务正在运行", "请在抓取和下载任务结束后检查运行环境", parent=self.winfo_toplevel())
             return
         try:
             output_dir = self.get_output_dir().expanduser()
@@ -249,7 +249,7 @@ class InitializationDialog:
             try:
                 value = self.output.get().strip()
                 if not value:
-                    raise ValueError("请选择论文保存目录。")
+                    raise ValueError("请选择论文保存目录")
                 directory = Path(value).expanduser().resolve()
                 directory.mkdir(parents=True, exist_ok=True)
                 with TemporaryFile(dir=directory):

@@ -50,9 +50,9 @@ class DownloadVerificationPrompt:
         wrap = min(520, window.winfo_screenwidth() - 100)
         if title:
             ttk.Label(body, text=title, wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 12))
-        ttk.Label(body, text=progress.get("message", "请在浏览器中完成人工验证。"),
+        ttk.Label(body, text=progress.get("message", "请在浏览器中完成人工验证"),
                   wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W)
-        ttk.Label(body, text="完成后可点击下方按钮继续。关闭此提示不会停止等待，也可在“下载任务”中继续。",
+        ttk.Label(body, text="完成后可点击下方按钮继续；关闭此提示不会停止等待，也可在“下载任务”中继续",
                   wraplength=wrap, justify=tk.LEFT, bootstyle="secondary").pack(anchor=tk.W, pady=(8, 16))
         actions = ttk.Frame(body)
         actions.pack(fill=tk.X)
@@ -315,7 +315,7 @@ class DownloadTasksWindow:
             for item_id in self.items.get_children():
                 self.items.delete(item_id)
             self.batch_note.set("")
-            self._set_details("选择批次查看论文。关闭此窗口不会停止下载。")
+            self._set_details("选择批次查看论文；关闭此窗口不会停止下载")
             return
         counts = batch["counts"]
         waiting = counts["waiting"] + counts["uncertain"] + counts["finalizing"]
@@ -367,7 +367,7 @@ class DownloadTasksWindow:
     def _details(self):
         selection = self.items.selection()
         if not selection or selection[0] not in self._items:
-            self._set_details("选择论文查看文件位置、处理原因和尝试记录。关闭此窗口不会停止下载。")
+            self._set_details("选择论文查看文件位置、处理原因和尝试记录；关闭此窗口不会停止下载")
             return
         item = self._items[selection[0]]
         value = f"{item['paper']['title']}\n状态：{ITEM_LABELS[item['state']]}"
@@ -390,21 +390,21 @@ class DownloadTasksWindow:
 
     def _retry(self):
         batch, selected = self._batch(), self.items.selection()
-        if batch and selected and messagebox.askyesno("重试所选论文", f"重新尝试所选 {len(selected)} 篇？已有 PDF 文件会保留。", parent=self.window):
+        if batch and selected and messagebox.askyesno("重试所选论文", f"重新尝试所选 {len(selected)} 篇？已有 PDF 文件会保留", parent=self.window):
             self._send("retry", batch_id=batch["id"], item_ids=list(selected))
 
     def _append(self):
         batch = self._batch()
         papers = self.selected_papers()
         if not papers:
-            messagebox.showinfo("追加论文", "请先在论文结果窗口勾选要追加的论文。", parent=self.window)
+            messagebox.showinfo("追加论文", "请先在论文结果窗口勾选要追加的论文", parent=self.window)
         elif batch:
             self._send("append", batch_id=batch["id"], papers=papers)
 
     def _associate(self):
         selected = self.items.selection()
         if len(selected) != 1:
-            messagebox.showinfo("关联 PDF", "请选择一篇论文。", parent=self.window)
+            messagebox.showinfo("关联 PDF", "请选择一篇论文", parent=self.window)
             return
         path = filedialog.askopenfilename(parent=self.window, title="关联已有 PDF", filetypes=[("PDF", "*.pdf")])
         if path:
@@ -434,12 +434,12 @@ class DownloadTasksWindow:
 
     def _clear(self):
         batch = self._batch()
-        if batch and messagebox.askyesno("清理任务记录", "清除此批次的任务记录？PDF 文件和文件关联会保留。", parent=self.window):
+        if batch and messagebox.askyesno("清理任务记录", "清除此批次的任务记录？PDF 文件和文件关联会保留", parent=self.window):
             self._send("clear", batch_id=batch["id"])
 
     def _reset_session(self):
         batch = self._batch()
-        if batch and messagebox.askyesno("清除登录会话", "清除此访问环境保存的浏览器会话？下次下载需要重新准备登录。", parent=self.window):
+        if batch and messagebox.askyesno("清除登录会话", "清除此访问环境保存的浏览器会话？下次下载需要重新准备登录", parent=self.window):
             self._send("reset_session", session_id=batch["session_id"])
 
     def _history(self):

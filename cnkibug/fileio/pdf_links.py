@@ -151,7 +151,7 @@ class PdfIndex:
 
         keys = paper_keys(paper)
         if not keys:
-            raise ValueError(f"“{paper.title}”缺少 DOI、详情链接或完整书目信息，无法自动保存 PDF 关联。")
+            raise ValueError(f"“{paper.title}”缺少 DOI、详情链接或完整书目信息，无法自动保存 PDF 关联")
         previous = self.find(paper)
         entry = {
             "keys": list(dict.fromkeys([*(previous["keys"] if previous else []), *keys])),
@@ -321,7 +321,7 @@ def associate_pdf_folder(items: list[tuple[int, Paper]], papers: list[Paper], di
         events.emit("paper_pdf_link", index=index, path=str(path), saved=not error)
         linked += 1
         if error:
-            failures.append(f"关联已更新，但无法自动保存：{error}。请导出 Excel 或 CSV 保存关联。")
+            failures.append(f"关联已更新，但无法自动保存：{error}；请导出 Excel 或 CSV 保存关联")
             break
     if failures:
         events.emit("paper_task_error", error="\n".join(failures))

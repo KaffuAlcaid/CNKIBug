@@ -177,11 +177,11 @@ class CNKIBugApp:
             "关于 CNKIBug",
             (
                 f"CNKIBug  v{APP_VERSION}\n\n免责声明\n"
-                "CNKIBug 是独立开发的开源工具，与中国知网（CNKI）及其关联方不存在隶属、授权、合作或背书关系。\n\n"
-                "请在遵守适用法律法规、CNKI 用户协议及所在机构规定的前提下使用，并自行确认访问和处理相关内容的权限。\n\n"
-                "本软件按“现状”提供，不保证结果完整、准确或持续可用。请合理控制任务规模和访问频率，相关使用风险由使用者依法承担。\n\n"
-                "软件会在本地保存配置、日志、任务状态和浏览器会话信息，请妥善保管。\n\n"
-                "如您下载并使用本软件，即视为您已阅读、理解并同意本免责声明及 MIT License。"
+                "CNKIBug 是独立开发的开源工具，与中国知网（CNKI）及其关联方不存在隶属、授权、合作或背书关系\n\n"
+                "请在遵守适用法律法规、CNKI 用户协议及所在机构规定的前提下使用，并自行确认访问和处理相关内容的权限\n\n"
+                "本软件按“现状”提供，不保证结果完整、准确或持续可用；请合理控制任务规模和访问频率，相关使用风险由使用者依法承担\n\n"
+                "软件会在本地保存配置、日志、任务状态和浏览器会话信息，请妥善保管\n\n"
+                "如您下载并使用本软件，即视为您已阅读、理解并同意本免责声明及 MIT License"
             ),
             parent=self.root,
         )
@@ -210,7 +210,7 @@ class CNKIBugApp:
                 return True
         except Exception as error:
             _logger.warning("浏览器准备检查失败: %s", error)
-        messagebox.showinfo("浏览器尚未准备好", "请在设置的运行环境中检查或安装浏览器，然后继续。", parent=self.root)
+        messagebox.showinfo("浏览器尚未准备好", "请在设置的运行环境中检查或安装浏览器，然后继续", parent=self.root)
         self._open_settings(selected_tab="运行环境")
         try:
             return browser_installed()
@@ -260,9 +260,9 @@ class CNKIBugApp:
         if not messagebox.askyesno(
             "清理日志与报告",
             (
-                "将永久删除历史日志和任务报告。\n\n"
-                "本日运行文件将保留。\n"
-                "配置、浏览器会话、断点和抓取结果不会受影响。\n\n"
+                "将永久删除历史日志和任务报告\n\n"
+                "本日运行文件将保留\n"
+                "配置、浏览器会话、断点和抓取结果不会受影响\n\n"
                 "此操作不可撤销，是否继续？"
             ),
             icon="warning",
@@ -274,14 +274,14 @@ class CNKIBugApp:
         if result.failed:
             messagebox.showwarning(
                 "清理完成",
-                f"已删除 {result.deleted} 个历史文件，{result.failed} 个文件无法删除。",
+                f"已删除 {result.deleted} 个历史文件，{result.failed} 个文件无法删除",
                 parent=self.root,
             )
         else:
             message = (
-                f"已删除 {result.deleted} 个历史文件。"
+                f"已删除 {result.deleted} 个历史文件"
                 if result.deleted
-                else "没有需要清理的历史文件。"
+                else "没有需要清理的历史文件"
             )
             messagebox.showinfo("清理完成", message, parent=self.root)
 
@@ -372,7 +372,7 @@ class CNKIBugApp:
         if request.search_options:
             summary += f"检索设置：{request.search_options.summary()}\n\n"
         summary += _long_task_warning(high)
-        summary += "确认无误后才会启动浏览器和抓取任务。"
+        summary += "确认无误后才会启动浏览器和抓取任务"
         confirmed = (
             confirm_advanced_task(
                 self.root, summary,
@@ -393,7 +393,7 @@ class CNKIBugApp:
                 if delete_last_task(self.runtime.paths) or not last_task_path.exists():
                     messagebox.showwarning(
                         "未完成任务",
-                        "检测到损坏的任务缓存，已删除。",
+                        "检测到损坏的任务缓存，已删除",
                         parent=self.root,
                     )
                 else:
@@ -422,9 +422,9 @@ class CNKIBugApp:
                 (
                     f"{describe_task(state)}\n\n"
                     f"{_long_task_warning(remaining_high)}"
-                    "选择“是”：继续上次任务。\n"
-                    "选择“否”：忽略断点，删除断点文件并新建任务。\n"
-                    "选择“取消”：保留断点并退出程序。"
+                    "选择“是”：继续上次任务\n"
+                    "选择“否”：忽略断点，删除断点文件并新建任务\n"
+                    "选择“取消”：保留断点并退出程序"
                 ),
                 parent=self.root,
             )
@@ -436,7 +436,7 @@ class CNKIBugApp:
                 self._start_task(resume_state=state)
                 return
             if delete_last_task(self.runtime.paths) or not last_task_path.exists():
-                self._task_progress.append_log("已忽略并删除上次任务断点。", "warning")
+                self._task_progress.append_log("已忽略并删除上次任务断点", "warning")
                 return
             messagebox.showerror(
                 "断点删除失败",
@@ -448,12 +448,12 @@ class CNKIBugApp:
         if self._running or self._close_when_done:
             return
         if self._downloads_running():
-            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后继续任务。", parent=self.root)
+            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后继续任务", parent=self.root)
             return
         state = load_last_task(self.runtime.paths)
         if state is None:
             self._task_progress.set_resume_available(False)
-            messagebox.showinfo("无法继续任务", "未找到可继续的任务断点。", parent=self.root)
+            messagebox.showinfo("无法继续任务", "未找到可继续的任务断点", parent=self.root)
             return
         self._task_form.populate_resume(state)
         self._start_task(resume_state=state)
@@ -466,7 +466,7 @@ class CNKIBugApp:
         if self._running or self._close_when_done:
             return
         if self._downloads_running():
-            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后开始抓取。", parent=self.root)
+            messagebox.showinfo("论文操作正在运行", "请在论文处理结束后开始抓取", parent=self.root)
             return
         if not self._ensure_browser_ready():
             return
@@ -604,7 +604,7 @@ class CNKIBugApp:
                     self.root.focus_force()
                 answer = False if self._close_when_done else messagebox.askokcancel(
                     title="需要手动验证",
-                    message="请在浏览器中完成安全验证后点击继续，恢复抓取论文结果。\n点击取消将停止任务并保存已抓取的结果。",
+                    message="请在浏览器中完成安全验证后点击继续，恢复抓取论文结果\n点击取消将停止任务并保存已抓取的结果",
                     confirm="继续",
                     parent=self.root,
                 )
@@ -657,10 +657,10 @@ class CNKIBugApp:
                 completed = self._task_progress.completed
                 title = "抓取完成" if completed else "任务已结束"
                 count = len(self._current_results)
-                if count and messagebox.askyesno(title, f"已取得 {count} 篇论文。\n\n是否展示论文详情？", parent=self.root, default=messagebox.NO):
+                if count and messagebox.askyesno(title, f"已取得 {count} 篇论文\n\n是否展示论文详情？", parent=self.root, default=messagebox.NO):
                     self._show_results()
                 elif not count and completed:
-                    messagebox.showinfo(title, "未取得论文结果。", parent=self.root)
+                    messagebox.showinfo(title, "未取得论文结果", parent=self.root)
 
     def _downloads_running(self) -> bool:
         result = getattr(self, "_results_window", None)
@@ -687,7 +687,7 @@ class CNKIBugApp:
         from .download_tasks import DownloadTasksWindow
 
         if self._download_service is None:
-            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志。", parent=self.root)
+            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志", parent=self.root)
             return
         viewer = self._download_tasks_window
         if viewer is None or not viewer.window.winfo_exists():
@@ -833,7 +833,7 @@ class CNKIBugApp:
             self._cancel_event.set()
             self._task_progress.disable_stop()
             self._task_progress.set_status("正在安全停止并保存结果")
-            self._task_progress.append_log("已请求安全停止，请等待当前操作结束。", "warning")
+            self._task_progress.append_log("已请求安全停止，请等待当前操作结束", "warning")
 
     def _on_close(self) -> None:
         if self._close_when_done:
@@ -844,7 +844,7 @@ class CNKIBugApp:
             return
         if not messagebox.askyesno(
             "退出 CNKIBug",
-            "任务仍在运行。退出前将安全停止并保存当前结果，是否继续？"
+            "任务仍在运行；退出前将安全停止并保存当前结果，是否继续？"
             if self._running else "确定要退出 CNKIBug 吗？",
             parent=self.root,
         ):

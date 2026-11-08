@@ -38,15 +38,15 @@ def _get(path: str) -> tuple[object, dict[str, str]]:
         response = connection.getresponse()
         body = response.read()
         if response.status == 403:
-            raise RuntimeError("Zotero 本地 API 未开启，请在 Zotero 设置中允许本机应用访问文库。")
+            raise RuntimeError("Zotero 本地 API 未开启，请在 Zotero 设置中允许本机应用访问文库")
         if response.status != 200:
-            raise RuntimeError(f"无法读取 Zotero 文库（HTTP {response.status}），未发送文献。")
+            raise RuntimeError(f"无法读取 Zotero 文库（HTTP {response.status}），未发送文献")
         try:
             return json.loads(body), {key.lower(): value for key, value in response.getheaders()}
         except (UnicodeError, ValueError) as error:
-            raise RuntimeError("Zotero 返回的文库数据无效，未发送文献。") from error
+            raise RuntimeError("Zotero 返回的文库数据无效，未发送文献") from error
     except (OSError, http.client.HTTPException) as error:
-        raise RuntimeError("无法完整读取 Zotero 文库，请确认 Zotero 已启动并允许本地 API 访问。") from error
+        raise RuntimeError("无法完整读取 Zotero 文库，请确认 Zotero 已启动并允许本地 API 访问") from error
     finally:
         connection.close()
 
@@ -66,31 +66,31 @@ def _read_pages(path: str, events: EventSink, *, track_version: bool) -> tuple[l
         data, headers = _get(path + "?" + urlencode({"limit": 100, "start": len(records)}))
         _cancel_if_requested(events)
         if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
-            raise RuntimeError("Zotero 返回的文库列表无效，未发送文献。")
+            raise RuntimeError("Zotero 返回的文库列表无效，未发送文献")
         current_version = headers.get("last-modified-version", "")
         if track_version:
             if not current_version or (version and current_version != version):
-                raise RuntimeError("Zotero 文库版本无法确认或已发生变化，请重新查重。")
+                raise RuntimeError("Zotero 文库版本无法确认或已发生变化，请重新查重")
             version = current_version
         if "total-results" in headers:
             try:
                 current_total = int(headers["total-results"])
             except ValueError as error:
-                raise RuntimeError("Zotero 返回的条目总数无效。") from error
+                raise RuntimeError("Zotero 返回的条目总数无效") from error
             if current_total < 0 or (total is not None and total != current_total):
-                raise RuntimeError("Zotero 文库在读取过程中发生变化，请重新查重。")
+                raise RuntimeError("Zotero 文库在读取过程中发生变化，请重新查重")
             total = current_total
         for item in data:
             key = item.get("key") if track_version else item.get("id")
             if not key or key in seen:
-                raise RuntimeError("Zotero 分页数据不完整，请重新查重。")
+                raise RuntimeError("Zotero 分页数据不完整，请重新查重")
             seen.add(key)
         records.extend(data)
         if track_version:
             events.emit("paper_operation_progress", message=f"正在检查 Zotero 文库：已读取 {len(records)} 条")
         if total is not None:
             if len(records) > total or (not data and len(records) < total):
-                raise RuntimeError("Zotero 文库没有完整读取，未发送文献。")
+                raise RuntimeError("Zotero 文库没有完整读取，未发送文献")
             if len(records) == total:
                 return records, version
         elif not data:
@@ -103,7 +103,7 @@ def library_prefix(selected: dict, events: EventSink) -> str:
         if isinstance(target, dict) and target.get("level") == 0 and str(target.get("id", "")).startswith("L")
     ]
     if not libraries or f"L{selected['libraryID']}" not in {item["id"] for item in libraries}:
-        raise RuntimeError("无法确认当前 Zotero 文库，请重新选择发送目标。")
+        raise RuntimeError("无法确认当前 Zotero 文库，请重新选择发送目标")
     # The Connector lists the personal library first, then editable group libraries.
     if libraries and libraries[0]["id"] == f"L{selected['libraryID']}":
         return "/api/users/0"
@@ -112,11 +112,11 @@ def library_prefix(selected: dict, events: EventSink) -> str:
     for group in groups:
         data = group.get("data")
         if not isinstance(data, dict):
-            raise RuntimeError("Zotero 群组信息不完整，请重新读取文库。")
+            raise RuntimeError("Zotero 群组信息不完整，请重新读取文库")
         if str(group.get("id", "")).isdigit() and data.get("name") == selected["libraryName"]:
             choices.append({"id": str(group["id"]), "name": str(data["name"])})
     if not choices:
-        raise RuntimeError("无法识别当前 Zotero 文库，请确认选择了可用的个人库或群组库。")
+        raise RuntimeError("无法识别当前 Zotero 文库，请确认选择了可用的个人库或群组库")
     choice = events.request(
         "zotero_library_requested", libraries=choices, destination=str(selected["libraryName"]),
     )
@@ -124,14 +124,14 @@ def library_prefix(selected: dict, events: EventSink) -> str:
     if choice is None:
         raise ZoteroReadCancelled()
     if choice not in {item["id"] for item in choices}:
-        raise RuntimeError("Zotero 群组选择无效，未发送文献。")
+        raise RuntimeError("Zotero 群组选择无效，未发送文献")
     return f"/api/groups/{choice}"
 
 
 def _paper_from_item(item: dict) -> Paper | None:
     data = item.get("data")
     if not isinstance(data, dict):
-        raise RuntimeError("Zotero 条目数据不完整，未发送文献。")
+        raise RuntimeError("Zotero 条目数据不完整，未发送文献")
     kind = data.get("itemType")
     if kind in {"attachment", "note", "annotation"}:
         return None
@@ -168,7 +168,7 @@ def check_library_unchanged(snapshot: LibrarySnapshot, events: EventSink) -> Non
     _, headers = _get(snapshot.prefix + "/items/top?limit=1")
     _cancel_if_requested(events)
     if headers.get("last-modified-version") != snapshot.version:
-        raise RuntimeError("Zotero 文库已发生变化，请重新查重后发送。")
+        raise RuntimeError("Zotero 文库已发生变化，请重新查重后发送")
 
 
 def _normalized(value: str) -> str:

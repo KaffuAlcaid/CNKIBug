@@ -95,7 +95,7 @@ def write_bibtex(path: str | Path, papers: list[Paper]) -> None:
         persons = {"author": [Person(last="{" + _text(name) + "}") for name in split_authors(paper.authors)]}
         key = _entry_key(paper)
         if key in entries:
-            raise ValueError("文献标识发生冲突，请分开导出这些文献。")
+            raise ValueError("文献标识发生冲突，请分开导出这些文献")
         entries[key] = Entry(kind, fields=fields, persons=persons)
     content = _PlainTextWriter(encoding="UTF-8").to_string(BibliographyData(entries=entries))
     Path(path).write_text(content, encoding="utf-8", newline="\n")

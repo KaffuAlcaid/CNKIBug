@@ -34,11 +34,11 @@ class SearchOptions:
 
     def __post_init__(self) -> None:
         if not self.resources or any(value not in RESOURCE_TYPES for value in self.resources):
-            raise ValueError("请选择有效的检索范围。")
+            raise ValueError("请选择有效的检索范围")
         if self.sort not in SORT_MODES or self.language not in LANGUAGES:
-            raise ValueError("检索排序或语种无效。")
+            raise ValueError("检索排序或语种无效")
         if isinstance(self.page_size, bool) or self.page_size not in (10, 20, 50):
-            raise ValueError("每页显示条数应为 10、20 或 50。")
+            raise ValueError("每页显示条数应为 10、20 或 50")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -48,11 +48,11 @@ class SearchOptions:
         if value is None:
             return None
         if not isinstance(value, dict):
-            raise ValueError("检索设置格式无效。")
+            raise ValueError("检索设置格式无效")
         try:
             return cls(**{**value, "resources": tuple(value["resources"])})
         except (KeyError, TypeError) as error:
-            raise ValueError("检索设置格式无效。") from error
+            raise ValueError("检索设置格式无效") from error
 
     def summary(self) -> str:
         return f"{'、'.join(self.resources)}；{SORT_MODES[self.sort]}；{LANGUAGES[self.language]}；每页 {self.page_size} 条"
@@ -77,36 +77,36 @@ class AdvancedQuery:
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.conditions) <= 10:
-            raise ValueError("高级检索需要 1 至 10 条有效条件。")
+            raise ValueError("高级检索需要 1 至 10 条有效条件")
         for condition in self.conditions:
             if condition.field not in SEARCH_FIELDS:
-                raise ValueError("检索字段无效。")
+                raise ValueError("检索字段无效")
             if not isinstance(condition.text, str) or not condition.text.strip():
-                raise ValueError("检索词不能为空。")
+                raise ValueError("检索词不能为空")
             if len(condition.text.encode("utf-16-le")) // 2 > 120:
-                raise ValueError("每条检索条件不能超过 120 个字符。")
+                raise ValueError("每条检索条件不能超过 120 个字符")
             if condition.operator not in {"AND", "OR", "NOT"}:
-                raise ValueError("条件关系无效。")
+                raise ValueError("条件关系无效")
             if condition.match not in MATCH_MODES or (condition.field == "SU" and condition.match != "="):
-                raise ValueError("检索字段与匹配方式不兼容。")
+                raise ValueError("检索字段与匹配方式不兼容")
         for value in (self.date_from, self.date_to):
             if not isinstance(value, str):
-                raise ValueError("日期格式应为 YYYY-MM-DD。")
+                raise ValueError("日期格式应为 YYYY-MM-DD")
             if value:
                 try:
                     parsed = date.fromisoformat(value)
                 except ValueError as error:
-                    raise ValueError("日期格式应为 YYYY-MM-DD。") from error
+                    raise ValueError("日期格式应为 YYYY-MM-DD") from error
                 if parsed.isoformat() != value:
-                    raise ValueError("日期格式应为 YYYY-MM-DD。")
+                    raise ValueError("日期格式应为 YYYY-MM-DD")
         if self.date_from and self.date_to and self.date_from > self.date_to:
-            raise ValueError("开始日期不能晚于结束日期。")
+            raise ValueError("开始日期不能晚于结束日期")
         if not isinstance(self.bilingual, bool) or not isinstance(self.synonym, bool):
-            raise ValueError("检索扩展设置无效。")
+            raise ValueError("检索扩展设置无效")
         if self.bilingual and self.synonym:
-            raise ValueError("中英文扩展与同义词扩展只能选择一项。")
+            raise ValueError("中英文扩展与同义词扩展只能选择一项")
         if any(value not in PUBLICATION_FILTERS for value in self.publications):
-            raise ValueError("出版筛选项无效。")
+            raise ValueError("出版筛选项无效")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -114,14 +114,14 @@ class AdvancedQuery:
     @classmethod
     def from_dict(cls, raw: Any) -> AdvancedQuery:
         if not isinstance(raw, dict):
-            raise ValueError("高级检索条件格式无效。")
+            raise ValueError("高级检索条件格式无效")
         try:
             values = dict(raw)
             values["conditions"] = tuple(SearchCondition(**item) for item in raw["conditions"])
             values["publications"] = tuple(raw.get("publications", ()))
             return cls(**values)
         except (KeyError, TypeError, AttributeError) as error:
-            raise ValueError("高级检索条件格式无效。") from error
+            raise ValueError("高级检索条件格式无效") from error
 
     def summary(self) -> str:
         parts = []
@@ -138,7 +138,7 @@ class AdvancedQuery:
 
 def load_advanced_queries(raw: Any, keywords: list[str]) -> dict[str, AdvancedQuery]:
     if not isinstance(raw, dict) or any(key not in keywords for key in raw):
-        raise ValueError("高级检索与任务列表不一致。")
+        raise ValueError("高级检索与任务列表不一致")
     return {key: AdvancedQuery.from_dict(value) for key, value in raw.items()}
 
 
@@ -148,9 +148,9 @@ class ProfessionalQuery:
 
     def __post_init__(self) -> None:
         if not isinstance(self.expression, str) or not self.expression.strip():
-            raise ValueError("请输入专业检索式。")
+            raise ValueError("请输入专业检索式")
         if any(unicodedata.category(character) in {"Cc", "Cs"} and character not in "\t\r\n" for character in self.expression):
-            raise ValueError("专业检索式包含无法提交的控制字符。")
+            raise ValueError("专业检索式包含无法提交的控制字符")
 
     def to_dict(self) -> dict[str, str]:
         return {"expression": self.expression}
@@ -158,7 +158,7 @@ class ProfessionalQuery:
     @classmethod
     def from_dict(cls, raw: Any) -> ProfessionalQuery:
         if not isinstance(raw, dict) or set(raw) != {"expression"}:
-            raise ValueError("专业检索条件格式无效。")
+            raise ValueError("专业检索条件格式无效")
         return cls(raw["expression"])
 
     def summary(self) -> str:
@@ -167,5 +167,5 @@ class ProfessionalQuery:
 
 def load_professional_queries(raw: Any, keywords: list[str], advanced: Any = ()) -> dict[str, ProfessionalQuery]:
     if not isinstance(raw, dict) or any(key not in keywords or key in advanced for key in raw):
-        raise ValueError("专业检索与任务列表或高级检索条件不一致。")
+        raise ValueError("专业检索与任务列表或高级检索条件不一致")
     return {key: ProfessionalQuery.from_dict(value) for key, value in raw.items()}

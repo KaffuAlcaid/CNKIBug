@@ -500,7 +500,7 @@ class ResultsWindow:
                     content["journal"] = "\n".join(f"{label}：{journal.get(key) or '页面未提供'}" for key, label in (
                         ("name", "期刊"), ("issn", "ISSN"), ("cn", "CN"), ("sponsor", "主办单位"), ("frequency", "出版周期"),
                     ))
-                    content["journal"] += "\n\n页面收录信息：\n" + (journal.get("indexing") or "页面未提供，不能据此判断未收录。")
+                    content["journal"] += "\n\n页面收录信息：\n" + (journal.get("indexing") or "页面未提供，不能据此判断未收录")
                     content["journal"] += "\n\n影响因子（页面原文）：\n" + ("\n".join(journal.get("metrics", [])) or "页面未提供")
                 if journal.get("source_url"):
                     content["journal"] += f"\n\n来源：{journal['source_url']}"
@@ -601,11 +601,11 @@ class ResultsWindow:
         if saved:
             self._operation_status.set(f"已导出 {len(papers)} 篇：" + "、".join(path.name for path in saved))
         else:
-            self._operation_status.set("本次导出未生成结果文件。")
+            self._operation_status.set("本次导出未生成结果文件")
         if failures:
             message = "\n".join(failures)
             if saved:
-                self._operation_status.set(f"已导出 {len(saved)} 种格式，{len(failures)} 种格式失败。")
+                self._operation_status.set(f"已导出 {len(saved)} 种格式，{len(failures)} 种格式失败")
                 messagebox.showwarning("部分导出失败", "已生成：" + "、".join(path.name for path in saved) + "\n\n" + message, parent=self.window)
             else:
                 messagebox.showerror("导出失败", message, parent=self.window)
@@ -614,7 +614,7 @@ class ResultsWindow:
         if self.busy:
             return None
         if len(self._checked) != 1:
-            messagebox.showinfo("选择论文", "请只勾选一篇论文。", parent=self.window)
+            messagebox.showinfo("选择论文", "请只勾选一篇论文", parent=self.window)
             return None
         return next(iter(self._checked))
 
@@ -658,14 +658,14 @@ class ResultsWindow:
         self._save_pdf_link(index, "unlinked")
         self._statuses.pop(index, None)
         self._row_statuses.pop(index, None)
-        self._operation_status.set("PDF 关联已解除，文件仍保存在原位置。")
+        self._operation_status.set("PDF 关联已解除，文件仍保存在原位置")
         self._populate()
 
     def _associate_pdf_folder(self):
         if self.busy or not self._checked:
             return
         if not self.can_run():
-            messagebox.showinfo("任务正在运行", "请在当前任务结束后关联 PDF。", parent=self.window)
+            messagebox.showinfo("任务正在运行", "请在当前任务结束后关联 PDF", parent=self.window)
             return
         selection = PdfFolderDialog(self.window, Path(self.get_output_dir())).show()
         if selection is None:
@@ -715,7 +715,7 @@ class ResultsWindow:
             )
         except (OSError, ValueError) as error:
             messagebox.showwarning(
-                "PDF 关联尚未保存", f"当前关联已更新，但无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存这些关联。", parent=self.window,
+                "PDF 关联尚未保存", f"当前关联已更新，但无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存这些关联", parent=self.window,
             )
             return False
         self._unsaved_pdf_links.discard(index)
@@ -729,7 +729,7 @@ class ResultsWindow:
         if self.busy or not self._checked:
             return
         if not self.can_run():
-            messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后处理论文。", parent=self.window)
+            messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后处理论文", parent=self.window)
             return
         if needs_browser and not self.prepare_browser():
             return
@@ -786,16 +786,16 @@ class ResultsWindow:
         if self.busy or not self._checked:
             return
         if self.download_service is None:
-            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志并重新打开应用。", parent=self.window)
+            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志并重新打开应用", parent=self.window)
             return
         self._restore_pdf_links()
         indices = [index for index in sorted(self._checked) if force or self._pdf_errors[index]]
         self._refresh_checks()
         if not indices:
-            self._operation_status.set("所选文献均已关联有效 PDF，已跳过下载。")
+            self._operation_status.set("所选文献均已关联有效 PDF，已跳过下载")
             return
         if force and not messagebox.askyesno(
-            "重新下载 PDF", f"重新下载所选 {len(indices)} 篇文献？已有 PDF 文件将保留。", parent=self.window,
+            "重新下载 PDF", f"重新下载所选 {len(indices)} 篇文献？已有 PDF 文件将保留", parent=self.window,
         ):
             return
         if not self.prepare_browser():
@@ -879,7 +879,7 @@ class ResultsWindow:
                 elif event.name == "verify_required":
                     answers = payload.get("response_queue")
                     answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel(
-                        "需要手动验证", "请在浏览器中完成安全验证，然后继续。", parent=self.window,
+                        "需要手动验证", "请在浏览器中完成安全验证，然后继续", parent=self.window,
                     )
                     if answers is not None:
                         answers.put(answer)
@@ -944,7 +944,7 @@ class ResultsWindow:
                     except Exception:
                         logging.getLogger("cnkibug.gui.results").exception("无法显示论文操作确认窗口")
                         if not self._closing:
-                            messagebox.showerror("无法显示确认窗口", "本次操作已取消，请查看日志。", parent=self.window)
+                            messagebox.showerror("无法显示确认窗口", "本次操作已取消，请查看日志", parent=self.window)
                     finally:
                         payload["response_queue"].put(answer)
                 elif event.name in {"download_error", "paper_task_error"} and not (self._closing or self._hide_when_done):
@@ -957,7 +957,7 @@ class ResultsWindow:
                     self._stop_button.pack_forget()
                     self._open_button.configure(state=tk.NORMAL)
                     message = payload.get("message", "下载已停止" if payload.get("stopped") else "本批下载结束")
-                    self._operation_status.set(f"已停止。{message}" if event.name == "paper_task_finished" and payload.get("stopped") else message)
+                    self._operation_status.set(f"已停止；{message}" if event.name == "paper_task_finished" and payload.get("stopped") else message)
                     self._update_summary()
                     if self._closing:
                         self.window.destroy()

@@ -103,7 +103,7 @@ def _read_rows(rows, query: str = "", directory: Path | None = None) -> list[Pap
     header = next(rows, ())
     keys = [ALIASES.get(str(value or "").strip(), "") for value in header]
     if "title" not in keys:
-        raise ValueError("文件缺少“论文标题”列，请选择 CNKIBug 导出的 XLSX 或 CSV 文件。")
+        raise ValueError("文件缺少“论文标题”列，请选择 CNKIBug 导出的 XLSX 或 CSV 文件")
     papers = []
     for row in rows:
         values = {key: str(value).strip() if value is not None else "" for key, value in zip(keys, row) if key}
@@ -125,7 +125,7 @@ def read_papers(path: str | Path) -> list[Paper]:
         with path.open(encoding="utf-8-sig", newline="") as stream:
             return deduplicate_papers(_read_rows(iter(csv.reader(stream)), directory=path.parent))
     if path.suffix.lower() != ".xlsx":
-        raise ValueError("请选择 XLSX 或 CSV 文件。")
+        raise ValueError("请选择 XLSX 或 CSV 文件")
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         papers = []
@@ -152,8 +152,8 @@ def write_ris(path: str | Path, papers: list[Paper], include_pdf: bool = False) 
     unsupported = list(dict.fromkeys(paper.document_type for paper, family in zip(papers, families) if family not in _RIS_TYPES))
     if unsupported:
         raise ValueError(
-            f"以下文献类型暂不支持准确的 Zotero 导出：{'、'.join(unsupported)}。"
-            "请使用 Excel 或 CSV 保存这些结果。"
+            f"以下文献类型暂不支持准确的 Zotero 导出：{'、'.join(unsupported)}；"
+            "请使用 Excel 或 CSV 保存这些结果"
         )
     with open(path, "w", encoding="utf-8-sig", newline="\n") as stream:
         def emit(tag: str, value: str) -> None:
@@ -219,4 +219,4 @@ def save_papers(path: str | Path, papers: list[Paper], include_pdf: bool = False
 
         _write_atomically(str(path), lambda temporary: write_bibtex(temporary, papers))
     else:
-        raise ValueError("保存格式应为 XLSX、CSV、RIS 或 BibTeX。")
+        raise ValueError("保存格式应为 XLSX、CSV、RIS 或 BibTeX")

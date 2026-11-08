@@ -229,7 +229,7 @@ def load_or_create_config(paths: RuntimePaths) -> tuple[dict[str, Any], list[tup
 
 def validate_config(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValueError("配置文件根结构必须是 JSON 对象。")
+        raise ValueError("配置文件根结构必须是 JSON 对象")
     for key, default in DEFAULT_CONFIG.items():
         if key in raw and type(raw[key]) is not type(default):
             raise ValueError(f"配置项类型无效：{key}")

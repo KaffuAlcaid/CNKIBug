@@ -212,13 +212,13 @@ class TaskProgress(ttk.Frame):
         elif name == "activity_started":
             self._status_var.set(str(payload.get("message", "正在处理")))
         elif name == "browser_edge_failed":
-            self.append_log("Edge 启动失败，正在尝试备用 Chromium。", "warning")
+            self.append_log("Edge 启动失败，正在尝试备用 Chromium", "warning")
         elif name == "browser_launched":
             browser = payload.get("browser_name") or ("Microsoft Edge" if payload.get("channel") == "msedge" else "Chromium")
-            self.append_log(f"已启动 {browser}。", "success")
+            self.append_log(f"已启动 {browser}", "success")
         elif name == "browser_ready":
             self._status_var.set("浏览器已就绪")
-            self.append_log("浏览器已打开；遇到滑块时请在浏览器窗口手动完成。")
+            self.append_log("浏览器已打开；遇到滑块时请在浏览器窗口手动完成")
         elif name == "browser_launch_failed":
             error = str(payload.get("error", "未知错误"))
             self._status_var.set("浏览器启动失败")
@@ -228,9 +228,9 @@ class TaskProgress(ttk.Frame):
         elif name == "verify_waiting":
             self._status_var.set(f"等待安全验证，剩余约 {payload.get('remaining', 0)} 秒")
         elif name == "verify_timeout":
-            self.append_log("等待安全验证超时，将保存当前结果。", "warning")
+            self.append_log("等待安全验证超时，将保存当前结果", "warning")
         elif name == "verify_passed":
-            self.append_log("安全验证已通过，继续抓取。", "success")
+            self.append_log("安全验证已通过，继续抓取", "success")
         elif name == "page_debug":
             self.append_log(f"页面异常：{payload.get('context', '未记录上下文')}", "warning")
             self.append_log(f"当前 URL：{payload.get('url', '<无法读取>')}")
@@ -287,7 +287,7 @@ class TaskProgress(ttk.Frame):
             level = "warning" if failed or stopped else "success"
             self.append_log(
                 f"本轮摘要：成功 {success}，无结果 {empty}，失败 {failed}，"
-                f"中止 {stopped}，共 {total_records} 条。",
+                f"中止 {stopped}，共 {total_records} 条",
                 level,
             )
             for item in report.failed_items():
@@ -300,11 +300,11 @@ class TaskProgress(ttk.Frame):
             result = payload["result"]
             if result.failed:
                 self.append_log(
-                    f"本轮有 {result.failed} 个结果文件未能成功保存。",
+                    f"本轮有 {result.failed} 个结果文件未能成功保存",
                     "error",
                 )
             if result.keyword_txt_failed:
-                self.append_log("关键词 TXT 未能成功保存，详情见日志。", "error")
+                self.append_log("关键词 TXT 未能成功保存，详情见日志", "error")
             for path in result.saved_paths:
                 self.append_log(f"已保存：{path}", "success")
             if result.keyword_txt_path:

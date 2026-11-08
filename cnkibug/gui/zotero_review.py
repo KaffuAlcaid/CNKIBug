@@ -203,7 +203,7 @@ class ZoteroLibraryDialog:
         body = ttk.Frame(self.window, padding=20)
         body.pack(fill=tk.BOTH, expand=True)
         ttk.Label(body, text=f"当前发送目标：{destination}", wraplength=600).pack(anchor=tk.W)
-        ttk.Label(body, text="请选择对应的群组文库用于查重。").pack(anchor=tk.W, pady=(12, 8))
+        ttk.Label(body, text="请选择对应的群组文库用于查重").pack(anchor=tk.W, pady=(12, 8))
         self.libraries = libraries
         self.choice = ttk.Combobox(body, state="readonly", values=[f"{item['name']}（群组 {item['id']}）" for item in libraries])
         self.choice.pack(fill=tk.X)

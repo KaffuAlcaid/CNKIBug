@@ -221,11 +221,11 @@ class SettingsDialog:
             try:
                 number = Decimal(self._numbers[key].get().strip()) * divisor
             except InvalidOperation as error:
-                raise ValueError(f"{label}必须是有效数值。") from error
+                raise ValueError(f"{label}必须是有效数值") from error
             minimum = 0 if key == "download_auth_wait_sec" else 1
             if not number.is_finite() or number < minimum or number != number.to_integral_value():
                 requirement = "非负整数" if minimum == 0 else "正数，精确到毫秒" if divisor == 1000 else "正整数"
-                raise ValueError(f"{label}必须为{requirement}。")
+                raise ValueError(f"{label}必须为{requirement}")
             config[key] = int(number)
         for key, variable in self._flags.items():
             config[key] = variable.get()
@@ -270,7 +270,7 @@ class SettingsDialog:
 
     def _prepare_update(self, parent: tk.Misc) -> str | None:
         if self.environment.busy:
-            messagebox.showinfo("运行环境正在处理", "请在环境检查或浏览器安装完成后更新程序。", parent=parent)
+            messagebox.showinfo("运行环境正在处理", "请在环境检查或浏览器安装完成后更新程序", parent=parent)
             return None
         if can_install_update() and not self._confirm_update(parent):
             return None
@@ -283,7 +283,7 @@ class SettingsDialog:
             return config["update_source"]
         choice = messagebox.askyesnocancel(
             "保存设置",
-            "设置尚未保存。是否保存后继续更新？\n选择否将使用已保存的设置。",
+            "设置尚未保存；是否保存后继续更新？\n选择否将使用已保存的设置",
             parent=parent,
         )
         if choice is None:

@@ -55,7 +55,7 @@ class PdfFolderDialog:
         try:
             path = Path(value).expanduser().resolve()
             if not value or not path.is_dir():
-                raise ValueError("请选择存在的 PDF 文件夹。")
+                raise ValueError("请选择存在的 PDF 文件夹")
         except (OSError, ValueError) as error:
             messagebox.showerror("文件夹不可用", str(error), parent=self.window)
             return

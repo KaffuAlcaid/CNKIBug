@@ -37,14 +37,14 @@ def validate_webvpn_url(value: str) -> None:
         if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password or parts.port == 0:
             raise ValueError()
     except ValueError as error:
-        raise ValueError("请填写学校提供的完整知网 WebVPN 网址。") from error
+        raise ValueError("请填写学校提供的完整知网 WebVPN 网址") from error
     _check_webvpn_path(parts.path)
     prefix, separator, school_domain = parts.hostname.partition(".")
     if not separator or not school_domain or prefix not in {"www-cnki-net-443", "kns-cnki-net-443"}:
         raise ValueError(
             "当前支持网址以 www-cnki-net-443. 或 kns-cnki-net-443. 开头的知网 WebVPN 入口，"
-            "后面需包含完整学校域名。\n\n"
-            "对于其他门户及地址中含 /https/编码/ 的入口，请在学校 WebVPN 浏览器页面中手动下载 PDF。"
+            "后面需包含完整学校域名\n\n"
+            "对于其他门户及地址中含 /https/编码/ 的入口，请在学校 WebVPN 浏览器页面中手动下载 PDF"
         )
 
 
@@ -87,7 +87,7 @@ class ManagedDownloadBrowser:
             except PlaywrightError as error:
                 failures.append(f"{candidate.name}：{error}")
         if self.context is None:
-            raise DownloadProblem("下载浏览器无法启动；请检查是否有旧窗口仍在使用此会话。\n" + "\n".join(failures), "session_error")
+            raise DownloadProblem("下载浏览器无法启动；请检查是否有旧窗口仍在使用此会话\n" + "\n".join(failures), "session_error")
         restored = False
         if self.settings.session_cache_enabled and self._storage_path.is_file():
             try:

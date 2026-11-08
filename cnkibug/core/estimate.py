@@ -16,7 +16,7 @@ _STARTUP_OVERHEAD_LOW = 18
 _STARTUP_OVERHEAD_HIGH = 25
 LONG_TASK_WARNING_SECONDS = 10 * 60
 LONG_TASK_WARNING_TEXT = (
-    "风险提示：预计耗时上限已超过 10 分钟，任务较大且更容易触发知网反爬验证。"
+    "风险提示：预计耗时上限已超过 10 分钟，任务较大且更容易触发知网反爬验证"
 )
 
 
