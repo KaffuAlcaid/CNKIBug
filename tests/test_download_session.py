@@ -205,9 +205,11 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
     import time
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
+    from urllib.parse import parse_qs, urlsplit
     from cnkibug.downloads.service import DownloadService
     from cnkibug.fileio.pdf_links import PdfIndex
     requests = []
+    title = "10mm厚AH36船板激光-MIG复合焊工艺及组织研究"
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -230,18 +232,24 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
                 return
             body = '<input id="txt_SearchText">'
             if self.path == "/search":
-                body += '<form action="/results"><input class="search-input" name="q"><input type="submit" class="search-btn"></form>'
+                body += '''<form class="search-main" action="/results">
+                    <input type="hidden" id="selectfield" name="field" value="SU">
+                    <button type="button" class="sort-default" onclick="document.querySelector('.sort-list').hidden=false">主题</button>
+                    <ul class="sort-list" hidden><li data-val="TI"><a href="#" onclick="document.querySelector('#selectfield').value='TI';return false">篇名</a></li></ul>
+                    <input class="search-input" name="q"><input type="submit" class="search-btn"></form>'''
                 body += '<script>window.jQuery={active:1}</script>'
             if self.path.startswith("/results"):
                 body += '<script>window.jQuery={active:1}</script>'
-                if outcome == "missing":
+                query = parse_qs(urlsplit(self.path).query)
+                literal_title = query.get("field") == ["TI"] and query.get("q") == ["'" + title + "'"]
+                if outcome == "missing" or not literal_title:
                     body += '<div id="briefBox"><p class="no-content">没有结果</p></div>'
                 else:
                     target = '' if outcome == 'same_tab' else 'target="_blank"'
-                    row = f'<tr><td class="name"><a href="/detail" {target}>Local managed paper</a></td></tr>'
+                    row = f'<tr><td class="name"><a href="/detail" {target}>{title}</a></td></tr>'
                     body += '<table class="result-table-list"><tbody>' + row * (2 if outcome == 'ambiguous' else 1) + '</tbody></table>'
             if self.path == "/detail":
-                body += '<div class="brief"><h1>Local managed paper</h1></div><a id="pdfDown" href="/file" target="_blank">PDF</a>'
+                body += f'<div class="brief"><h1>{title}</h1></div><a id="pdfDown" href="/file" target="_blank">PDF</a>'
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -258,7 +266,7 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
     monkeypatch.setattr(downloads, "browser_launch_options", lambda candidate: {**browser_launch_options(candidate), "headless": True})
     paths = init_runtime(program_dir=tmp_path, configure_logging=False).paths
     service = DownloadService(paths)
-    paper = Paper(title="Local managed paper", doi="10.1234/native-managed", detail_url=base + "/old-signed-detail?v=expired")
+    paper = Paper(title=title, doi="10.1234/native-managed", detail_url=base + "/old-signed-detail?v=expired")
     try:
         service.submit([paper], tmp_path / "pdf", get_scraper_settings({**DEFAULT_CONFIG, "download_auth_wait_sec": 0})).result(3)
         deadline = time.monotonic() + 35
@@ -277,6 +285,8 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
         history = service.request("history", item_id=item["id"]).result(3)
         attempt = history["attempts"][0]
         assert not any(path.startswith("/old-signed-detail") for path, _ in requests)
+        assert attempt["metadata"]["lookup"]["field"] == "TI"
+        assert attempt["metadata"]["lookup"]["query"] == "'" + title + "'"
         if outcome in {"missing", "ambiguous"}:
             assert not attempt["requested"]
             assert item["state"] == "failed"

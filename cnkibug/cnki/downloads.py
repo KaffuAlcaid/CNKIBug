@@ -234,6 +234,28 @@ class ManagedDownloadBrowser:
                 return False
         return True
 
+    @staticmethod
+    def _title_query(title):
+        # CNKI treats unquoted -, + and * as search operators.
+        for quote in ("'", '"'):
+            if quote not in title:
+                return quote + title.strip() + quote
+        parts = [part.strip() for part in re.split(r"['\"]", title) if part.strip()]
+        return " * ".join("'" + part + "'" for part in parts)
+
+    async def _select_title_search(self, page):
+        field = page.locator("#selectfield")
+        if await field.input_value(timeout=self.settings.timeout_selector_ms) == "TI":
+            return
+        menu = page.locator(".search-main .sort-default")
+        option = page.locator('.search-main li[data-val="TI"] a')
+        await self._await(menu.hover(timeout=self.settings.timeout_selector_ms))
+        if not await option.is_visible():
+            await self._await(menu.click(timeout=self.settings.timeout_selector_ms))
+        await self._await(option.click(timeout=self.settings.timeout_selector_ms))
+        if await field.input_value() != "TI":
+            raise DownloadProblem("无法切换到篇名检索，请稍后重试", "lookup_not_ready", retryable=True)
+
     async def _wait_search_ready(self, page, *, results=False):
         remaining = self.settings.timeout_load_ms / 1000
         stable = 0.0
@@ -288,7 +310,10 @@ class ManagedDownloadBrowser:
             self.report("throttle")
             raise DownloadProblem("知网限制当前检索频率，请稍后继续", "rate_limited")
         await self._wait_search_ready(search)
-        await self._await(search.locator(SELECTOR_SEARCH_INPUT).fill(paper.title, timeout=self.settings.timeout_selector_ms))
+        await self._select_title_search(search)
+        query = self._title_query(paper.title)
+        self.report("evidence", lookup={"field": "TI", "query": query})
+        await self._await(search.locator(SELECTOR_SEARCH_INPUT).fill(query, timeout=self.settings.timeout_selector_ms))
         await self.control.wait(0.5)
         await self._await(search.locator(SELECTOR_SEARCH_BUTTON).click(timeout=self.settings.timeout_selector_ms))
         await self._wait_search_ready(search, results=True)
@@ -300,6 +325,10 @@ class ManagedDownloadBrowser:
                 authors:[...row.querySelectorAll('td.author a')].map(e=>e.textContent.trim()).filter(Boolean)};
         })""")
         matches = [row for row in rows if self._matches_result(paper, row)]
+        self.report("evidence", lookup={"field": "TI", "query": query, "result_count": len(rows),
+                    "match_count": len(matches), "candidates": [
+                        {key: row[key] for key in ("title", "authors", "source", "date")} for row in rows[:5]]})
+        _logger.info("下载篇名检索: title=%s results=%s matches=%s", paper.title, len(rows), len(matches))
         if len(matches) != 1:
             reason = "未找到与题名和已知书目信息一致的论文" if not matches else "同名检索结果不唯一，无法确定要下载的论文"
             raise DownloadProblem(reason + "；请核对文献信息", "lookup_not_found" if not matches else "lookup_ambiguous")
