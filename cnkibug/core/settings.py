@@ -25,6 +25,7 @@ class ScraperSettings:
     detail_txt_export: bool = False
     search_options: SearchOptions | None = None
     download_auth_wait_sec: int = 60
+    download_interval_sec: int = 3
 
 
 def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
@@ -42,4 +43,5 @@ def get_scraper_settings(config: dict[str, Any]) -> ScraperSettings:
         log_scraped_records=bool(config["log_scraped_records"]),
         detail_txt_export=bool(config["detail_txt_export"]),
         download_auth_wait_sec=int(config.get("download_auth_wait_sec", 60)),
+        download_interval_sec=int(config.get("download_interval_sec", 3)),
     )

@@ -55,6 +55,7 @@ python -m pip install -e ".[gui]" -r requirements-dev.txt
 | `cnkibug/gui/` | 主窗口、任务表单、结果窗口、设置和更新 |
 | `cnkibug/browser/` | 浏览器选择、启动和会话保存 |
 | `cnkibug/cnki/` | 检索、页面解析、翻页、详情、引文和下载 |
+| `cnkibug/downloads/` | 应用级下载队列、SQLite 存储、传输事件、文件核对与恢复 |
 | `cnkibug/core/` | 检索条件、设置、事件、耗时估算和内存统计 |
 | `cnkibug/fileio/` | 文件导入导出、检索方案和 Zotero 发送 |
 | `cnkibug/workflow/` | 任务执行、断点、结果保存和报告 |
@@ -64,6 +65,14 @@ python -m pip install -e ".[gui]" -r requirements-dev.txt
 GUI 的主要入口是 `cnkibug/gui/app.py`，任务表单位于 `task_form.py`，进度与日志位于 `task_progress.py`，文献列表位于 `results.py`
 
 耗时操作在工作线程中执行，通过事件队列通知界面，Tk 控件由主线程更新
+
+下载服务由主应用持有，`gui/download_tasks.py` 展示批次和任务，结果窗口只提交文献快照与接收按文献标识匹配的结果。服务使用独立 asyncio 工作线程作为数据库和浏览器的唯一执行者；命令与事件通过批次、任务项和尝试 ID 关联，旧尝试的事件不能覆盖当前尝试
+
+任务数据库位于 `tasks/downloads.sqlite3`，使用显式事务和同步提交。点击前登记尝试，正式文件保存前登记目标与校验值。PDF 文件和数据库无法处于同一个事务中，因此启动核对需要处理文件已保存、索引未登记、文件缺失和不完整传输。任务目录的进程锁避免多个实例同时管理同一数据库及浏览器配置
+
+浏览器通过页面所属关系和下载事件关联 GUID，只处理当前论文打开的页面。下载文件在目标目录的 `.cnkibug-incoming/<attempt_id>/` 中接收，验证后以不覆盖已有文件的方式保存，再更新 PDF 索引与任务记录。清理仅涉及已关联到该尝试的临时文件
+
+下载采用串行调度，与抓取及其他论文操作互斥。暂停允许已开始的传输完成；停止取消当前执行并保留任务。恢复时不自动重放结果不明的点击，也不将任务恢复描述为字节断点续传
 
 ## 测试与启动检查
 

@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "session_cache_enabled": True,
     "session_cache_ttl_hours": 12,
     "download_auth_wait_sec": 60,
+    "download_interval_sec": 3,
     "log_level": "INFO",
     "log_save_path": True,
     "log_keywords": False,
@@ -312,6 +313,7 @@ def _normalize_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool, list[t
         "max_advance_fail",
         "session_cache_ttl_hours",
         "download_auth_wait_sec",
+        "download_interval_sec",
     )
     for key in int_keys:
         minimum = 0 if key == "download_auth_wait_sec" else 1

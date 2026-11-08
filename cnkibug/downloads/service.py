@@ -4,6 +4,7 @@ import asyncio
 import copy
 import csv
 import logging
+import random
 import threading
 import time
 from dataclasses import asdict
@@ -14,6 +15,7 @@ from ..core.settings import ScraperSettings, get_scraper_settings
 from ..fileio.pdf_links import PdfIndex, pdf_problem, resolve_pdf_path
 from .files import discard_incoming, inspect_pdf, owned_incoming, publish_file, unique_target
 from .models import ACTIVE_ITEMS, DownloadProblem, DownloadStopped, restore_paper
+from .models import TERMINAL_ITEMS
 from .store import DownloadStore
 
 
@@ -70,7 +72,7 @@ class DownloadService:
 
     @property
     def busy(self):
-        return self.snapshot().get("busy", False)
+        return self.alive and self.snapshot().get("busy", False)
 
     def snapshot(self):
         with self._snapshot_lock:
@@ -102,6 +104,9 @@ class DownloadService:
             self.events.emit("download_service_error", error=str(error))
         finally:
             self._closed = True
+            with self._snapshot_lock:
+                self._snapshot["busy"] = False
+                self._snapshot["closing"] = True
             self._ready.set()
             self.events.emit("download_service_closed")
 
@@ -118,6 +123,8 @@ class DownloadService:
         self._control = None
         self._progress = {}
         self._reconciling = True
+        self._command_lock = asyncio.Lock()
+        self._backoff = 1.0
         self._last_publish = 0.0
         self._wake = asyncio.Event()
         try:
@@ -128,7 +135,7 @@ class DownloadService:
             self._reconciling = False
             self._publish()
             while not self._shutdown:
-                if not self._paused and not self._external_busy:
+                if not self._paused and not self._external_busy and not self._reconciling:
                     batch = next((b for b in self.store.snapshot()["batches"] if b["state"] == "queued"), None)
                     if batch:
                         await self._execute_batch(batch)
@@ -159,7 +166,13 @@ class DownloadService:
         try:
             if self._reconciling and action not in {"shutdown", "external_busy", "history"}:
                 raise ValueError("正在核对上次下载，请稍后操作")
-            result = await self._apply_command(action, **kwargs)
+            if action in {"pause", "stop", "shutdown", "continue_user", "external_busy"}:
+                result = await self._apply_command(action, **kwargs)
+            else:
+                async with self._command_lock:
+                    result = await self._apply_command(action, **kwargs)
+            for batch in self.store.snapshot()["batches"]:
+                self._finish_resolved_batch(batch["id"])
             self._publish()
             self._wake.set()
             return result
@@ -192,8 +205,16 @@ class DownloadService:
         elif action == "resume":
             target = batch_id or self._active_batch
             if target:
+                if target == self._active_batch and self._control and (
+                    self._control.stopped or self.store.batch(target)["state"] in {"stopped", "blocked", "completed"}
+                ):
+                    raise ValueError("当前批次正在结束并关闭浏览器，请稍后继续")
                 if any(i["state"] in {"uncertain", "finalizing"} for i in self.store.items(target)):
-                    await self._reconcile_batch(target)
+                    self._reconciling = True
+                    try:
+                        await self._reconcile_batch(target)
+                    finally:
+                        self._reconciling = False
                 if any(i["state"] in {"uncertain", "finalizing"} for i in self.store.items(target)):
                     raise ValueError("此批次有待确认或待登记的文件，请先核对、关联文件或跳过")
                 self.store.set_batch(target, "running" if target == self._active_batch else "queued")
@@ -236,12 +257,26 @@ class DownloadService:
         elif action == "append":
             return self.store.append(batch_id, kw["papers"])
         elif action == "move":
+            if item_id == self._active_item or batch_id == self._active_batch:
+                raise ValueError("当前执行中的任务不能调整顺序")
             self.store.move(item_id or batch_id, kw["offset"], item=bool(item_id))
         elif action == "remove":
+            if item_id == self._active_item:
+                raise ValueError("当前论文已经开始，请使用跳过")
             self.store.remove_item(item_id)
+        elif action == "remove_batch":
+            if batch_id == self._active_batch:
+                raise ValueError("请先停止批次再移出待执行项")
+            for item in self.store.items(batch_id):
+                if item["state"] == "queued":
+                    self.store.remove_item(item["id"])
         elif action == "clear":
+            if batch_id == self._active_batch:
+                raise ValueError("请等待本批浏览器关闭后再清理记录")
             self.store.clear_batch(batch_id)
         elif action == "destination":
+            if batch_id == self._active_batch:
+                raise ValueError("请先停止批次，再更换未完成项的目录")
             self.store.set_destination(batch_id, kw["destination"])
         elif action == "history":
             return self.store.history(item_id)
@@ -304,6 +339,8 @@ class DownloadService:
             self.store.save_session(payload["session_id"], payload["entry"], payload["profile"], payload["browser"])
         elif kind == "progress":
             self._progress.update(payload)
+        elif kind == "throttle":
+            self._backoff = min(8.0, self._backoff * 2)
         elif kind == "phase":
             self._progress.update(stage=payload["state"], message=payload.get("message", ""))
             if self._attempt_id:
@@ -320,7 +357,6 @@ class DownloadService:
         self._publish()
         try:
             while not self._shutdown:
-                await self._control.check()
                 item = next((i for i in self.store.items(batch["id"]) if i["state"] == "queued"), None)
                 if item is None:
                     if any(i["state"] in {"uncertain", "finalizing", "waiting"} for i in self.store.items(batch["id"])):
@@ -329,6 +365,7 @@ class DownloadService:
                     else:
                         self.store.set_batch(batch["id"], "completed")
                     break
+                await self._control.check()
                 self._active_item = item["id"]
                 self._attempt_id = ""
                 self._control.skip = False
@@ -338,8 +375,10 @@ class DownloadService:
                 self._publish()
                 if self._paused and not self._control.paused:
                     break
-                if self._browser:
-                    await self._control.wait(2.0)
+                if self._browser and any(i["state"] == "queued" for i in self.store.items(batch["id"])):
+                    base = max(1, batch["settings"].get("download_interval_sec", 3))
+                    interval = min(60, random.uniform(base, base * 2) * self._backoff)
+                    await self._control.wait(interval)
         except DownloadStopped:
             self.store.set_batch(batch["id"], "stopped", "已停止，未完成项可继续")
         except Exception as error:
@@ -380,7 +419,7 @@ class DownloadService:
             self.store.update_attempt(self._attempt_id, incoming=str(incoming))
             if self._browser is None:
                 if self.browser_factory is None:
-                    from .browser import ManagedDownloadBrowser
+                    from ..cnki.downloads import ManagedDownloadBrowser
                     factory = ManagedDownloadBrowser
                 else:
                     factory = self.browser_factory
@@ -410,22 +449,26 @@ class DownloadService:
         if attempt and attempt["metadata"].get("target"):
             state = "finalizing"
             self._paused = True
-        elif attempt and attempt["requested"] and code not in {"cancelled", "access_denied", "no_pdf"}:
+        elif attempt and attempt["requested"] and code not in {"cancelled", "access_denied", "no_pdf", "invalid_pdf"}:
             state = "uncertain"
             self._paused = True
         elif isinstance(error, DownloadStopped) or code == "cancelled":
             state = "skipped" if self._control.skip else "queued"
         else:
-            state = "failed"
-            if code in {"local_error", "browser_closed", "verification_timeout", "session_error", "rate_limited"}:
+            blocked = code in {"local_error", "browser_closed", "verification_timeout", "session_error", "rate_limited"}
+            state = "queued" if blocked else "failed"
+            if blocked:
                 self._paused = True
         if attempt:
-            self.store.update_attempt(attempt["id"], state=state, error=str(error))
+            self.store.update_attempt(attempt["id"], state="failed" if state == "queued" else state, error=str(error))
         self.store.set_item(item["id"], state, str(error), code)
         self._publish()
 
     async def _finalize(self, item_id, attempt_id, source: Path, destination: Path):
-        artifact = await asyncio.to_thread(inspect_pdf, source)
+        try:
+            artifact = await asyncio.to_thread(inspect_pdf, source)
+        except ValueError as error:
+            raise DownloadProblem(str(error), "invalid_pdf") from error
         item = self.store.item(item_id)
         paper = restore_paper(item["paper"])
         target = unique_target(destination, paper.title)
@@ -443,7 +486,11 @@ class DownloadService:
         paper.pdf_path = str(target)
         PdfIndex(destination).record(paper, outcome="downloaded", source="download")
         self.store.complete(item_id, artifact, attempt_id)
-        discard_incoming(destination, attempt_id)
+        self._backoff = max(1.0, self._backoff * 0.9)
+        try:
+            discard_incoming(destination, attempt_id, [source.name])
+        except OSError:
+            _logger.warning("已保存 PDF，临时文件稍后清理", exc_info=True)
         self.events.emit("download_task_result", paper=asdict(paper), source="download")
 
     async def _reconcile_all(self):
@@ -454,47 +501,100 @@ class DownloadService:
     async def _reconcile_batch(self, batch_id):
         batch = self.store.batch(batch_id)
         for item in self.store.items(batch_id):
+            if self._shutdown or item["state"] in {"removed", "skipped"}:
+                continue
             attempt = self.store.attempt(item["active_attempt"]) if item["active_attempt"] else None
             metadata = attempt["metadata"] if attempt else {}
+            previous = self.store.artifact(item["id"])
             target = item["path"] or metadata.get("target", "")
-            expected = metadata.get("artifact", {}).get("sha256", "")
+            expected = metadata.get("artifact", {}).get("sha256") or previous.get("sha256", "")
+            target_issue = ""
             if target and Path(target).is_file():
                 try:
                     artifact = await asyncio.to_thread(inspect_pdf, Path(target))
                     if expected and artifact["sha256"] != expected:
-                        self.store.set_item(item["id"], "uncertain", "文件内容与保存记录不一致，请核对", "file_changed")
+                        target_issue = "文件内容与保存记录不一致，请核对"
+                    else:
+                        paper = restore_paper(item["paper"])
+                        paper.pdf_path = target
+                        PdfIndex(batch["destination"]).record(paper, outcome="linked", source=metadata.get("source", "download"))
+                        if item["state"] != "completed":
+                            self.store.complete(item["id"], artifact, item["active_attempt"])
+                            self.events.emit("download_task_result", paper=asdict(paper), source=metadata.get("source", "download"))
+                        if attempt:
+                            try:
+                                discard_incoming(batch["destination"], attempt["id"],
+                                                 [metadata.get("guid", ""), Path(metadata.get("source", "")).name])
+                            except OSError:
+                                pass
                         continue
-                    paper = restore_paper(item["paper"])
-                    paper.pdf_path = target
-                    PdfIndex(batch["destination"]).record(paper, outcome="linked", source=metadata.get("source", "download"))
-                    if item["state"] != "completed":
-                        self.store.complete(item["id"], artifact, item["active_attempt"])
-                        self.events.emit("download_task_result", paper=asdict(paper), source=metadata.get("source", "download"))
-                    continue
-                except (OSError, ValueError) as error:
+                except ValueError as error:
+                    target_issue = str(error)
+                except OSError as error:
                     self.store.set_item(item["id"], "finalizing", str(error), "registration_failed")
                     continue
-            if item["state"] == "completed":
-                self.store.set_item(item["id"], "failed", "原 PDF 文件缺失，请关联文件或重新下载", "file_missing")
+            if attempt and await self._recover_received_file(batch, item, attempt, expected):
                 continue
-            if attempt:
-                incoming = owned_incoming(batch["destination"], attempt["id"])
-                sources = [Path(metadata["source"])] if metadata.get("source") else []
-                if incoming.is_dir():
-                    sources.extend(p for p in incoming.iterdir() if p.is_file() and p.suffix not in {".crdownload", ".part", ".tmp"})
-                for source in dict.fromkeys(sources):
-                    if not source.is_file() or source.parent.resolve() != incoming.resolve():
-                        continue
-                    try:
-                        artifact = await asyncio.to_thread(inspect_pdf, source)
-                        if expected and artifact["sha256"] != expected:
-                            continue
-                        # Native GUID files are renamed by Chromium after completion.
-                        complete = metadata.get("transport_completed") or source.name == metadata.get("guid") or bool(expected)
-                        if not complete:
-                            continue
-                        await self._finalize(item["id"], attempt["id"], source, Path(batch["destination"]))
-                        break
-                    except (OSError, ValueError) as error:
-                        self.store.set_item(item["id"], "finalizing", str(error), "registration_failed")
-                        break
+            if not target_issue and await self._adopt_indexed_file(batch, item, attempt):
+                continue
+            if target_issue:
+                self.store.set_item(item["id"], "uncertain", target_issue, "file_changed")
+            elif item["state"] == "completed":
+                self.store.set_item(item["id"], "failed", "原 PDF 文件缺失，请关联文件或重新下载", "file_missing")
+        self._finish_resolved_batch(batch_id)
+
+    def _finish_resolved_batch(self, batch_id):
+        if batch_id == self._active_batch or self.store.batch(batch_id)["state"] == "completed":
+            return
+        if all(item["state"] in TERMINAL_ITEMS for item in self.store.items(batch_id)):
+            self.store.set_batch(batch_id, "completed")
+
+    async def _recover_received_file(self, batch, item, attempt, expected):
+        metadata = attempt["metadata"]
+        incoming = owned_incoming(batch["destination"], attempt["id"])
+        sources = [Path(metadata["source"])] if metadata.get("source") else []
+        guid = metadata.get("guid", "")
+        if guid and Path(guid).name == guid:
+            sources.append(incoming / guid)
+        elif metadata.get("transport_completed"):
+            sources.append(incoming / "received.pdf")
+        for source in dict.fromkeys(sources):
+            if not source.is_file() or source.parent.resolve() != incoming.resolve():
+                continue
+            try:
+                artifact = await asyncio.to_thread(inspect_pdf, source)
+                if expected and artifact["sha256"] != expected:
+                    continue
+                # Chromium renames a native GUID file after completing the transfer.
+                complete = metadata.get("transport_completed") or source.name == metadata.get("guid") or bool(expected)
+                if not complete:
+                    continue
+                await self._finalize(item["id"], attempt["id"], source, Path(batch["destination"]))
+                return True
+            except (OSError, ValueError, DownloadProblem) as error:
+                self.store.set_item(item["id"], "finalizing", str(error), "registration_failed")
+                return True
+        return False
+
+    async def _adopt_indexed_file(self, batch, item, attempt):
+        if batch["force"] and item["state"] == "queued":
+            return False
+        paper = restore_paper(item["paper"])
+        try:
+            index = PdfIndex(batch["destination"])
+            entry = index.find(paper)
+            if not entry or entry["outcome"] == "unlinked":
+                return False
+            if batch["force"] and attempt and entry["updated_ns"] < attempt["created"] * 1_000_000_000:
+                return False
+            path = resolve_pdf_path(entry["path"], Path(batch["destination"]))
+            if pdf_problem(path):
+                return False
+            artifact = await asyncio.to_thread(inspect_pdf, Path(path))
+            paper.pdf_path = path
+            linked_attempt = self.store.begin_attempt(item["id"])
+            self.store.complete(item["id"], artifact, linked_attempt, source="existing")
+            self.events.emit("download_task_result", paper=asdict(paper), source=entry["source"] or "manual")
+            return True
+        except (OSError, ValueError):
+            return False

@@ -72,6 +72,7 @@ class DownloadTasksWindow:
         for label, command in (
             ("批次上移", lambda: self._batch_command("move", offset=-1)),
             ("批次下移", lambda: self._batch_command("move", offset=1)),
+            ("移出本批待执行项", lambda: self._batch_command("remove_batch")),
             ("核对文件与记录", lambda: self._batch_command("recheck")),
             ("修改未完成项保存目录", self._destination),
             ("重试失败项", lambda: self._batch_command("retry")),
@@ -240,6 +241,11 @@ class DownloadTasksWindow:
     def _render_items(self):
         batch = self._batch()
         if batch is None:
+            self._items = {}
+            for item_id in self.items.get_children():
+                self.items.delete(item_id)
+            self.batch_note.set("")
+            self._set_details("选择批次查看论文。关闭此窗口不会停止下载。")
             return
         counts = batch["counts"]
         waiting = counts["waiting"] + counts["uncertain"] + counts["finalizing"]
@@ -382,7 +388,8 @@ class DownloadTasksWindow:
                 lines.append(f"尝试 {index}　{stamp}　{ITEM_LABELS.get(attempt['state'], attempt['state'])}\n{attempt['error']}")
             for event in history["events"]:
                 stamp = datetime.fromtimestamp(event["created"]).strftime("%H:%M:%S")
-                lines.append(f"{stamp}　{ITEM_LABELS.get(event['kind'], event['kind'])}　{event['message']}")
+                label = {"attempt_started": "开始尝试", "late_event": "上次尝试的补充结果"}.get(event["kind"], ITEM_LABELS.get(event["kind"], "状态记录"))
+                lines.append(f"{stamp}　{label}　{event['message']}")
             view.text.insert("1.0", "\n\n".join(lines) or "暂无尝试记录")
             view.text.configure(state=tk.DISABLED)
         self._send("history", item_id=selected[0], callback=show)

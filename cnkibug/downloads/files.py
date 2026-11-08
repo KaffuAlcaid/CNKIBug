@@ -61,11 +61,14 @@ def owned_incoming(directory: str | Path, attempt_id: str) -> Path:
     return Path(directory).resolve() / ".cnkibug-incoming" / attempt_id
 
 
-def discard_incoming(directory: str | Path, attempt_id: str) -> None:
+def discard_incoming(directory: str | Path, attempt_id: str, names=()) -> None:
     folder = owned_incoming(directory, attempt_id)
     if not folder.exists() or folder.is_symlink():
         return
-    for child in folder.iterdir():
+    for name in set(names):
+        if not name or Path(name).name != name:
+            continue
+        child = folder / name
         if child.is_file() and not child.is_symlink():
             child.unlink()
     try:

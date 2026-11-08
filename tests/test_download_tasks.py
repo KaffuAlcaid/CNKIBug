@@ -245,3 +245,65 @@ def test_restart_recovers_completed_native_file_without_new_click(tmp_path):
     finally:
         instance.close()
         assert instance.wait_closed()
+
+
+def test_registration_failure_is_repaired_without_repeating_download(service, tmp_path, monkeypatch):
+    from cnkibug.fileio.pdf_links import PdfIndex
+
+    original = PdfIndex.record
+    failed = False
+
+    def interrupted(self, *args, **kwargs):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("simulated index write failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(PdfIndex, "record", interrupted)
+    batch_id = submit(service, tmp_path, [paper()])
+    wait_until(lambda: failed and not service.busy)
+    assert service.snapshot()["batches"][0]["items"][0]["state"] == "finalizing"
+    assert len(list((tmp_path / "pdf").glob("*.pdf"))) == 1
+    service.request("recheck", batch_id=batch_id).result(3)
+    assert service.snapshot()["batches"][0]["state"] == "completed"
+    assert FakeBrowser.calls == [paper().doi]
+    assert len(list((tmp_path / "pdf").glob("*.pdf"))) == 1
+
+
+def test_active_batch_destination_cannot_change_while_paused(service, tmp_path):
+    FakeBrowser.gate = threading.Event()
+    batch_id = submit(service, tmp_path, [paper()])
+    wait_until(lambda: len(FakeBrowser.calls) == 1)
+    service.request("pause").result(3)
+    with pytest.raises(ValueError, match="先停止"):
+        service.request("destination", batch_id=batch_id, destination=str(tmp_path / "elsewhere")).result(3)
+    FakeBrowser.gate.set()
+
+
+def test_invalid_pdf_is_a_failed_download_not_an_uncertain_attempt(service, tmp_path, monkeypatch):
+    async def invalid(self, paper, incoming, before_click):
+        before_click()
+        path = incoming / "received.pdf"
+        path.write_text("<html>login</html>", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(FakeBrowser, "download", invalid)
+    submit(service, tmp_path, [paper()])
+    wait_until(lambda: service.snapshot()["batches"][0]["state"] == "completed")
+    item = service.snapshot()["batches"][0]["items"][0]
+    assert item["state"] == "failed" and item["error_code"] == "invalid_pdf"
+
+
+def test_cleanup_keeps_unclaimed_files_in_attempt_directory(tmp_path):
+    from cnkibug.downloads.files import discard_incoming, owned_incoming
+
+    attempt = "a" * 32
+    incoming = owned_incoming(tmp_path, attempt)
+    incoming.mkdir(parents=True)
+    (incoming / "ours").write_bytes(b"done")
+    other = incoming / "unclaimed"
+    other.write_bytes(b"keep")
+    discard_incoming(tmp_path, attempt, ["ours"])
+    assert not (incoming / "ours").exists()
+    assert other.read_bytes() == b"keep"

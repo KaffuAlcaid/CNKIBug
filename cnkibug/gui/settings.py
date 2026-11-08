@@ -26,6 +26,7 @@ _NUMERIC_FIELDS = (
     ("max_advance_fail", "连续翻页失败上限（次）", 1),
     ("session_cache_ttl_hours", "会话有效期（小时）", 1),
     ("download_auth_wait_sec", "下载前首页等待（秒）", 1),
+    ("download_interval_sec", "论文下载基础间隔（秒）", 1),
 )
 
 
@@ -132,7 +133,7 @@ class SettingsDialog:
 
         self._numbers: dict[str, tk.StringVar] = {}
         for row, (key, label, divisor) in enumerate(_NUMERIC_FIELDS):
-            session_rows = {"session_cache_ttl_hours": 1, "download_auth_wait_sec": 2}
+            session_rows = {"session_cache_ttl_hours": 1, "download_auth_wait_sec": 2, "download_interval_sec": 3}
             tab = tabs["会话"] if key in session_rows else tabs["抓取"]
             row = session_rows.get(key, row)
             variable = tk.StringVar(master=self.window)

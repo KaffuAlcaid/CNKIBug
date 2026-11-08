@@ -168,6 +168,12 @@ class DownloadStore:
         if batch["state"] == "completed":
             raise ValueError("已结束批次不能追加，请提交新批次")
         existing = [restore_paper(item["paper"]) for item in self.items(batch_id) if item["state"] != "removed"]
+        existing.extend(restore_paper(row[0]) for row in self.db.execute(
+            "SELECT i.paper FROM items i JOIN batches b ON b.id=i.batch_id "
+            "WHERE b.destination_key=? AND b.id!=? AND b.state!='completed' "
+            "AND i.state NOT IN ('completed','failed','skipped','removed')",
+            (batch["destination_key"], batch_id),
+        ))
         accepted = [p for p in deduplicate_papers(papers) if not any(same_paper(p, old) for old in existing)]
         with self.transaction():
             position = self.db.execute("SELECT COALESCE(MAX(position),0)+1 FROM items WHERE batch_id=?", (batch_id,)).fetchone()[0]
@@ -284,18 +290,27 @@ class DownloadStore:
             "events": [dict(row) for row in self.db.execute("SELECT * FROM events WHERE item_id=? ORDER BY id", (item_id,))],
         }
 
+    def artifact(self, item_id) -> dict:
+        row = self.db.execute("SELECT * FROM artifacts WHERE item_id=? ORDER BY created DESC LIMIT 1", (item_id,)).fetchone()
+        return dict(row) if row else {}
+
     def recover_states(self):
         with self.transaction():
+            interrupted = set()
             for row in self.db.execute("SELECT id FROM items").fetchall():
                 item = self.item(row[0])
                 if item["state"] not in ACTIVE_ITEMS:
                     continue
+                interrupted.add(item["batch_id"])
                 attempt = self.attempt(item["active_attempt"]) if item["active_attempt"] else None
                 state = "uncertain" if attempt and attempt["requested"] else "queued"
                 self.db.execute("UPDATE items SET state=?,error=?,error_code='interrupted',updated=? WHERE id=?",
                                 (state, "上次执行已中断，等待核对" if state == "uncertain" else "", time.time(), item["id"]))
-            self.db.execute("UPDATE batches SET state='paused',message='上次任务已保存，请核对后继续',updated=? WHERE state!='completed'",
+            self.db.execute("UPDATE batches SET state='paused',message='上次任务已保存，请核对后继续',updated=? WHERE state='running'",
                             (time.time(),))
+            for batch_id in interrupted:
+                self.db.execute("UPDATE batches SET state='paused',message='上次任务已保存，请核对后继续',updated=? WHERE id=? AND state='queued'",
+                                (time.time(), batch_id))
 
     def move(self, record_id, offset, *, item=False):
         table = "items" if item else "batches"
@@ -322,6 +337,7 @@ class DownloadStore:
         if self.batch(batch_id)["state"] != "completed":
             raise ValueError("只能清理已结束批次；PDF 文件会保留")
         with self.transaction():
+            self.db.execute("DELETE FROM artifacts WHERE item_id IN (SELECT id FROM items WHERE batch_id=?)", (batch_id,))
             self.db.execute("DELETE FROM batches WHERE id=?", (batch_id,))
 
     def set_destination(self, batch_id, destination):
