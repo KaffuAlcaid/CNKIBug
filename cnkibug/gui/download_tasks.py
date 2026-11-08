@@ -52,7 +52,7 @@ class DownloadVerificationPrompt:
             ttk.Label(body, text=title, wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 12))
         ttk.Label(body, text=progress.get("message", "请在浏览器中完成人工验证"),
                   wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W)
-        ttk.Label(body, text="完成后可点击下方按钮继续；关闭此提示不会停止等待，也可在“下载任务”中继续",
+        ttk.Label(body, text="验证完成后，请点击下方绿色“处理完成”按钮，下载才会继续\n若已关闭此提示，请在“下载任务”窗口点击绿色“处理完成”按钮",
                   wraplength=wrap, justify=tk.LEFT, bootstyle="secondary").pack(anchor=tk.W, pady=(8, 16))
         actions = ttk.Frame(body)
         actions.pack(fill=tk.X)

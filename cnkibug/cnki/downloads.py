@@ -115,7 +115,7 @@ class ManagedDownloadBrowser:
         self.control.continued.clear()
         if self.webvpn_url:
             _check_webvpn_path(urlsplit(self.home.url).path)
-            self.report("phase", state="waiting", message="请完成机构 WebVPN 登录，点击“处理完成”继续")
+            self.report("phase", state="waiting", message="请在浏览器中完成机构 WebVPN 登录，再回到本程序点击绿色“处理完成”按钮继续")
             while not self.control.continued.is_set():
                 await self.control.check()
                 if self.home.is_closed():
@@ -127,7 +127,7 @@ class ManagedDownloadBrowser:
         else:
             remaining = self.settings.download_auth_wait_sec
             while remaining > 0 and not self.control.continued.is_set():
-                self.report("phase", state="preparing", message=f"知网首页准备：{ceil(remaining)} 秒，可点击“处理完成”提前继续")
+                self.report("phase", state="preparing", message=f"知网首页准备：{ceil(remaining)} 秒，可点击绿色“处理完成”按钮提前继续")
                 await self.control.wait(min(1.0, remaining))
                 remaining -= 1
         self.control.continued.clear()
@@ -182,7 +182,7 @@ class ManagedDownloadBrowser:
             return False
         self.control.continued.clear()
         self.report("throttle")
-        self.report("phase", state="waiting", message="请在浏览器中处理登录或安全验证，完成后点击“处理完成”")
+        self.report("phase", state="waiting", message="请在浏览器中完成登录或安全验证，再回到本程序点击绿色“处理完成”按钮继续")
         await page.bring_to_front()
         remaining = self.settings.verify_wait_timeout_sec
         confirmed = False
