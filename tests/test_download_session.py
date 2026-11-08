@@ -88,3 +88,67 @@ def test_encrypted_webvpn_is_rejected_before_starting_worker(tmp_path):
         session.submit([], tmp_path, get_scraper_settings(DEFAULT_CONFIG), "https://webvpn.example/https/" + "a" * 64 + "/")
     assert session._thread is None
     assert not (paths.cache_dir / "download_cookies").exists()
+
+
+@pytest.mark.parametrize("new_tab", [True, False])
+def test_native_download_tracks_owned_file_and_survives_context_close(tmp_path, new_tab):
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+    from playwright.async_api import async_playwright
+    from cnkibug.browser.environment import browser_candidates
+    from cnkibug.downloads.service import DownloadControl
+    from cnkibug.downloads.transport import DownloadTransport
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/paper":
+                content = b"%PDF-1.4\n" + b" " * 16000 + b"\n%%EOF\n"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Disposition", "attachment; filename=paper.pdf")
+                self.send_header("Content-Length", str(len(content)))
+            else:
+                target = 'target="_blank"' if new_tab else ""
+                content = f'<a id="pdf" href="/paper" {target}>PDF</a>'.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(content)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+
+    async def run():
+        incoming = tmp_path / "incoming"
+        incoming.mkdir()
+        evidence = []
+        async with async_playwright() as playwright:
+            candidate = browser_candidates(playwright)[0]
+            context = await playwright.chromium.launch_persistent_context(
+                str(tmp_path / "profile"), accept_downloads=True,
+                **{**browser_launch_options(candidate), "headless": True})
+            transfer = DownloadTransport(context, incoming, DownloadControl(), lambda kind, **data: evidence.append((kind, data)))
+            try:
+                await transfer.start()
+                page = context.pages[0]
+                await page.goto(f"http://127.0.0.1:{server.server_port}/")
+                await transfer.own(page)
+                await page.locator("#pdf").click()
+                path = await transfer.receive(15)
+                assert transfer.guid
+                assert path.read_bytes().startswith(b"%PDF-")
+                assert any(data.get("transport_completed") for _, data in evidence)
+            finally:
+                await transfer.close()
+                await context.close()
+            assert path.is_file()
+
+    try:
+        asyncio.run(run())
+    finally:
+        server.shutdown()
+        server.server_close()
