@@ -21,6 +21,76 @@ def _size(value):
         size /= 1024
 
 
+class DownloadVerificationPrompt:
+    def __init__(self, parent, service):
+        self.parent, self.service = parent, service
+        self.window = None
+        self._attention_id = ""
+        self._raise_timer = None
+
+    def update(self, snapshot):
+        progress = snapshot.get("progress", {})
+        attention_id = progress.get("attention_id", "")
+        if not snapshot.get("busy") or snapshot.get("closing") or progress.get("stage") != "waiting" or not attention_id:
+            self.close()
+            return
+        if attention_id == self._attention_id:
+            return
+        self.close()
+        self._attention_id = attention_id
+        title = next((item["paper"]["title"] for batch in snapshot.get("batches", []) for item in batch["items"]
+                      if item["id"] == snapshot.get("active_item")), "")
+        self.window = window = ttk.Toplevel(self.parent)
+        window.title("CNKIBug - 下载需要人工处理")
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self.close)
+        body = ttk.Frame(window, padding=20)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text="请处理登录或安全验证", style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 12))
+        wrap = min(520, window.winfo_screenwidth() - 100)
+        if title:
+            ttk.Label(body, text=title, wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 12))
+        ttk.Label(body, text=progress.get("message", "请在浏览器中完成人工验证。"),
+                  wraplength=wrap, justify=tk.LEFT).pack(anchor=tk.W)
+        ttk.Label(body, text="完成后可点击下方按钮继续。关闭此提示不会停止等待，也可在“下载任务”中继续。",
+                  wraplength=wrap, justify=tk.LEFT, bootstyle="secondary").pack(anchor=tk.W, pady=(8, 16))
+        actions = ttk.Frame(body)
+        actions.pack(fill=tk.X)
+        self.continue_button = ttk.Button(actions, text="处理完成", bootstyle="success",
+                                          command=lambda: self._continue(attention_id))
+        self.continue_button.pack(side=tk.RIGHT)
+        ttk.Button(actions, text="稍后处理", command=self.close, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=(0, 8))
+        window.attributes("-topmost", True)
+        window.lift()
+        window.bell()
+        self._raise_timer = window.after(1500, self._release_topmost)
+
+    def _release_topmost(self):
+        self._raise_timer = None
+        if self.window is not None:
+            self.window.attributes("-topmost", False)
+
+    def _continue(self, attention_id):
+        if attention_id != self._attention_id:
+            return
+        snapshot = self.service.snapshot()
+        progress = snapshot.get("progress", {})
+        if snapshot.get("busy") and progress.get("stage") == "waiting" and progress.get("attention_id") == attention_id:
+            try:
+                self.service.request("continue_user", attention_id=attention_id)
+            except RuntimeError as error:
+                messagebox.showerror("下载任务", str(error), parent=self.window)
+        self.close()
+
+    def close(self):
+        if self.window is not None:
+            if self._raise_timer is not None:
+                self.window.after_cancel(self._raise_timer)
+                self._raise_timer = None
+            self.window.destroy()
+            self.window = None
+
+
 class DownloadTasksWindow:
     def __init__(self, parent, service, *, selected_papers=lambda: []):
         self.service = service

@@ -122,6 +122,7 @@ class CNKIBugApp:
         self._current_results: list[Paper] = []
         self._results_window = None
         self._download_tasks_window = None
+        self._download_verification_prompt = None
         self._download_recovery_shown = False
         self._download_service = None
         try:
@@ -712,6 +713,12 @@ class CNKIBugApp:
                 viewer.apply_download_result(event.payload["paper"], event.payload.get("source", "download"))
         if event.name == "download_tasks_changed" and service is not None:
             snapshot = service.snapshot()
+            if not self._close_when_done:
+                from .download_tasks import DownloadVerificationPrompt
+
+                if self._download_verification_prompt is None:
+                    self._download_verification_prompt = DownloadVerificationPrompt(self.root, service)
+                self._download_verification_prompt.update(snapshot)
             pending = sum(batch["state"] != "completed" for batch in snapshot["batches"])
             self._downloads_button.configure(text=f"下载任务 ({pending})" if pending else "下载任务")
             viewer = self._results_window
@@ -866,6 +873,9 @@ class CNKIBugApp:
                 self._close_when_done = False
                 return
             self._exit_confirmed = True
+        prompt = getattr(self, "_download_verification_prompt", None)
+        if prompt is not None:
+            prompt.close()
         service = getattr(self, "_download_service", None)
         if service is not None and service.alive:
             service.close()

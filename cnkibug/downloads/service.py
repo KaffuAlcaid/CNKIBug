@@ -14,7 +14,7 @@ from ..core.events import EventSink
 from ..core.settings import ScraperSettings, get_scraper_settings
 from ..fileio.pdf_links import PdfIndex, pdf_problem, resolve_pdf_path
 from .files import discard_incoming, inspect_pdf, owned_incoming, publish_file, unique_target
-from .models import ACTIVE_ITEMS, DownloadProblem, DownloadStopped, restore_paper
+from .models import ACTIVE_ITEMS, DownloadProblem, DownloadStopped, new_id, restore_paper
 from .models import TERMINAL_ITEMS
 from .store import DownloadStore
 
@@ -226,7 +226,9 @@ class DownloadService:
             if self._control:
                 self._control.paused = False
         elif action == "continue_user":
-            if self._control:
+            attention_id = kw.get("attention_id")
+            if self._control and (not attention_id or (
+                    self._progress.get("stage") == "waiting" and self._progress.get("attention_id") == attention_id)):
                 self._control.continued.set()
         elif action == "stop":
             self._paused = True
@@ -342,6 +344,11 @@ class DownloadService:
         elif kind == "throttle":
             self._backoff = min(8.0, self._backoff * 2)
         elif kind == "phase":
+            if payload["state"] == "waiting":
+                if self._progress.get("stage") != "waiting":
+                    self._progress["attention_id"] = new_id()
+            else:
+                self._progress.pop("attention_id", None)
             self._progress.update(stage=payload["state"], message=payload.get("message", ""))
             if self._attempt_id:
                 self.store.update_attempt(self._attempt_id, state=payload["state"])
