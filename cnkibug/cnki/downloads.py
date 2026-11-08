@@ -6,16 +6,19 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from math import ceil
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from ..browser.cache import DOWNLOAD_COOKIE_STATE_FILENAME, get_cookie_state_path, prepare_cookie_state, write_cookie_state
 from ..browser.environment import browser_candidates, browser_launch_options
-from ..cnki.search import CNKI_HOME_URL
+from .search import CNKI_HOME_URL, CNKI_SEARCH_URL
+from .selectors import SELECTOR_SEARCH_INPUT, SELECTOR_SEARCH_BUTTON, SELECTOR_RESULT_ROWS, SELECTOR_NO_CONTENT
+from .models import split_authors
 from ..downloads.models import DownloadProblem, DownloadStopped
 from ..downloads.transport import DownloadTransport
 
@@ -50,6 +53,7 @@ class ManagedDownloadBrowser:
         self.paths, self.batch, self.settings = paths, batch, settings
         self.control, self.report = control, report
         self.context = self.driver = self.home = None
+        self.search_page = None
         self._temporary_profile = None
         self._storage_path = None
         self.webvpn_url = batch["webvpn_url"]
@@ -201,23 +205,133 @@ class ManagedDownloadBrowser:
                 remaining -= 4
         raise DownloadProblem("等待登录或安全验证超时，请处理后继续此任务", "verification_timeout")
 
-    def _detail_url(self, paper):
-        original = urlsplit(paper.detail_url)
-        host = (original.hostname or "").lower()
-        portal = urlsplit(self.webvpn_url) if self.webvpn_url else None
-        allowed = host == "cnki.net" or host.endswith(".cnki.net")
-        if portal:
-            validate_webvpn_url(self.webvpn_url)
-            _, school = portal.hostname.split(".", 1)
-            detail_host = "kns-cnki-net-443." + school
-            if host in {portal.hostname, detail_host}:
-                return paper.detail_url
-            if allowed:
-                authority = detail_host + (f":{portal.port}" if portal.port else "")
-                return urlunsplit((portal.scheme, authority, original.path, original.query, original.fragment))
-        if allowed and original.scheme in {"https", "http"}:
-            return paper.detail_url
-        raise DownloadProblem("缺少有效的知网详情链接", "invalid_url")
+    def _search_entry_url(self):
+        if not self.webvpn_url:
+            return CNKI_SEARCH_URL
+        validate_webvpn_url(self.webvpn_url)
+        portal = urlsplit(self.webvpn_url)
+        _, school = portal.hostname.split(".", 1)
+        authority = "kns-cnki-net-443." + school + (f":{portal.port}" if portal.port else "")
+        return urlunsplit((portal.scheme, authority, urlsplit(CNKI_SEARCH_URL).path, "", ""))
+
+    @staticmethod
+    def _identity_text(value):
+        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value)).casefold()
+
+    def _matches_result(self, paper, result):
+        normalize = self._identity_text
+        if normalize(result["title"]) != normalize(paper.title):
+            return False
+        if paper.source and result["source"] and normalize(paper.source) != normalize(result["source"]):
+            return False
+        expected_year = re.search(r"\d{4}", paper.publication_date)
+        found_year = re.search(r"\d{4}", result["date"])
+        if expected_year and found_year and expected_year.group() != found_year.group():
+            return False
+        if paper.authors and result["authors"]:
+            authors = {normalize(author) for author in split_authors(paper.authors)}
+            if not authors.intersection(normalize(author) for author in result["authors"]):
+                return False
+        return True
+
+    async def _wait_search_ready(self, page, *, results=False):
+        remaining = self.settings.timeout_load_ms / 1000
+        stable = 0.0
+        previous = ""
+        while remaining > 0:
+            await self.control.check()
+            state = await self._state(page)
+            if state["challenge"] or state["login"] or state["rate"]:
+                await self._manual(page)
+                remaining = self.settings.timeout_load_ms / 1000
+                stable = 0
+                previous = ""
+                continue
+            if results:
+                links = page.locator(SELECTOR_RESULT_ROWS).locator("td.name a")
+                marker = await links.evaluate_all("links=>links.map(e=>(e.textContent||'').trim()+'|'+e.getAttribute('href')).join('\\n')")
+                ready = bool(marker)
+                if not ready and await page.locator(SELECTOR_NO_CONTENT).count():
+                    raise DownloadProblem("当前会话未检索到该论文，请核对题名", "lookup_not_found")
+            else:
+                field = page.locator(SELECTOR_SEARCH_INPUT)
+                button = page.locator(SELECTOR_SEARCH_BUTTON)
+                ready = await field.is_visible() and await button.is_visible()
+                if ready:
+                    ready = await field.is_enabled() and await button.is_enabled()
+                marker = "form" if ready else ""
+            if ready:
+                stable = stable + 0.25 if marker == previous else 0.25
+                previous = marker
+                if stable >= 0.75:
+                    return
+            else:
+                stable = 0
+                previous = ""
+            await self.control.wait(0.25)
+            remaining -= 0.25
+        raise DownloadProblem("检索页面未准备完成，请稍后重试", "lookup_not_ready", retryable=True)
+
+    async def _open_detail_from_search(self, paper, transport):
+        if not paper.title.strip():
+            raise DownloadProblem("缺少论文题名，无法在当前会话定位文献", "lookup_metadata_missing")
+        if self.search_page is None or self.search_page.is_closed():
+            self.search_page = await self.context.new_page()
+        search = self.search_page
+        await search.bring_to_front()
+        self.report("phase", state="preparing", message="正在当前会话检索论文题名")
+        # Start from the search form so a previous result table cannot be mistaken
+        # for the response to this title. Saved signed detail URLs are never replayed.
+        response = await self._await(search.goto(self._search_entry_url(), referer=self.home.url,
+                                                wait_until="domcontentloaded", timeout=self.settings.timeout_goto_ms))
+        if response and response.status == 429:
+            self.report("throttle")
+            raise DownloadProblem("知网限制当前检索频率，请稍后继续", "rate_limited")
+        await self._wait_search_ready(search)
+        await self._await(search.locator(SELECTOR_SEARCH_INPUT).fill(paper.title, timeout=self.settings.timeout_selector_ms))
+        await self.control.wait(0.5)
+        await self._await(search.locator(SELECTOR_SEARCH_BUTTON).click(timeout=self.settings.timeout_selector_ms))
+        await self._wait_search_ready(search, results=True)
+        rows = await search.locator(SELECTOR_RESULT_ROWS).evaluate_all("""rows => rows.map((row,index) => {
+            const link=row.querySelector('td.name a');
+            return {index,title:link?.textContent?.trim()||'',href:link?.getAttribute('href')||'',
+                source:row.querySelector('td.source')?.textContent?.trim()||'',
+                date:row.querySelector('td.date')?.textContent?.trim()||'',
+                authors:[...row.querySelectorAll('td.author a')].map(e=>e.textContent.trim()).filter(Boolean)};
+        })""")
+        matches = [row for row in rows if self._matches_result(paper, row)]
+        if len(matches) != 1:
+            reason = "未找到与题名和已知书目信息一致的论文" if not matches else "同名检索结果不唯一，无法确定要下载的论文"
+            raise DownloadProblem(reason + "；请核对文献信息", "lookup_not_found" if not matches else "lookup_ambiguous")
+        selected = matches[0]
+        address = urlsplit(urljoin(search.url, selected["href"]))
+        expected_host = urlsplit(self._search_entry_url()).hostname
+        allowed = address.hostname == expected_host or (not self.webvpn_url and (
+            address.hostname == "cnki.net" or (address.hostname or "").endswith(".cnki.net")))
+        if address.scheme not in {"http", "https"} or not allowed:
+            raise DownloadProblem("检索结果没有提供可确认的知网论文入口", "lookup_invalid_link")
+        await transport.own(search)
+        link = search.locator(SELECTOR_RESULT_ROWS).nth(selected["index"]).locator("td.name a").first
+        await self.control.check()
+        self.report("phase", state="preparing", message="正在点击当前检索结果进入论文详情")
+        if await link.get_attribute("target") == "_blank":
+            async with search.expect_popup(timeout=self.settings.timeout_selector_ms) as opened:
+                await self._await(link.click(timeout=self.settings.timeout_selector_ms))
+            page = await self._await(opened.value)
+        else:
+            await self._await(link.click(timeout=self.settings.timeout_selector_ms))
+            page = search
+        await transport.own(page)
+        await page.bring_to_front()
+        await self._await(page.wait_for_load_state("domcontentloaded", timeout=self.settings.timeout_goto_ms))
+        self.report("evidence", located_from_search=True)
+        return page
+
+    async def _confirm_detail_title(self, page, paper):
+        title = await page.locator(".brief h1,h1.title").first.inner_text(timeout=self.settings.timeout_selector_ms)
+        title = re.sub(r"(?:\s*(?:网络首发|附视频))+$", "", title).strip()
+        if self._identity_text(title) != self._identity_text(paper.title):
+            raise DownloadProblem("打开的详情页题名与目标论文不一致，未点击下载", "identity_mismatch")
 
     async def download(self, paper, incoming, before_click):
         transport = DownloadTransport(self.context, incoming, self.control, self.report)
@@ -228,30 +342,7 @@ class ManagedDownloadBrowser:
             await self.control.check()
             if not self.context.browser.is_connected():
                 raise DownloadProblem("下载浏览器已关闭", "browser_closed")
-            await self.home.bring_to_front()
-            async with self.home.expect_popup(timeout=self.settings.timeout_goto_ms) as opened:
-                await self.home.evaluate("() => window.open('about:blank','_blank')")
-            page = await opened.value
-            await transport.own(page)
-            await page.bring_to_front()
-            self.report("phase", state="preparing", message="正在加载论文详情")
-            for attempt in range(2):
-                try:
-                    response = await self._await(page.goto(self._detail_url(paper), referer=self.home.url,
-                                                          wait_until="domcontentloaded", timeout=self.settings.timeout_goto_ms))
-                    if response and response.status == 429:
-                        self.report("throttle")
-                        raise DownloadProblem("知网限制当前请求频率，请稍后继续", "rate_limited")
-                    if response and response.status >= 500:
-                        if not attempt:
-                            await self.control.wait(2)
-                            continue
-                        raise DownloadProblem("知网暂时无法提供页面，请稍后重试", "page_not_ready", retryable=True)
-                    break
-                except PlaywrightError:
-                    if attempt or transport.started:
-                        raise
-                    await self.control.wait(2)
+            page = await self._open_detail_from_search(paper, transport)
             remaining = self.settings.timeout_load_ms / 1000
             stable = 0.0
             while not transport.started:
@@ -277,6 +368,7 @@ class ManagedDownloadBrowser:
                 remaining -= 0.25
             if not transport.started:
                 await self.control.check()
+                await self._confirm_detail_title(page, paper)
                 before_click()
                 clicked = True
                 self.report("phase", state="requested", message="已点击下载，正在等待文件")
@@ -327,16 +419,13 @@ class ManagedDownloadBrowser:
             await transport.close()
             for owned in reversed(transport.pages):
                 try:
-                    if not owned.is_closed():
+                    if owned is not self.search_page and not owned.is_closed():
                         await owned.close()
                 except PlaywrightError:
                     pass
-            if not self.control.stopped and not self.home.is_closed():
+            if not self.control.stopped and self.search_page is not None and not self.search_page.is_closed():
                 try:
-                    await self.home.bring_to_front()
-                    search = self.home.locator("#txt_SearchText")
-                    if await search.count():
-                        await search.click(timeout=1500)
+                    await self.search_page.bring_to_front()
                 except PlaywrightError:
                     pass
 

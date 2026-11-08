@@ -200,16 +200,18 @@ def test_native_download_tracks_owned_file_and_survives_context_close(tmp_path, 
         server.server_close()
 
 
-@pytest.mark.parametrize("outcome", ["pdf", "html", "cancel"])
+@pytest.mark.parametrize("outcome", ["pdf", "html", "cancel", "missing", "ambiguous", "same_tab"])
 def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, outcome):
     import time
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
     from cnkibug.downloads.service import DownloadService
     from cnkibug.fileio.pdf_links import PdfIndex
+    requests = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            requests.append((self.path, self.headers.get("Referer", "")))
             if self.path == "/file":
                 body = b"<html>login required</html>" if outcome == "html" else b"%PDF-1.4\n" + b" " * 1_000_000 + b"\n%%EOF\n"
                 self.send_response(200)
@@ -227,6 +229,17 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
                     pass
                 return
             body = '<input id="txt_SearchText">'
+            if self.path == "/search":
+                body += '<form action="/results"><input class="search-input" name="q"><input type="submit" class="search-btn"></form>'
+                body += '<script>window.jQuery={active:1}</script>'
+            if self.path.startswith("/results"):
+                body += '<script>window.jQuery={active:1}</script>'
+                if outcome == "missing":
+                    body += '<div id="briefBox"><p class="no-content">没有结果</p></div>'
+                else:
+                    target = '' if outcome == 'same_tab' else 'target="_blank"'
+                    row = f'<tr><td class="name"><a href="/detail" {target}>Local managed paper</a></td></tr>'
+                    body += '<table class="result-table-list"><tbody>' + row * (2 if outcome == 'ambiguous' else 1) + '</tbody></table>'
             if self.path == "/detail":
                 body += '<div class="brief"><h1>Local managed paper</h1></div><a id="pdfDown" href="/file" target="_blank">PDF</a>'
             self.send_response(200)
@@ -241,11 +254,11 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
     Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     monkeypatch.setattr(downloads, "CNKI_HOME_URL", base)
+    monkeypatch.setattr(downloads, "CNKI_SEARCH_URL", base + "/search")
     monkeypatch.setattr(downloads, "browser_launch_options", lambda candidate: {**browser_launch_options(candidate), "headless": True})
-    monkeypatch.setattr(downloads.ManagedDownloadBrowser, "_detail_url", lambda self, paper: paper.detail_url)
     paths = init_runtime(program_dir=tmp_path, configure_logging=False).paths
     service = DownloadService(paths)
-    paper = Paper(title="Local managed paper", doi="10.1234/native-managed", detail_url=base + "/detail")
+    paper = Paper(title="Local managed paper", doi="10.1234/native-managed", detail_url=base + "/old-signed-detail?v=expired")
     try:
         service.submit([paper], tmp_path / "pdf", get_scraper_settings({**DEFAULT_CONFIG, "download_auth_wait_sec": 0})).result(3)
         deadline = time.monotonic() + 35
@@ -263,9 +276,18 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
         item = snapshot["batches"][0]["items"][0]
         history = service.request("history", item_id=item["id"]).result(3)
         attempt = history["attempts"][0]
+        assert not any(path.startswith("/old-signed-detail") for path, _ in requests)
+        if outcome in {"missing", "ambiguous"}:
+            assert not attempt["requested"]
+            assert item["state"] == "failed"
+            assert item["error_code"] == ("lookup_not_found" if outcome == "missing" else "lookup_ambiguous")
+            assert not any(path in {"/detail", "/file"} for path, _ in requests)
+            return
+        assert any(path == "/detail" and referer.startswith(base + "/results") for path, referer in requests)
+        assert attempt["metadata"]["located_from_search"]
         assert attempt["requested"]
         assert attempt["metadata"]["guid"]
-        if outcome == "pdf":
+        if outcome in {"pdf", "same_tab"}:
             assert item["state"] == "completed"
             assert Path(item["path"]).read_bytes().startswith(b"%PDF-")
             assert PdfIndex(tmp_path / "pdf").find(paper)["outcome"] == "downloaded"
@@ -282,3 +304,20 @@ def test_managed_browser_to_persisted_task_and_pdf_index(monkeypatch, tmp_path, 
         assert service.wait_closed()
         server.shutdown()
         server.server_close()
+
+
+def test_download_search_matching_checks_known_bibliographic_fields():
+    browser = object.__new__(downloads.ManagedDownloadBrowser)
+    paper = Paper(title="316L 工艺研究", authors="张三;李四", source="精密成形工程", publication_date="2024-10-10")
+    result = {"title": "３１６Ｌ工艺研究", "authors": ["张三", "李四"], "source": "精密成形工程", "date": "2024-10-10"}
+    assert browser._matches_result(paper, result)
+    assert not browser._matches_result(paper, {**result, "authors": ["王五"]})
+    assert not browser._matches_result(paper, {**result, "source": "其他期刊"})
+    assert not browser._matches_result(paper, {**result, "date": "2023-10-10"})
+
+
+def test_download_search_entry_preserves_webvpn_authority(monkeypatch):
+    browser = object.__new__(downloads.ManagedDownloadBrowser)
+    browser.webvpn_url = "https://www-cnki-net-443.webvpn.school.example:8443/kns8s/search"
+    monkeypatch.setattr(downloads, "CNKI_SEARCH_URL", "https://kns.cnki.net/kns8s/")
+    assert browser._search_entry_url() == "https://kns-cnki-net-443.webvpn.school.example:8443/kns8s/"
