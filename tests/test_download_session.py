@@ -12,6 +12,36 @@ from cnkibug.core.events import EventSink
 from cnkibug.core.settings import get_scraper_settings
 
 
+def test_verification_visibility_ignores_offscreen_container_and_preserves_download_below_fold():
+    import asyncio
+    from playwright.async_api import async_playwright
+    from cnkibug.browser.environment import browser_candidates
+
+    async def run():
+        async with async_playwright() as playwright:
+            candidate = browser_candidates(playwright)[0]
+            browser = await playwright.chromium.launch(**{**browser_launch_options(candidate), "headless": True})
+            try:
+                page = await browser.new_page()
+                await page.set_content('''
+                    <title>中国知网</title>
+                    <div id="tCaptchaDyMainWrap" style="position:fixed;top:-1000000px;width:218px;height:280px"></div>
+                    <input type="password" style="display:none">
+                    <div style="margin-top:2000px"><a id="pdfDown" href="#">PDF下载</a></div>
+                ''')
+                state = await downloads.ManagedDownloadBrowser._state(None, page)
+                assert not state["challenge"] and not state["login"]
+                assert state["button"]
+                await page.locator("#tCaptchaDyMainWrap").evaluate("e=>e.style.top='20px'")
+                assert (await downloads.ManagedDownloadBrowser._state(None, page))["challenge"]
+                await page.locator("#tCaptchaDyMainWrap").evaluate("e=>e.style.opacity='0'")
+                assert not (await downloads.ManagedDownloadBrowser._state(None, page))["challenge"]
+            finally:
+                await browser.close()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("outcome", ["success", "failure", "cancel", "webvpn_redirect"])
 def test_batch_saves_isolated_cookies_and_closes_browser(monkeypatch, tmp_path, outcome):
     import time

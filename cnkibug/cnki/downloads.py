@@ -146,15 +146,26 @@ class ManagedDownloadBrowser:
         if page.is_closed():
             raise DownloadProblem("下载页面已关闭", "browser_closed")
         return await page.evaluate("""() => {
-            const visible = e => !!(e && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
+            const rendered = (e, inViewport=false) => {
+                if (!e) return false;
+                const r=e.getBoundingClientRect();
+                if (r.width<=0 || r.height<=0) return false;
+                for (let node=e; node; node=node.parentElement) {
+                    const style=getComputedStyle(node);
+                    if (style.display==='none' || style.visibility==='hidden' ||
+                        style.visibility==='collapse' || Number(style.opacity)===0) return false;
+                }
+                return !inViewport || (r.bottom>0 && r.right>0 && r.top<innerHeight && r.left<innerWidth);
+            };
+            const visible = e => rendered(e, true);
             const text = document.body?.innerText || '';
             const challenge = /安全验证|拼图验证|拼图校验/.test(document.title) ||
                 /\\/verify|\\/checkcode/i.test(location.pathname) ||
                 [...document.querySelectorAll('iframe[src*=captcha],iframe[src*=verify],#tCaptchaDyMainWrap,.nc-container,.captcha-dialog')].some(visible);
-            const login = visible(document.querySelector('input[type=password]')) ||
+            const login = [...document.querySelectorAll('input[type=password]')].some(visible) ||
                 [...document.querySelectorAll('iframe[src*=login],iframe[src*=passport],iframe[src*=sso]')].some(visible);
-            const button = [...document.querySelectorAll('#pdfDown,.btn-dlpdf a')].find(visible);
-            const detail = visible(document.querySelector('.brief h1,h1.title,#ChDivSummary'));
+            const button = [...document.querySelectorAll('#pdfDown,.btn-dlpdf a')].find(e=>rendered(e));
+            const detail = rendered(document.querySelector('.brief h1,h1.title,#ChDivSummary'));
             return {challenge, login, button:!!button, detail,
                 complete:document.readyState==='complete', pending:!!window.jQuery?.active,
                 denied:/机构未订购|无权访问|没有.{0,8}权限/.test(text),
