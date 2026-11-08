@@ -170,8 +170,7 @@ def _results_view():
     viewer._worker = None
     viewer._queue = Queue()
     viewer.cancel = Event()
-    viewer._download_session = Mock(alive=False)
-    viewer._download_session.close.side_effect = viewer.cancel.set
+    viewer.download_service = Mock(busy=True)
     viewer._papers = [Paper(title="Paper", pdf_path="saved.pdf")]
     viewer._checked = {0}
     viewer._statuses = {}
@@ -244,7 +243,7 @@ def test_results_close_and_reopen_preserves_selection_and_pdf_associations():
     viewer.close()
     viewer.window.withdraw.assert_called_once_with()
     viewer.window.destroy.assert_not_called()
-    viewer._download_session.close.assert_not_called()
+    viewer.download_service.close.assert_not_called()
 
     app = CNKIBugApp.__new__(CNKIBugApp)
     app._results_window = viewer
@@ -258,11 +257,48 @@ def test_results_close_and_reopen_preserves_selection_and_pdf_associations():
     viewer.window.deiconify.assert_called_once_with()
 
 
+def test_results_window_close_does_not_stop_application_downloads():
+    viewer = _results_view()
+    viewer.download_service.busy = True
+    viewer.close()
+    viewer.window.withdraw.assert_called_once_with()
+    viewer.download_service.close.assert_not_called()
+    viewer.download_service.request.assert_not_called()
+
+
+def test_download_result_matches_paper_identity_after_result_order_changes(tmp_path):
+    from dataclasses import asdict
+
+    viewer = _results_view()
+    viewer._set_row_status = Mock()
+    first = Paper(title="First", doi="10.1234/first")
+    second = Paper(title="Second", doi="10.1234/second")
+    viewer._papers = [second, first]
+    path = tmp_path / "first.pdf"
+    path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    completed = Paper(title="First", doi=first.doi, pdf_path=str(path))
+    viewer.apply_download_result(asdict(completed))
+    assert first.pdf_path == str(path)
+    assert second.pdf_path == ""
+    assert viewer._pdf_sources[1] == "download"
+
+
+def test_cancel_exit_keeps_download_service_usable():
+    app = CNKIBugApp.__new__(CNKIBugApp)
+    app.root = Mock()
+    app._results_window = None
+    app._download_service = Mock(alive=True)
+    app._confirm_replace_results = Mock(return_value=False)
+    app._close_application()
+    assert not app._close_when_done
+    app._download_service.close.assert_not_called()
+
+
 @pytest.mark.parametrize("confirmed", [True, False])
-def test_results_download_close_waits_for_completion_before_hiding(monkeypatch, confirmed):
+def test_results_paper_operation_close_waits_for_completion_before_hiding(monkeypatch, confirmed):
     viewer = _results_view()
     viewer.busy = True
-    viewer._download_session.alive = True
+    viewer._worker = Mock(is_alive=lambda: True)
     monkeypatch.setattr("cnkibug.gui.results.messagebox.askyesno", lambda *args, **kwargs: confirmed)
 
     viewer.close()
@@ -271,12 +307,12 @@ def test_results_download_close_waits_for_completion_before_hiding(monkeypatch, 
     viewer.window.withdraw.assert_not_called()
     viewer.window.destroy.assert_not_called()
     if not confirmed:
-        viewer._download_session.close.assert_not_called()
+        assert not viewer.cancel.is_set()
         assert not viewer._hide_when_done
         return
-    viewer._download_session.close.assert_called_once_with()
+    assert viewer.cancel.is_set()
     viewer._queue.put(GuiEvent("paper_download", {"index": 0, "status": "已下载", "path": "latest.pdf"}))
-    viewer._queue.put(GuiEvent("download_finished", {"stopped": True}))
+    viewer._queue.put(GuiEvent("paper_task_finished", {"stopped": True}))
     viewer._drain()
 
     assert not viewer.busy and not viewer._closing and not viewer._hide_when_done
@@ -305,14 +341,14 @@ def test_results_download_finishing_during_close_confirmation_hides_immediately(
 def test_results_application_shutdown_overrides_pending_window_hide():
     viewer = _results_view()
     viewer.busy = True
-    viewer._download_session.alive = True
+    viewer._worker = Mock(is_alive=lambda: True)
     viewer._hide_when_done = True
 
     viewer.shutdown()
 
     assert viewer._closing and not viewer._hide_when_done
     viewer.window.destroy.assert_not_called()
-    viewer._queue.put(GuiEvent("download_finished", {"stopped": True}))
+    viewer._queue.put(GuiEvent("paper_task_finished", {"stopped": True}))
     viewer._drain()
     viewer.window.destroy.assert_called_once_with()
     viewer.window.withdraw.assert_not_called()

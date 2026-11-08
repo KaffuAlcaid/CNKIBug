@@ -31,6 +31,8 @@ from ..core.memory import MemorySampler, format_memory
 from ..core.settings import get_scraper_settings
 from ..core.search_query import SearchOptions, load_advanced_queries, load_professional_queries
 from ..core.version import APP_VERSION
+from ..downloads.service import DownloadService
+from ..downloads.models import restore_paper, same_paper
 from ..fileio.paths import get_real_desktop_path, open_directory
 from ..workflow.runner import scrape_cnki
 from ..workflow.state import (
@@ -119,6 +121,14 @@ class CNKIBugApp:
         self._memory_sampler = MemorySampler()
         self._current_results: list[Paper] = []
         self._results_window = None
+        self._download_tasks_window = None
+        self._download_recovery_shown = False
+        self._download_service = None
+        try:
+            self._download_service = DownloadService(self.runtime.paths, self._events)
+        except Exception as error:
+            _logger.exception("下载任务服务无法启动")
+            self._event_queue.put(GuiEvent("download_service_error", {"error": str(error)}))
         self._active_include_citation = False
         self._active_output_dir: Path | None = None
         self._result_prompt_pending = False
@@ -153,7 +163,13 @@ class CNKIBugApp:
                 _logger.warning("Windows GUI 图标加载失败: %s", error)
 
     def run(self) -> None:
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            service = getattr(self, "_download_service", None)
+            if service is not None and service.alive:
+                service.close()
+                service.wait_closed(10)
 
     def _show_info(self) -> None:
         messagebox.showinfo(
@@ -205,7 +221,7 @@ class CNKIBugApp:
             return
         SettingsDialog(
             self.root, self.runtime.config, self.runtime.paths.config_path, self._apply_config,
-            on_restart=self.root.destroy,
+            on_restart=self._close_application,
             confirm_update=lambda parent: self._confirm_replace_results("更新并重启", parent=parent),
             get_output_dir=lambda: self._task_form.output_dir,
             can_check_environment=lambda: not (self._running or self._downloads_running()),
@@ -296,6 +312,8 @@ class CNKIBugApp:
         )
         self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=(0, 8))
+        self._downloads_button = ttk.Button(toolbar, text="下载任务", command=self._show_download_tasks, bootstyle="secondary-outline")
+        self._downloads_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         self._task_form = TaskForm(
             container,
@@ -494,6 +512,8 @@ class CNKIBugApp:
             messagebox.showerror("无法读取配置", str(error), parent=self.root)
             return
         self._apply_config(config)
+        if not self._reserve_download_browser():
+            return
         task_settings = self.settings
         self._active_include_citation = request.include_citation
         self._active_output_dir = output_dir
@@ -562,6 +582,9 @@ class CNKIBugApp:
             return
 
     def _handle_event(self, event: GuiEvent) -> None:
+        if event.name.startswith("download_"):
+            self._handle_download_event(event)
+            return
         self._task_progress.handle_event(event)
         name = event.name
         payload = event.payload
@@ -620,6 +643,7 @@ class CNKIBugApp:
             self._star_prompt_pending = False
             messagebox.showerror("任务异常结束", str(payload.get("error", "未知错误")), parent=self.root)
         elif name == "worker_done":
+            self._release_download_browser()
             viewer = getattr(self, "_results_window", None)
             if viewer is not None and viewer.window.winfo_exists():
                 viewer.set_papers(self._current_results)
@@ -639,7 +663,64 @@ class CNKIBugApp:
 
     def _downloads_running(self) -> bool:
         result = getattr(self, "_results_window", None)
-        return bool(result is not None and result.busy)
+        service = getattr(self, "_download_service", None)
+        return bool((result is not None and result.busy) or (service is not None and service.busy))
+
+    def _reserve_download_browser(self) -> bool:
+        service = getattr(self, "_download_service", None)
+        if service is None:
+            return True
+        try:
+            service.request("external_busy", value=True).result(timeout=5)
+            return True
+        except Exception as error:
+            _logger.info("无法预约浏览器执行: %s", error)
+            return False
+
+    def _release_download_browser(self):
+        service = getattr(self, "_download_service", None)
+        if service is not None and service.alive and not self._close_when_done:
+            service.request("external_busy", value=False)
+
+    def _show_download_tasks(self):
+        from .download_tasks import DownloadTasksWindow
+
+        if self._download_service is None:
+            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志。", parent=self.root)
+            return
+        viewer = self._download_tasks_window
+        if viewer is None or not viewer.window.winfo_exists():
+            viewer = self._download_tasks_window = DownloadTasksWindow(
+                self.root, self._download_service,
+                selected_papers=lambda: self._results_window.selected_papers() if self._results_window else [],
+            )
+        viewer.show()
+
+    def _handle_download_event(self, event):
+        service = getattr(self, "_download_service", None)
+        if event.name in {"download_service_error", "download_command_error"}:
+            if not self._close_when_done:
+                messagebox.showerror("下载任务", event.payload["error"], parent=self.root)
+            return
+        if event.name == "download_task_result":
+            paper = restore_paper(event.payload["paper"])
+            for current in self._current_results:
+                if same_paper(current, paper):
+                    current.pdf_path = paper.pdf_path
+            viewer = self._results_window
+            if viewer is not None and viewer.window.winfo_exists():
+                viewer.apply_download_result(event.payload["paper"], event.payload.get("source", "download"))
+        if event.name == "download_tasks_changed" and service is not None:
+            snapshot = service.snapshot()
+            pending = sum(batch["state"] != "completed" for batch in snapshot["batches"])
+            self._downloads_button.configure(text=f"下载任务 ({pending})" if pending else "下载任务")
+            viewer = self._results_window
+            if viewer is not None and viewer.window.winfo_exists():
+                viewer.sync_download_tasks(snapshot)
+            if not self._download_recovery_shown and not snapshot.get("recovering"):
+                self._download_recovery_shown = True
+                if pending and snapshot.get("paused") and not self._close_when_done:
+                    self._show_download_tasks()
 
     def _confirm_replace_results(self, action: str, *, parent=None) -> bool:
         viewer = getattr(self, "_results_window", None)
@@ -665,6 +746,10 @@ class CNKIBugApp:
             initial_format="csv" if self._task_form.output_format == "csv" else "xlsx",
             can_run=lambda: not (self._running or self._close_when_done),
             prepare_browser=self._ensure_browser_ready,
+            download_service=getattr(self, "_download_service", None),
+            show_download_tasks=self._show_download_tasks,
+            reserve_browser=self._reserve_download_browser,
+            release_browser=self._release_download_browser,
         )
         self._results_window.window.bind("<<ResultsClosed>>", lambda _: self._offer_star())
 
@@ -774,10 +859,22 @@ class CNKIBugApp:
         viewer = getattr(self, "_results_window", None)
         if viewer is not None and (viewer.busy or viewer.alive):
             viewer.cancel.set()
+            self.root.after(200, self._close_application)
+            return
+        if not getattr(self, "_exit_confirmed", False):
+            if not self._confirm_replace_results("退出"):
+                self._close_when_done = False
+                return
+            self._exit_confirmed = True
+        service = getattr(self, "_download_service", None)
+        if service is not None and service.alive:
+            service.close()
             self.root.after(200, self._exit_after_download)
             return
-        if not self._confirm_replace_results("退出"):
-            self._close_when_done = False
+        viewer = getattr(self, "_results_window", None)
+        if viewer is not None and (viewer.busy or viewer.alive):
+            viewer.cancel.set()
+            self.root.after(200, self._exit_after_download)
             return
         if viewer is not None and viewer.window.winfo_exists():
             viewer.shutdown()
@@ -785,7 +882,8 @@ class CNKIBugApp:
 
     def _exit_after_download(self) -> None:
         viewer = getattr(self, "_results_window", None)
-        if viewer is not None and (viewer.busy or viewer.alive):
+        service = getattr(self, "_download_service", None)
+        if (service is not None and service.alive) or (viewer is not None and (viewer.busy or viewer.alive)):
             self.root.after(200, self._exit_after_download)
         else:
             self._close_application()

@@ -156,9 +156,9 @@ class DownloadService:
         self.events.emit("download_tasks_changed")
 
     async def _command(self, action, **kwargs):
-        if self._reconciling and action not in {"shutdown", "external_busy", "history"}:
-            raise ValueError("正在核对上次下载，请稍后操作")
         try:
+            if self._reconciling and action not in {"shutdown", "external_busy", "history"}:
+                raise ValueError("正在核对上次下载，请稍后操作")
             result = await self._apply_command(action, **kwargs)
             self._publish()
             self._wake.set()
@@ -264,7 +264,7 @@ class DownloadService:
             PdfIndex(batch["destination"]).record(paper, outcome="linked", source="manual")
             attempt_id = self.store.begin_attempt(item_id)
             self.store.complete(item_id, artifact, attempt_id, source="manual")
-            self.events.emit("download_task_result", paper=asdict(paper))
+            self.events.emit("download_task_result", paper=asdict(paper), source="manual")
         elif action == "export":
             batch = self.store.batch(batch_id)
             rows = self.store.items(batch_id)
@@ -372,7 +372,7 @@ class DownloadService:
                 artifact = await asyncio.to_thread(inspect_pdf, Path(paper.pdf_path))
                 index.record(paper, outcome="linked", source=old["source"] if old else "manual")
                 self.store.complete(item["id"], artifact, source="existing")
-                self.events.emit("download_task_result", paper=asdict(paper))
+                self.events.emit("download_task_result", paper=asdict(paper), source=old["source"] if old else "manual")
                 return
             self._attempt_id = self.store.begin_attempt(item["id"])
             incoming = owned_incoming(destination, self._attempt_id)
@@ -444,7 +444,7 @@ class DownloadService:
         PdfIndex(destination).record(paper, outcome="downloaded", source="download")
         self.store.complete(item_id, artifact, attempt_id)
         discard_incoming(destination, attempt_id)
-        self.events.emit("download_task_result", paper=asdict(paper))
+        self.events.emit("download_task_result", paper=asdict(paper), source="download")
 
     async def _reconcile_all(self):
         for batch in self.store.snapshot()["batches"]:
@@ -469,7 +469,7 @@ class DownloadService:
                     PdfIndex(batch["destination"]).record(paper, outcome="linked", source=metadata.get("source", "download"))
                     if item["state"] != "completed":
                         self.store.complete(item["id"], artifact, item["active_attempt"])
-                        self.events.emit("download_task_result", paper=asdict(paper))
+                        self.events.emit("download_task_result", paper=asdict(paper), source=metadata.get("source", "download"))
                     continue
                 except (OSError, ValueError) as error:
                     self.store.set_item(item["id"], "finalizing", str(error), "registration_failed")

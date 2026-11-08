@@ -14,7 +14,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.utility import scale_size
 from . import dialogs as messagebox
 
-from ..cnki.downloads import DownloadSession
+from ..downloads.models import ITEM_LABELS, restore_paper, same_paper
 from ..cnki.details import fetch_selected_details
 from ..cnki.journals import fetch_journal_info
 from ..cnki.models import Paper, deduplicate_papers
@@ -32,7 +32,8 @@ from .zotero_review import ZoteroLibraryDialog, ZoteroReviewDialog
 class ResultsWindow:
     def __init__(self, parent, papers: list[Paper], *, settings, paths, output_dir: Path | None = None,
                  get_output_dir=None, initial_format="xlsx", can_run=lambda: True,
-                 prepare_browser=lambda: True):
+                 prepare_browser=lambda: True, download_service=None, show_download_tasks=lambda: None,
+                 reserve_browser=lambda: True, release_browser=lambda: None):
         self.window = ttk.Toplevel(parent)
         self.window.title("CNKIBug - 论文结果")
         width = min(1200, parent.winfo_screenwidth() - 70)
@@ -46,6 +47,10 @@ class ResultsWindow:
         self._initial_format = initial_format
         self.can_run = can_run
         self.prepare_browser = prepare_browser
+        self.download_service = download_service
+        self.show_download_tasks = show_download_tasks
+        self.reserve_browser = reserve_browser
+        self.release_browser = release_browser
         self.busy = False
         self._closing = False
         self._hide_when_done = False
@@ -54,7 +59,6 @@ class ResultsWindow:
         self.cancel = Event()
         self._continue = Event()
         self._events = GuiEventSink(self._queue, self.cancel)
-        self._download_session = DownloadSession(paths, self._events, self.cancel, self._continue)
         self._webvpn_url = ""
         self._checked: set[int] = set()
         self._statuses: dict[int, str] = {}
@@ -719,7 +723,7 @@ class ResultsWindow:
 
     @property
     def alive(self) -> bool:
-        return self._download_session.alive or (self._worker is not None and self._worker.is_alive())
+        return self._worker is not None and self._worker.is_alive()
 
     def _start_operation(self, operation, *, label: str, needs_browser: bool = False):
         if self.busy or not self._checked:
@@ -728,6 +732,8 @@ class ResultsWindow:
             messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后处理论文。", parent=self.window)
             return
         if needs_browser and not self.prepare_browser():
+            return
+        if not getattr(self, "reserve_browser", lambda: True)():
             return
         items = [(index, copy.deepcopy(self._papers[index])) for index in sorted(self._checked)]
         self.cancel.clear()
@@ -779,8 +785,8 @@ class ResultsWindow:
     def _download(self, *, force: bool = False):
         if self.busy or not self._checked:
             return
-        if not self.can_run():
-            messagebox.showinfo("任务正在运行", "请在当前抓取任务结束后下载论文。", parent=self.window)
+        if self.download_service is None:
+            messagebox.showerror("下载任务不可用", "下载任务服务未能启动，请查看日志并重新打开应用。", parent=self.window)
             return
         self._restore_pdf_links()
         indices = [index for index in sorted(self._checked) if force or self._pdf_errors[index]]
@@ -804,14 +810,49 @@ class ResultsWindow:
         except (OSError, ValueError) as error:
             messagebox.showerror("保存位置不可用", str(error), parent=self.window)
             return
-        items = [(i, copy.deepcopy(self._papers[i])) for i in indices]
-        self.busy = True
-        self._stop_button.configure(text="停止下载", state=tk.NORMAL)
-        self._stop_button.pack(side=tk.RIGHT)
-        self._open_button.configure(state=tk.DISABLED)
+        papers = [copy.deepcopy(self._papers[i]) for i in indices]
+        self.download_service.submit(papers, directory, self.settings, dialog.webvpn_url, force=force,
+                                     source=self._source_path.stem if self._source_path else "论文下载")
+        self._operation_status.set(f"已提交 {len(papers)} 篇论文，请在下载任务中查看进度")
+        self.show_download_tasks()
+
+    def selected_papers(self):
+        return [copy.deepcopy(self._papers[index]) for index in sorted(self._checked)]
+
+    def apply_download_result(self, data: dict, source="download"):
+        paper = restore_paper(data)
+        for index, current in enumerate(self._papers):
+            if not same_paper(current, paper):
+                continue
+            current.pdf_path = paper.pdf_path
+            self._pdf_overrides.add(index)
+            self._pdf_sources[index] = source
+            self._pdf_errors[index] = pdf_problem(current.pdf_path)
+            self._unsaved_pdf_links.discard(index)
+            self._statuses[index] = "已下载" if source == "download" else "已关联 PDF"
+            self._set_row_status(index, self._statuses[index])
         self._update_summary()
 
-        self._download_session.submit(items, directory, self.settings, dialog.webvpn_url, skip_existing=not force)
+    def sync_download_tasks(self, snapshot):
+        from ..fileio.pdf_links import paper_keys
+
+        indexed = {}
+        for batch in snapshot.get("batches", []):
+            for item in batch["items"]:
+                value = restore_paper(item["paper"])
+                for key in paper_keys(value):
+                    indexed.setdefault(key, []).append((item, value))
+        for index, paper in enumerate(self._papers):
+            candidates = [entry for key in paper_keys(paper) for entry in indexed.get(key, []) if same_paper(paper, entry[1])]
+            if not candidates:
+                continue
+            item, _ = max(candidates, key=lambda entry: entry[0]["updated"])
+            if item["state"] in {"completed", "removed"}:
+                continue
+            status = item["error"] or ITEM_LABELS[item["state"]]
+            if self._statuses.get(index) != status:
+                self._statuses[index] = status
+                self._set_row_status(index, status)
 
     def _drain(self):
         try:
@@ -910,6 +951,7 @@ class ResultsWindow:
                     messagebox.showerror("论文处理结束", payload["error"], parent=self.window)
                 elif event.name in {"download_finished", "paper_task_finished"}:
                     self.busy = False
+                    getattr(self, "release_browser", lambda: None)()
                     self._continue_button.pack_forget()
                     self._stop_button.configure(state=tk.DISABLED)
                     self._stop_button.pack_forget()
@@ -942,7 +984,7 @@ class ResultsWindow:
         if self.busy:
             if not messagebox.askyesno("停止处理", "停止当前处理并关闭论文结果窗口？", parent=self.window):
                 return
-            self._download_session.close()
+            self.cancel.set()
             if self.busy:
                 self._hide_when_done = True
                 return
@@ -952,7 +994,7 @@ class ResultsWindow:
     def shutdown(self):
         self._closing = True
         self._hide_when_done = False
-        self._download_session.close()
+        self.cancel.set()
         self.busy = self.alive
         if not self.busy:
             self.window.destroy()

@@ -190,6 +190,7 @@ class DownloadStore:
             raise ValueError("下载任务不存在")
         result = dict(row)
         result["paper"] = json.loads(result["paper"])
+        result["attempt_count"] = self.db.execute("SELECT COUNT(*) FROM attempts WHERE item_id=?", (item_id,)).fetchone()[0]
         return result
 
     def items(self, batch_id) -> list[dict]:
