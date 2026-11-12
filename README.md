@@ -73,7 +73,7 @@ Linux 提供实验性的 x86-64 AppImage，也可通过源码运行，安装步�
 
 - [使用说明](docs/usage.md)：安装、检索、断点恢复、文献整理、Zotero 与 PDF
 - [配置说明](docs/configuration.md)：设置窗口、参数含义和运行数据位置
-- [开发和打包](docs/development.md)：源码运行、项目结构、构建与测试
+- [开发和打包](docs/development.md)：源码运行、项目结构、打包与发布
 - [反馈问题](https://github.com/KaffuAlcaid/CNKIBug/issues/new)：可按[反馈模板](docs/issue-template.md)填写
 
 ## 许可与致谢

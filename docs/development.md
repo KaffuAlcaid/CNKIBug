@@ -2,7 +2,7 @@
 
 [返回首页](../README.md) · [使用说明](usage.md)
 
-快速导航：[源码运行](#从源码运行) · [项目结构](#项目结构) · [测试](#测试与启动检查) · [Windows 打包](#windows-打包) · [AppImage](#linux-appimage) · [更新清单](#发布与更新清单)
+快速导航：[源码运行](#从源码运行) · [项目结构](#项目结构) · [启动检查](#启动检查) · [Windows 打包](#windows-打包) · [AppImage](#linux-appimage) · [更新清单](#发布与更新清单)
 
 ## 从源码运行
 
@@ -26,10 +26,10 @@ Linux 使用：
 source .venv/bin/activate
 ```
 
-安装 GUI 和开发依赖并启动：
+安装 GUI 依赖并启动：
 
 ```bash
-python -m pip install -e ".[gui]" -r requirements-dev.txt
+python -m pip install -e ".[gui]"
 python run_gui.py
 ```
 
@@ -41,7 +41,7 @@ python run_gui.py
 
 ```bash
 git pull --ff-only
-python -m pip install -e ".[gui]" -r requirements-dev.txt
+python -m pip install -e ".[gui]"
 ```
 
 如果工作区有本地修改，先处理这些修改，再拉取远端代码
@@ -59,8 +59,7 @@ python -m pip install -e ".[gui]" -r requirements-dev.txt
 | `cnkibug/core/` | 检索条件、设置、事件、耗时估算和内存统计 |
 | `cnkibug/fileio/` | 文件导入导出、检索方案和 Zotero 发送 |
 | `cnkibug/workflow/` | 任务执行、断点、结果保存和报告 |
-| `tests/` | 自动化测试 |
-| `.github/workflows/` | 测试、构建和发布流程 |
+| `.github/workflows/` | 构建和发布流程 |
 
 GUI 的主要入口是 `cnkibug/gui/app.py`，任务表单位于 `task_form.py`，进度与日志位于 `task_progress.py`，文献列表位于 `results.py`
 
@@ -76,16 +75,7 @@ GUI 的主要入口是 `cnkibug/gui/app.py`，任务表单位于 `task_form.py`�
 
 下载采用串行调度，与抓取及其他论文操作互斥。暂停允许已开始的传输完成；停止取消当前执行并保留任务。恢复时不自动重放结果不明的点击，也不将任务恢复描述为字节断点续传
 
-## 测试与启动检查
-
-项目使用 pytest，部分测试需要 Playwright 浏览器，安装开发依赖后可运行：
-
-```bash
-python -m playwright install chromium
-python -m pytest -q
-```
-
-Linux 如缺少浏览器系统组件，可按 Playwright 提示安装，Ubuntu/Debian 可使用 `python -m playwright install --with-deps chromium`
+## 启动检查
 
 启动检查命令分别检查终端版和 GUI 所需的导入与资源：
 
@@ -137,7 +127,7 @@ AppImage 通过 `APPIMAGE` 定位自身，运行数据位置见[配置说明](co
 
 版本号由 `pyproject.toml` 管理，Windows 版本资源通过 `generate_version_info.py` 生成，发布标签采用 `vX.Y.Z`
 
-`.github/workflows/build.yml` 构建 Windows EXE、Linux AppImage 和终端版源码包，并检查打包资源与导入
+`.github/workflows/build.yml` 核对发布版本，构建 Windows EXE、Linux AppImage 和终端版源码包，并上传 Release 附件
 
 Release 附件上传后，`scripts/publish_update.py` 将正式版本号、说明、附件地址、大小和 SHA-256 写入 `updates` 分支的 `latest.json`
 

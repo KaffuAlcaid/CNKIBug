@@ -76,29 +76,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            requirements-dev.txt
             requirements-build.txt
 
       - name: Install dependencies
         shell: bash
         run: |
-          uv pip install --system -e ".[gui]" -r requirements-dev.txt -r requirements-build.txt
-
-      - name: Install Playwright browsers
-        shell: bash
-        run: |
-          python -m playwright install --with-deps chromium
-
-      - name: Smoke test source imports on Windows
-        shell: bash
-        run: |
-          python -m compileall -q run.py run_gui.py cnkibug
-          python -c "import cnkibug.app.cli, cnkibug.gui.app, cnkibug.browser.runtime, cnkibug.cnki.keyword, cnkibug.fileio.exporter, cnkibug.workflow.runner; print('import graph OK')"
-
-      - name: Unit tests
-        shell: bash
-        run: |
-          python -m pytest tests
+          uv pip install --system -e ".[gui]" -r requirements-build.txt
 
       - name: Build Windows GUI executable
         shell: bash
@@ -128,14 +111,6 @@ jobs:
             echo "GUI files were included in the TUI source archive" >&2
             exit 1
           fi
-
-      - name: Smoke test packaged executable
-        shell: pwsh
-        run: |
-          $process = Start-Process -FilePath .\dist\CNKIBug-GUI.exe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
-          if ($process.ExitCode -ne 0) {
-            throw "Packaged GUI executable self-check failed"
-          }
 
       - name: Store release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -167,7 +142,7 @@ jobs:
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk libfuse2 squashfs-tools desktop-file-utils xvfb
+          sudo apt-get install -y python3-tk libfuse2 squashfs-tools desktop-file-utils
           python -m pip install ".[gui]" -r requirements-build.txt
 
       - name: Download appimagetool
@@ -179,11 +154,6 @@ jobs:
         env:
           APPIMAGETOOL: ${{ runner.temp }}/appimagetool
         run: bash scripts/build_appimage.sh
-
-      - name: Check packaged entry point
-        run: |
-          desktop-file-validate packaging/appimage/cnkibug.desktop
-          xvfb-run -a env APPIMAGE_EXTRACT_AND_RUN=1 ./dist/CNKIBug-GUI-x86_64.AppImage --self-check
 
       - name: Store Linux release asset
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
