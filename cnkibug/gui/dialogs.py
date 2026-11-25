@@ -96,8 +96,8 @@ class _StringDialog(QueryDialog):
     def create_buttonbox(self, master):
         buttons = ttk.Frame(master, padding=(20, 0, 20, 16))
         buttons.pack(fill=tk.X)
-        ttk.Button(buttons, text="确定", command=self.on_submit, bootstyle="primary").pack(side=tk.RIGHT)
-        ttk.Button(buttons, text="取消", command=self.on_cancel, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(buttons, text="确定", command=self.on_submit, style="Primary.TButton", width=8).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="取消", command=self.on_cancel, style="Soft.TButton", width=8).pack(side=tk.RIGHT, padx=(0, 8))
 
 
 def askstring(title, prompt, *, initialvalue="", parent=None):

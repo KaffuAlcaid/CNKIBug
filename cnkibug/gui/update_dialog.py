@@ -9,10 +9,11 @@ from threading import Event, Thread
 from tkinter import filedialog
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 
 from ..core.version import APP_VERSION
 from . import updater
-from .appearance import TextView
+from .appearance import Divider, TextView, configure_window_surface, place_toplevel
 
 
 class UpdateDialog:
@@ -39,42 +40,52 @@ class UpdateDialog:
         self._save_destination: Path | None = None
         self.window = ttk.Toplevel(title="测试连接" if probe else "检查更新", master=parent, transient=parent)
         self.window.withdraw()
+        self.window._cnkibug_surface = "card"
+        configure_window_surface(self.window, "card")
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self.window.bind("<Escape>", lambda _event: self._close())
-        width = min(600, max(280, parent.winfo_screenwidth() - 80))
-        height = min(460, max(240, parent.winfo_screenheight() - 80))
-        outer = ttk.Frame(self.window, padding=20)
-        outer.pack(fill=tk.BOTH, expand=True)
-        footer = ttk.Frame(outer)
-        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
-        self._primary = ttk.Button(footer, text="取消", command=self._close, width=10)
+
+        footer_wrap = ttk.Frame(self.window, style="Card.TFrame")
+        footer_wrap.pack(side=tk.BOTTOM, fill=tk.X)
+        Divider(footer_wrap).pack(fill=tk.X)
+        footer = ttk.Frame(footer_wrap, style="Card.TFrame", padding=scale_size(self.window, (20, 12)))
+        footer.pack(fill=tk.X)
+        self._primary = ttk.Button(footer, text="取消", command=self._close, width=10, style="Primary.TButton")
         self._primary.pack(side=tk.RIGHT)
-        self._secondary = ttk.Button(footer, text="忽略", command=self._close,
-                                     width=10, bootstyle="secondary-outline")
-        ttk.Label(outer, text=f"当前版本：{APP_VERSION}").pack(anchor=tk.W)
+        self._secondary = ttk.Button(footer, text="忽略", command=self._close, width=10, style="Soft.TButton")
+
+        outer = ttk.Frame(self.window, style="Card.TFrame", padding=scale_size(self.window, (20, 16)))
+        outer.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(outer, text=f"当前版本：{APP_VERSION}", style="CardMuted.TLabel").pack(anchor=tk.W)
         self._status = tk.StringVar(master=self.window, value="正在检查连接..." if probe else "正在检查正式发布...")
-        ttk.Label(outer, textvariable=self._status, wraplength=width - 40,
-                  justify=tk.LEFT).pack(fill=tk.X, pady=(12, 8))
-        self._progress = ttk.Progressbar(outer, mode="indeterminate")
-        self._progress.pack(fill=tk.X, pady=8)
+        ttk.Label(
+            outer, textvariable=self._status, style="Card.TLabel",
+            wraplength=scale_size(self.window, 540), justify=tk.LEFT,
+        ).pack(fill=tk.X, pady=(scale_size(self.window, 10), scale_size(self.window, 8)))
+        self._progress = ttk.Progressbar(outer, mode="indeterminate", bootstyle="primary")
+        self._progress.pack(fill=tk.X, pady=scale_size(self.window, 8))
         self._progress.start()
         self._notes_view = TextView(outer, height=8, state=tk.DISABLED)
         self._notes = self._notes_view.text
-        self.window.geometry(f"{width}x{height}")
-        self.window.minsize(min(400, width), min(280, height))
-        self.window.position_center()
+
+        place_toplevel(self.window, parent, 600, 460, min_width=420, min_height=280)
         self.window.deiconify()
         self.window.grab_set()
         if probe:
-            self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+            self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(scale_size(self.window, 8), 0))
             self._work(
-                lambda: updater.probe_connections(source, self._cancelled,
-                    lambda text: self._queue.put(("probe_result", text))), "probed",
+                lambda: updater.probe_connections(
+                    source, self._cancelled, lambda text: self._queue.put(("probe_result", text)),
+                ),
+                "probed",
             )
         else:
             self._work(
-                lambda: updater.check_release(source=source, cancelled=self._cancelled,
-                    on_source=lambda name: self._queue.put(("metadata_source", name))), "checked",
+                lambda: updater.check_release(
+                    source=source, cancelled=self._cancelled,
+                    on_source=lambda name: self._queue.put(("metadata_source", name)),
+                ),
+                "checked",
             )
         self._poll_id = self.window.after(100, self._poll)
 
@@ -190,11 +201,12 @@ class UpdateDialog:
         self._notes.configure(state=tk.NORMAL)
         self._notes.insert(tk.END, release.notes)
         self._notes.configure(state=tk.DISABLED)
-        self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
-        self._secondary.pack(side=tk.RIGHT, padx=(0, 8))
+        self._notes_view.pack(fill=tk.BOTH, expand=True, pady=(scale_size(self.window, 8), 0))
+        self._secondary.pack(side=tk.RIGHT, padx=(0, scale_size(self.window, 8)))
         available = release.ready or (not updater.can_install_update() and updater.appimage_path() is None)
-        self._primary.configure(text="更新", command=self._update,
-                                state=tk.NORMAL if available else tk.DISABLED)
+        self._primary.configure(
+            text="更新", command=self._update, state=tk.NORMAL if available else tk.DISABLED,
+        )
 
     def _update(self) -> None:
         release = self._release
@@ -224,7 +236,7 @@ class UpdateDialog:
         self._notes_view.pack_forget()
         self._secondary.pack_forget()
         self._progress.configure(mode="determinate", maximum=100, value=0)
-        self._progress.pack(fill=tk.X, pady=8)
+        self._progress.pack(fill=tk.X, pady=scale_size(self.window, 8))
         self._status.set("正在连接下载服务器...")
         self._primary.configure(text="取消", command=self._close)
         self._work(
