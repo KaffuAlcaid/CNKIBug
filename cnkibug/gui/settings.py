@@ -7,14 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 
 from ..app.runtime import DEFAULT_CONFIG, read_config, save_config
 from ..core.version import APP_VERSION
+from ..fileio.paths import get_real_desktop_path
+from . import dialogs as messagebox
+from .appearance import Divider, configure_window_surface, get_palette, place_toplevel
+from .environment import EnvironmentPanel
 from .update_dialog import UpdateDialog
 from .updater import SOURCE_LABELS, can_install_update
-from .environment import EnvironmentPanel
-from . import dialogs as messagebox
-from ..fileio.paths import get_real_desktop_path
 
 
 _NUMERIC_FIELDS = (
@@ -50,143 +52,207 @@ class SettingsDialog:
         self._on_restart = on_restart
         self._confirm_update = confirm_update
         self._closing = False
+        self._active_page = ""
         self.window = ttk.Toplevel(title="设置", transient=parent, master=parent)
+        self.window._cnkibug_surface = "card"
+        configure_window_surface(self.window, "card")
         self.window.withdraw()
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self.window.bind("<Escape>", lambda _event: self._close())
 
-        outer = ttk.Frame(self.window, padding=18)
-        outer.pack(fill=tk.BOTH, expand=True)
-        footer = ttk.Frame(outer)
-        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(16, 0))
-        ttk.Button(footer, text="恢复默认", command=self._reset, bootstyle="secondary-link").pack(side=tk.LEFT)
-        ttk.Button(footer, text="重新读取配置", command=self._reload, bootstyle="secondary-outline").pack(
-            side=tk.LEFT, padx=8,
+        shell = ttk.Frame(self.window, style="Card.TFrame")
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        # Clean Flat Sidebar (replaces blue-bordered Treeview)
+        sidebar = ttk.Frame(shell, style="CardSubtle.TFrame", padding=scale_size(self.window, (10, 16, 10, 14)))
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.configure(width=scale_size(self.window, 164))
+        sidebar.pack_propagate(False)
+        ttk.Label(sidebar, text="设置", style="CardSubtleHeading.TLabel").pack(
+            anchor=tk.W, padx=scale_size(self.window, 10), pady=(0, scale_size(self.window, 14)),
         )
-        ttk.Button(footer, text="保存", command=self._save, width=8, bootstyle="primary").pack(side=tk.RIGHT)
-        ttk.Button(footer, text="取消", command=self._close, width=8, bootstyle="secondary-outline").pack(
-            side=tk.RIGHT, padx=8,
+        nav_list = ttk.Frame(sidebar, style="CardSubtle.TFrame")
+        nav_list.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(sidebar, text=f"CNKIBug v{APP_VERSION}", style="CardSubtleSmall.TLabel").pack(
+            anchor=tk.W, padx=scale_size(self.window, 10), pady=(scale_size(self.window, 8), 0),
         )
 
-        body = ttk.Frame(outer)
-        body.pack(fill=tk.BOTH, expand=True)
-        sidebar = ttk.Frame(body)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 18))
-        ttk.Label(sidebar, text="设置", style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 16))
-        self._navigation = ttk.Treeview(sidebar, show="tree", selectmode="browse", height=6, style="Settings.Treeview")
-        self._navigation.column("#0", width=116, minwidth=116, stretch=False)
-        self._navigation.pack(fill=tk.Y, expand=True)
-        ttk.Separator(body, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
-        content = ttk.Frame(body)
-        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        Divider(shell, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
+
+        # Right Content & Footer
+        right = ttk.Frame(shell, style="Card.TFrame")
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        footer_area = ttk.Frame(right, style="Card.TFrame")
+        footer_area.pack(side=tk.BOTTOM, fill=tk.X)
+        Divider(footer_area).pack(fill=tk.X)
+        footer = ttk.Frame(footer_area, style="Card.TFrame", padding=scale_size(self.window, (20, 12)))
+        footer.pack(fill=tk.X)
+        ttk.Button(footer, text="恢复默认", command=self._reset, style="GhostMuted.TButton").pack(side=tk.LEFT)
+        ttk.Button(footer, text="重新读取配置", command=self._reload, style="GhostCompact.TButton").pack(
+            side=tk.LEFT, padx=(scale_size(self.window, 6), 0),
+        )
+        ttk.Button(footer, text="保存", command=self._save, width=9, style="Primary.TButton").pack(side=tk.RIGHT)
+        ttk.Button(footer, text="取消", command=self._close, width=9, style="Soft.TButton").pack(
+            side=tk.RIGHT, padx=(0, scale_size(self.window, 8)),
+        )
+
+        content = ttk.Frame(right, style="Card.TFrame", padding=scale_size(self.window, (24, 18, 24, 14)))
+        content.pack(fill=tk.BOTH, expand=True)
         self._page_title = tk.StringVar(master=self.window)
-        ttk.Label(content, textvariable=self._page_title, style="Section.TLabel").pack(anchor=tk.W, pady=(4, 18))
-        pages = ttk.Frame(content)
+        ttk.Label(content, textvariable=self._page_title, style="CardHeading.TLabel").pack(
+            anchor=tk.W, pady=(0, scale_size(self.window, 12)),
+        )
+        Divider(content).pack(fill=tk.X, pady=(0, scale_size(self.window, 16)))
+
+        pages = ttk.Frame(content, style="Card.TFrame")
         pages.pack(fill=tk.BOTH, expand=True)
         pages.columnconfigure(0, weight=1)
         pages.rowconfigure(0, weight=1)
+
         tabs = self._tabs = {}
+        self._nav_items: dict[str, tuple[tk.Frame, ttk.Button]] = {}
         for name in ("外观", "抓取", "会话", "日志", "运行环境", "更新"):
-            tab = ttk.Frame(pages)
+            tab = ttk.Frame(pages, style="Card.TFrame")
             tab.columnconfigure(0, weight=1)
             tab.grid(row=0, column=0, sticky=tk.NSEW)
-            self._navigation.insert("", tk.END, iid=name, text=name)
             tabs[name] = tab
-        self._navigation.bind("<<TreeviewSelect>>", self._select_page)
+
+            item_row = ttk.Frame(nav_list, style="CardSubtle.TFrame")
+            item_row.pack(fill=tk.X, pady=(0, scale_size(self.window, 2)))
+            indicator = tk.Frame(item_row, width=scale_size(self.window, 3), bd=0, highlightthickness=0)
+            indicator.pack(side=tk.LEFT, fill=tk.Y)
+            button = ttk.Button(
+                item_row, text=name, command=lambda target=name: self._show_page(target), style="Nav.TButton",
+            )
+            button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._nav_items[name] = (indicator, button)
+
+        self.window.bind("<<ThemeChanged>>", lambda _e: self._sync_nav_styles(), add="+")
 
         self.environment = EnvironmentPanel(
             tabs["运行环境"], config_path.parent,
             get_output_dir or (lambda: Path(config.get("output_dir") or get_real_desktop_path())),
             can_run=can_check_environment,
             on_change=self._environment_changed,
+            surface="card",
         )
         self.environment.grid(row=0, column=0, columnspan=2, sticky=tk.NSEW)
         tabs["运行环境"].rowconfigure(0, weight=1)
-        page_name = selected_tab if selected_tab in tabs else "外观"
-        self._navigation.selection_set(page_name)
-        self._show_page(page_name)
 
-        ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}").grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 16),
+        # Update tab
+        ttk.Label(tabs["更新"], text=f"当前版本：{APP_VERSION}", style="CardMuted.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, scale_size(self.window, 14)),
         )
         self._update_source = tk.StringVar(master=self.window)
-        ttk.Label(tabs["更新"], text="下载线路").grid(row=1, column=0, sticky=tk.W, padx=(0, 16))
-        ttk.Combobox(tabs["更新"], textvariable=self._update_source,
-                     values=list(SOURCE_LABELS.values()), state="readonly", width=24).grid(
-            row=1, column=1, sticky=tk.EW,
+        ttk.Label(tabs["更新"], text="下载线路", style="Card.TLabel").grid(
+            row=1, column=0, sticky=tk.W, padx=(0, scale_size(self.window, 16)),
         )
-        ttk.Button(tabs["更新"], text="检查更新", command=self._check_updates).grid(
-            row=2, column=0, sticky=tk.W, pady=16,
+        ttk.Combobox(
+            tabs["更新"], textvariable=self._update_source,
+            values=list(SOURCE_LABELS.values()), state="readonly", width=24,
+        ).grid(row=1, column=1, sticky=tk.EW)
+        update_actions = ttk.Frame(tabs["更新"], style="Card.TFrame")
+        update_actions.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(scale_size(self.window, 18), 0))
+        ttk.Button(update_actions, text="检查更新", command=self._check_updates, style="Primary.TButton").pack(
+            side=tk.LEFT,
         )
-        ttk.Button(tabs["更新"], text="测试连接", command=self._test_connections,
-                   bootstyle="secondary-outline").grid(
-            row=2, column=1, sticky=tk.W, pady=16,
-        )
+        ttk.Button(
+            update_actions, text="测试连接", command=self._test_connections, style="Soft.TButton",
+        ).pack(side=tk.LEFT, padx=(scale_size(self.window, 8), 0))
 
+        # Appearance tab
         self._theme = tk.StringVar(master=self.window)
-        ttk.Label(tabs["外观"], text="主题").grid(row=0, column=0, sticky=tk.W, padx=(0, 24))
-        theme_row = ttk.Frame(tabs["外观"])
-        theme_row.grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(tabs["外观"], text="界面主题", style="Card.TLabel").grid(
+            row=0, column=0, sticky=tk.W, padx=(0, scale_size(self.window, 24)),
+        )
+        theme_row = ttk.Frame(tabs["外观"], style="Card.TFrame")
+        theme_row.grid(row=0, column=1, sticky=tk.E)
         for text, value in (("浅色", "litera"), ("暗色", "darkly")):
-            ttk.Radiobutton(theme_row, text=text, value=value, variable=self._theme,
-                            width=10, bootstyle="primary").pack(side=tk.LEFT, padx=(0, 12))
+            ttk.Radiobutton(
+                theme_row, text=text, value=value, variable=self._theme,
+                width=8, style="Card.TRadiobutton",
+            ).pack(side=tk.LEFT, padx=(scale_size(self.window, 12), 0))
+        ttk.Label(
+            tabs["外观"],
+            text="浅色采用柔和灰白双层表面，暗色采用低对比炭灰底色；点击保存后立即生效",
+            style="CardSmall.TLabel",
+            wraplength=scale_size(self.window, 480),
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(scale_size(self.window, 10), 0))
 
+        # Numeric fields (Scraping & Session)
         self._numbers: dict[str, tk.StringVar] = {}
         for row, (key, label, divisor) in enumerate(_NUMERIC_FIELDS):
             session_rows = {"session_cache_ttl_hours": 1, "download_auth_wait_sec": 2, "download_interval_sec": 3}
             tab = tabs["会话"] if key in session_rows else tabs["抓取"]
-            row = session_rows.get(key, row)
+            grid_row = session_rows.get(key, row)
             variable = tk.StringVar(master=self.window)
             self._numbers[key] = variable
-            ttk.Label(tab, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 24), pady=8)
-            spinbox = ttk.Spinbox(tab, textvariable=variable, from_=0 if key == "download_auth_wait_sec" else 1 / divisor, to=2147483647 / divisor,
-                                 increment=1, width=12)
-            spinbox.grid(row=row, column=1, sticky=tk.E, pady=8)
+            ttk.Label(tab, text=label, style="Card.TLabel").grid(
+                row=grid_row, column=0, sticky=tk.W,
+                padx=(0, scale_size(self.window, 24)), pady=scale_size(self.window, 7),
+            )
+            spinbox = ttk.Spinbox(
+                tab, textvariable=variable,
+                from_=0 if key == "download_auth_wait_sec" else 1 / divisor,
+                to=2147483647 / divisor,
+                increment=1, width=12,
+            )
+            spinbox.grid(row=grid_row, column=1, sticky=tk.E, pady=scale_size(self.window, 7))
             if key == "session_cache_ttl_hours":
                 self._cache_ttl = spinbox
 
+        # Session & Logging flags (unified standard checkbox style)
         self._flags = {
             key: tk.BooleanVar(master=self.window)
             for key in ("session_cache_enabled", "log_save_path", "log_keywords", "log_scraped_records")
         }
-        ttk.Checkbutton(tabs["会话"], text="复用浏览器会话", variable=self._flags["session_cache_enabled"],
-                        command=self._sync_cache, bootstyle="round-toggle").grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 12),
-        )
+        ttk.Checkbutton(
+            tabs["会话"], text="复用浏览器会话", variable=self._flags["session_cache_enabled"],
+            command=self._sync_cache, style="Card.TCheckbutton",
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, scale_size(self.window, 12)))
+
         self._log_level = tk.StringVar(master=self.window)
-        ttk.Label(tabs["日志"], text="日志级别").grid(row=0, column=0, sticky=tk.W, padx=(0, 24), pady=8)
-        ttk.Combobox(tabs["日志"], textvariable=self._log_level, values=("INFO", "WARNING", "ERROR"),
-                     state="readonly", width=12).grid(row=0, column=1, sticky=tk.EW, pady=8)
+        ttk.Label(tabs["日志"], text="日志级别", style="Card.TLabel").grid(
+            row=0, column=0, sticky=tk.W,
+            padx=(0, scale_size(self.window, 24)), pady=scale_size(self.window, 8),
+        )
+        ttk.Combobox(
+            tabs["日志"], textvariable=self._log_level, values=("INFO", "WARNING", "ERROR"),
+            state="readonly", width=14,
+        ).grid(row=0, column=1, sticky=tk.E, pady=scale_size(self.window, 8))
         for row, (key, text) in enumerate((
             ("log_save_path", "记录导出文件路径"),
             ("log_keywords", "记录检索词"),
             ("log_scraped_records", "记录详细抓取统计"),
         ), start=1):
-            ttk.Checkbutton(tabs["日志"], text=text, variable=self._flags[key]).grid(
-                row=row, column=0, columnspan=2, sticky=tk.W, pady=10,
-            )
+            ttk.Checkbutton(
+                tabs["日志"], text=text, variable=self._flags[key], style="Card.TCheckbutton",
+            ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=scale_size(self.window, 9))
 
+        page_name = selected_tab if selected_tab in tabs else "外观"
+        self._show_page(page_name)
         self._populate(config)
         self.window.update_idletasks()
-        width = min(max(800, self.window.winfo_reqwidth()), parent.winfo_screenwidth() - 80)
-        height = min(max(540, self.window.winfo_reqheight()), parent.winfo_screenheight() - 80)
-        self.window.geometry(f"{width}x{height}")
-        self.window.minsize(min(720, width), min(460, height))
-        self.window.position_center()
+        place_toplevel(self.window, parent, 800, 540, min_width=700, min_height=460)
         self.window.deiconify()
         self.window.grab_set()
 
     def show(self) -> None:
         self.window.wait_window()
 
-    def _select_page(self, _event=None) -> None:
-        selection = self._navigation.selection()
-        if selection:
-            self._show_page(selection[0])
+    def _sync_nav_styles(self) -> None:
+        p = get_palette()
+        for name, (indicator, button) in self._nav_items.items():
+            active = name == self._active_page
+            indicator.configure(background=p.primary if active else p.card_subtle)
+            button.configure(style="NavActive.TButton" if active else "Nav.TButton")
 
     def _show_page(self, name: str) -> None:
+        self._active_page = name
         self._tabs[name].tkraise()
         self._page_title.set(name)
+        self._sync_nav_styles()
 
     def _close(self) -> None:
         if self.environment.busy:

@@ -6,12 +6,13 @@ from collections.abc import Callable
 from typing import Any
 
 import ttkbootstrap as ttk
+from ttkbootstrap.utility import scale_size
 
 from ..cnki.models import STATUS_EMPTY, STATUS_FAILED, STATUS_STOPPED, STATUS_SUCCESS
 from ..core.estimate import estimate_progress, estimate_seconds, estimate_work_seconds, format_eta
 from ..workflow.state import remaining_workload
+from .appearance import Card, Divider, TextView, get_palette
 from .events import GuiEvent
-from .appearance import TextView
 from .task_form import GuiTaskRequest
 
 
@@ -36,7 +37,7 @@ class TaskProgress(ttk.Frame):
         on_new_task: Callable[[], None],
         on_resume: Callable[[], None],
     ) -> None:
-        super().__init__(parent, padding=(0, 8))
+        super().__init__(parent, style="Canvas.TFrame")
         self._task_started_at: float | None = None
         self._actual_seconds: float | None = None
         self._active_elapsed = 0.0
@@ -59,102 +60,132 @@ class TaskProgress(ttk.Frame):
         }
         self._log_line_count = 0
 
-        progress_frame = self
+        workspace = ttk.Frame(self, style="Canvas.TFrame", padding=scale_size(self, (20, 16, 20, 16)))
+        workspace.pack(fill=tk.BOTH, expand=True)
+
+        # Progress Summary Card
+        status_card = Card(workspace, padding=scale_size(self, (18, 16)))
+        status_card.pack(fill=tk.X, pady=(0, scale_size(self, 14)))
+        body = status_card.body
+
+        header = ttk.Frame(body, style="Card.TFrame")
+        header.pack(fill=tk.X)
         self._status_var = tk.StringVar(value="等待设置任务")
-        ttk.Label(progress_frame, textvariable=self._status_var, style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        ttk.Label(header, textvariable=self._status_var, style="CardHeading.TLabel").pack(side=tk.LEFT)
+        self._progress_percent_var = tk.StringVar(value="0%")
+        ttk.Label(header, textvariable=self._progress_percent_var, style="CardSection.TLabel").pack(side=tk.RIGHT)
+
         self._progress_var = tk.IntVar(value=0)
-        progress_row = ttk.Frame(progress_frame)
-        progress_row.pack(fill=tk.X, pady=(8, 2))
-        progress_row.columnconfigure(0, weight=1)
         self._progress = ttk.Progressbar(
-            progress_row,
+            body,
             variable=self._progress_var,
             maximum=100,
             bootstyle="primary",
         )
-        self._progress.grid(row=0, column=0, sticky="ew")
-        self._progress_percent_var = tk.StringVar(value="0%")
-        ttk.Label(progress_row, textvariable=self._progress_percent_var, width=4).grid(
-            row=0,
-            column=1,
-            sticky=tk.E,
-            padx=(8, 0),
-        )
+        self._progress.pack(fill=tk.X, pady=(scale_size(self, 12), scale_size(self, 8)))
 
-        time_row = ttk.Frame(progress_frame)
+        time_row = ttk.Frame(body, style="Card.TFrame")
         time_row.pack(fill=tk.X)
         time_row.columnconfigure(0, weight=1)
         time_row.columnconfigure(1, weight=1)
         self._time_var = tk.StringVar(value="已用时：00:00")
-        ttk.Label(time_row, textvariable=self._time_var).grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(time_row, textvariable=self._time_var, style="CardMuted.TLabel").grid(row=0, column=0, sticky=tk.W)
         self._total_eta_var = tk.StringVar(value="预计总耗时：--")
         ttk.Label(
             time_row,
             textvariable=self._total_eta_var,
+            style="CardMuted.TLabel",
             justify=tk.RIGHT,
             wraplength=340,
         ).grid(row=0, column=1, sticky=tk.E)
+
         self._detail_var = tk.StringVar(value="尚未开始")
-        detail_label = ttk.Label(progress_frame, textvariable=self._detail_var, wraplength=900)
-        detail_label.pack(fill=tk.X, pady=(8, 10))
-        self.bind("<Configure>", lambda event: detail_label.configure(wraplength=max(200, event.width - 12)))
+        detail_label = ttk.Label(body, textvariable=self._detail_var, style="Card.TLabel", wraplength=900)
+        detail_label.pack(fill=tk.X, pady=(scale_size(self, 10), 0))
+        body.bind("<Configure>", lambda event: detail_label.configure(wraplength=max(200, event.width - 12)))
+
+        # Collapsible Run Log Card
         self._log_visible = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            progress_frame, text="运行记录", variable=self._log_visible, command=self._toggle_log,
-        ).pack(anchor=tk.W, pady=(0, 8))
-        self._log_frame = ttk.Frame(progress_frame)
+        self._log_card = Card(workspace)
+        self._log_card.pack(fill=tk.BOTH, expand=True)
+        log_head = ttk.Frame(self._log_card.body, style="Card.TFrame", padding=scale_size(self, (14, 8)))
+        log_head.pack(fill=tk.X)
+        self._log_toggle = ttk.Button(
+            log_head, text="▾ 运行记录", command=self._toggle_log_clicked, style="GhostMuted.TButton",
+        )
+        self._log_toggle.pack(side=tk.LEFT)
+        self._log_divider = Divider(self._log_card.body)
+        self._log_divider.pack(fill=tk.X)
+        self._log_frame = ttk.Frame(self._log_card.body, style="Card.TFrame")
         self._log_frame.pack(fill=tk.BOTH, expand=True)
-        log_view = TextView(self._log_frame, state=tk.DISABLED)
+        log_view = TextView(self._log_frame, state=tk.DISABLED, bordered=False)
         log_view.pack(fill=tk.BOTH, expand=True)
         self._log = log_view.text
 
-        stop_row = self._stop_row = ttk.Frame(progress_frame)
-        stop_row.pack(fill=tk.X, pady=(8, 0))
+        # Flush Bottom Action Bar
+        Divider(self).pack(fill=tk.X)
+        stop_row = self._stop_row = ttk.Frame(self, style="Card.TFrame", padding=scale_size(self, (22, 12)))
+        stop_row.pack(fill=tk.X)
         self._new_task_button = ttk.Button(
             stop_row,
             text="返回任务设置",
             command=on_new_task,
             state=tk.DISABLED,
-            bootstyle="secondary-outline",
+            style="Soft.TButton",
         )
         self._new_task_button.pack(side=tk.LEFT)
         self._resume_button = ttk.Button(
             stop_row,
             text="继续未完成任务",
             command=on_resume,
-            bootstyle="primary",
+            style="Primary.TButton",
         )
         self._stop_button = ttk.Button(
             stop_row,
             text="安全停止",
             command=on_stop,
             state=tk.DISABLED,
-            bootstyle="danger-outline",
+            style="DangerSoft.TButton",
         )
         self._stop_button.pack(side=tk.RIGHT)
+        self._memory_var = tk.StringVar(value="")
+        ttk.Label(stop_row, textvariable=self._memory_var, style="CardSmall.TLabel").pack(
+            side=tk.RIGHT, padx=(0, scale_size(self, 14)),
+        )
 
     @property
     def completed(self) -> bool:
         return self._progress_mode == "completed"
 
+    def set_memory(self, text: str) -> None:
+        self._memory_var.set(text)
+
+    def _toggle_log_clicked(self) -> None:
+        self._log_visible.set(not self._log_visible.get())
+        self._toggle_log()
+
     def _toggle_log(self) -> None:
         if self._log_visible.get():
-            self._log_frame.pack(fill=tk.BOTH, expand=True, before=self._stop_row)
+            self._log_toggle.configure(text="▾ 运行记录")
+            self._log_divider.pack(fill=tk.X)
+            self._log_frame.pack(fill=tk.BOTH, expand=True)
+            self._log_card.pack_configure(fill=tk.BOTH, expand=True)
         else:
+            self._log_toggle.configure(text="▸ 运行记录")
+            self._log_divider.pack_forget()
             self._log_frame.pack_forget()
+            self._log_card.pack_configure(fill=tk.X, expand=False)
 
     def apply_theme(self, style: ttk.Style) -> None:
-        colors = style.colors
+        p = get_palette(style)
         self._log.configure(
-            background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.inputfg,
-            selectbackground=colors.selectbg, selectforeground=colors.selectfg,
+            background=p.card,
+            foreground=p.fg,
+            insertbackground=p.fg,
+            selectbackground=p.row_sel,
+            selectforeground=p.row_sel_fg,
         )
-        log_colors = (
-            {"warning": "#a56a00", "error": "#b42318", "success": "#19713f"}
-            if style.theme.type == "light"
-            else {"warning": colors.warning, "error": colors.danger, "success": colors.success}
-        )
-        for tag, color in log_colors.items():
+        for tag, color in (("warning", p.warning), ("error", p.danger), ("success", p.success)):
             self._log.tag_configure(tag, foreground=color)
 
     def set_running(self, running: bool) -> None:
@@ -167,7 +198,7 @@ class TaskProgress(ttk.Frame):
 
     def set_resume_available(self, available: bool) -> None:
         if available:
-            self._resume_button.pack(side=tk.LEFT, padx=(8, 0), after=self._new_task_button)
+            self._resume_button.pack(side=tk.LEFT, padx=(scale_size(self, 8), 0), after=self._new_task_button)
         else:
             self._resume_button.pack_forget()
 
@@ -328,7 +359,6 @@ class TaskProgress(ttk.Frame):
             self._progress_var.set(percentage)
             self._progress_percent_var.set(f"{percentage}%")
 
-    # 只累计真实抓取时间，安全验证暂停时间不进入预计进度。
     def _active_seconds(self, now: float | None = None) -> float:
         current = time.monotonic() if now is None else now
         if self._progress_mode == "running" and self._active_started_at is not None:
@@ -403,7 +433,7 @@ class TaskProgress(ttk.Frame):
                 f"{self._progress_state.get('detail_total', 0)}"
             )
         parts.append(f"已获取 {self._progress_state.get('records', 0)} 条")
-        self._detail_var.set("  |  ".join(parts))
+        self._detail_var.set("  ·  ".join(parts))
 
     def append_log(self, text: str, level: str = "") -> None:
         line = text.rstrip() + "\n"

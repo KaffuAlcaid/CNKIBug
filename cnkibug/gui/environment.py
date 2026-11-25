@@ -10,20 +10,37 @@ from threading import Event, Thread
 from tkinter import filedialog
 
 import ttkbootstrap as ttk
-from . import dialogs as messagebox
-from .appearance import TextView
+from ttkbootstrap.utility import scale_size
 
 from ..app.runtime import save_config
 from ..browser.environment import (
-    EnvironmentCancelled, EnvironmentCheck, browser_cache_directory, check_environment, install_chromium,
+    EnvironmentCancelled,
+    EnvironmentCheck,
+    browser_cache_directory,
+    check_environment,
+    install_chromium,
 )
+from . import dialogs as messagebox
+from .appearance import Card, Divider, TextView, configure_window_surface, place_toplevel
 
 
 class EnvironmentPanel(ttk.Frame):
-    def __init__(self, parent, data_dir: Path, get_output_dir: Callable[[], Path], *,
-                 can_run: Callable[[], bool] = lambda: True, on_change: Callable[[], None] = lambda: None,
-                 show_actions: bool = True, show_directories: bool = True):
-        super().__init__(parent)
+    def __init__(
+        self,
+        parent,
+        data_dir: Path,
+        get_output_dir: Callable[[], Path],
+        *,
+        can_run: Callable[[], bool] = lambda: True,
+        on_change: Callable[[], None] = lambda: None,
+        show_actions: bool = True,
+        show_directories: bool = True,
+        surface: str = "card",
+    ):
+        frame_style = "Card.TFrame" if surface == "card" else "Canvas.TFrame"
+        label_style = "Card.TLabel" if surface == "card" else "Canvas.TLabel"
+        muted_style = "CardMuted.TLabel" if surface == "card" else "CanvasMuted.TLabel"
+        super().__init__(parent, style=frame_style)
         self.data_dir, self.get_output_dir = data_dir, get_output_dir
         self.can_run, self.on_change = can_run, on_change
         self.results: dict[str, EnvironmentCheck] = {}
@@ -40,29 +57,35 @@ class EnvironmentPanel(ttk.Frame):
             rows += [("data", "用户数据目录"), ("output", "论文保存目录")]
         self._labels = {}
         for index, (key, title) in enumerate(rows):
-            row = ttk.Frame(self, padding=(0, 6))
+            row = ttk.Frame(self, style=frame_style, padding=(0, scale_size(self, 5)))
             row.grid(row=index, column=0, sticky=tk.EW)
-            ttk.Label(row, text=title).pack(side=tk.LEFT)
-            label = ttk.Label(row, text="未检查", bootstyle="secondary")
+            ttk.Label(row, text=title, style=label_style).pack(side=tk.LEFT)
+            label = ttk.Label(row, text="未检查", style="BadgeNeutral.TLabel")
             label.pack(side=tk.RIGHT)
             self._labels[key] = label
         details_view = TextView(self, height=5, state=tk.DISABLED)
-        details_view.grid(row=len(rows), column=0, sticky=tk.NSEW, pady=(8, 8))
+        details_view.grid(row=len(rows), column=0, sticky=tk.NSEW, pady=scale_size(self, (10, 8)))
         self._details = details_view.text
         self.rowconfigure(len(rows), weight=1)
         self._status = tk.StringVar(self, "等待检查")
-        ttk.Label(self, textvariable=self._status, wraplength=540).grid(row=len(rows) + 1, column=0, sticky=tk.W)
-        self._progress = ttk.Progressbar(self, mode="indeterminate")
-        self._progress.grid(row=len(rows) + 2, column=0, sticky=tk.EW, pady=8)
+        ttk.Label(self, textvariable=self._status, style=muted_style, wraplength=540).grid(
+            row=len(rows) + 1, column=0, sticky=tk.W,
+        )
+        self._progress = ttk.Progressbar(self, mode="indeterminate", bootstyle="primary")
+        self._progress.grid(row=len(rows) + 2, column=0, sticky=tk.EW, pady=scale_size(self, 8))
         self._progress.grid_remove()
-        actions = ttk.Frame(self)
-        actions.grid(row=len(rows) + 3, column=0, sticky=tk.EW)
-        self._check_button = ttk.Button(actions, text="开始检查", command=self.check, bootstyle="secondary-outline")
+        actions = ttk.Frame(self, style=frame_style)
+        actions.grid(row=len(rows) + 3, column=0, sticky=tk.EW, pady=(scale_size(self, 8), 0))
+        self._check_button = ttk.Button(actions, text="开始检查", command=self.check, style="Soft.TButton")
         self._check_button.pack(side=tk.LEFT)
-        self._install_button = ttk.Button(actions, text="安装 Chromium", command=self.install, state=tk.DISABLED)
+        self._install_button = ttk.Button(
+            actions, text="安装 Chromium", command=self.install, state=tk.DISABLED, style="Primary.TButton",
+        )
         if sys.platform == "linux":
-            self._install_button.pack(side=tk.LEFT, padx=8)
-        self._cancel_button = ttk.Button(actions, text="取消", command=self.cancel, bootstyle="secondary-outline", state=tk.DISABLED)
+            self._install_button.pack(side=tk.LEFT, padx=(scale_size(self, 8), 0))
+        self._cancel_button = ttk.Button(
+            actions, text="取消", command=self.cancel, style="Ghost.TButton", state=tk.DISABLED,
+        )
         self._cancel_button.pack(side=tk.RIGHT)
         if not show_actions:
             actions.grid_remove()
@@ -94,7 +117,7 @@ class EnvironmentPanel(ttk.Frame):
             self._details.delete("1.0", tk.END)
             self._details.configure(state=tk.DISABLED)
         for label in self._labels.values():
-            label.configure(text="检查中", bootstyle="secondary")
+            label.configure(text="检查中", style="BadgeInfo.TLabel")
         self.busy, self.ready = True, False
         self._cancelled.clear()
         self._status.set("正在安装 Chromium" if installing else "正在检查运行环境")
@@ -109,8 +132,10 @@ class EnvironmentPanel(ttk.Frame):
             try:
                 if installing:
                     install_chromium(self._cancelled, lambda line: self._queue.put(("output", line)))
-                results = check_environment(self.data_dir, output_dir, self._cancelled,
-                                            lambda item: self._queue.put(("item", item)))
+                results = check_environment(
+                    self.data_dir, output_dir, self._cancelled,
+                    lambda item: self._queue.put(("item", item)),
+                )
                 self._queue.put(("done", results))
             except EnvironmentCancelled:
                 self._queue.put(("cancelled", None))
@@ -144,15 +169,19 @@ class EnvironmentPanel(ttk.Frame):
                     self.results[value.key] = value
                     label = self._labels.get(value.key)
                     if label is not None:
-                        text, style = {"ready": ("已就绪", "success"), "missing": ("需要安装", "warning"),
-                                       "pending": ("待检查", "secondary"), "error": ("需要处理", "danger")}[value.status]
-                        label.configure(text=text, bootstyle=style)
+                        text, badge_style = {
+                            "ready": ("已就绪", "BadgeSuccess.TLabel"),
+                            "missing": ("需要安装", "BadgeWarning.TLabel"),
+                            "pending": ("待检查", "BadgeNeutral.TLabel"),
+                            "error": ("需要处理", "BadgeDanger.TLabel"),
+                        }[value.status]
+                        label.configure(text=text, style=badge_style)
                     self._append(f"{value.label}：{value.detail}\n")
                 else:
                     self.busy = False
                     for label in self._labels.values():
                         if label.cget("text") == "检查中":
-                            label.configure(text="待检查", bootstyle="secondary")
+                            label.configure(text="待检查", style="BadgeNeutral.TLabel")
                     self._progress.stop()
                     self._progress.grid_remove()
                     self._cancel_button.configure(state=tk.DISABLED)
@@ -163,7 +192,11 @@ class EnvironmentPanel(ttk.Frame):
                     self._install_button.configure(state=tk.NORMAL if self.installable else tk.DISABLED)
                     if kind == "error":
                         self._append(value)
-                    self._status.set("运行环境已就绪" if self.ready else "检查已取消" if kind == "cancelled" else "请查看需要处理的项目")
+                    self._status.set(
+                        "运行环境已就绪" if self.ready
+                        else "检查已取消" if kind == "cancelled"
+                        else "请查看需要处理的项目"
+                    )
                     self.on_change()
         except Empty:
             pass
@@ -183,43 +216,70 @@ class InitializationDialog:
         self._closing = False
         self.window = ttk.Toplevel(master=parent, title="CNKIBug - 初始化设置")
         self.window.withdraw()
+        self.window._cnkibug_surface = "canvas"
+        configure_window_surface(self.window, "canvas")
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self.window.bind("<Escape>", lambda _: self._close())
-        body = ttk.Frame(self.window, padding=18)
+
+        header = ttk.Frame(self.window, style="Card.TFrame", padding=scale_size(self.window, (20, 14)))
+        header.pack(fill=tk.X)
+        ttk.Label(header, text="初始化设置", style="CardHeading.TLabel").pack(anchor=tk.W)
+        Divider(self.window).pack(fill=tk.X)
+
+        footer_wrap = ttk.Frame(self.window, style="Card.TFrame")
+        footer_wrap.pack(side=tk.BOTTOM, fill=tk.X)
+        Divider(footer_wrap).pack(fill=tk.X)
+        footer = ttk.Frame(footer_wrap, style="Card.TFrame", padding=scale_size(self.window, (20, 12)))
+        footer.pack(fill=tk.X)
+        self._later = ttk.Button(footer, text="稍后设置", command=self._close, style="Soft.TButton")
+        self._later.pack(side=tk.LEFT)
+        self._primary = ttk.Button(footer, text="开始检查", command=self._primary_action, width=16, style="Primary.TButton")
+        self._primary.pack(side=tk.RIGHT)
+
+        body = ttk.Frame(self.window, style="Canvas.TFrame", padding=scale_size(self.window, (20, 14)))
         body.pack(fill=tk.BOTH, expand=True)
-        footer = ttk.Frame(body)
-        footer.pack(side=tk.BOTTOM, fill=tk.X)
-        ttk.Label(body, text="初始化设置", style="Heading.TLabel").pack(anchor=tk.W, pady=(0, 14))
-        paths = ttk.Labelframe(body, text="保存位置", padding=12)
+
+        paths_card = Card(body, padding=scale_size(self.window, (16, 12)))
+        paths_card.pack(fill=tk.X)
+        ttk.Label(paths_card.body, text="保存位置", style="CardSection.TLabel").pack(
+            anchor=tk.W, pady=(0, scale_size(self.window, 10)),
+        )
+        paths = ttk.Frame(paths_card.body, style="Card.TFrame")
         paths.pack(fill=tk.X)
         paths.columnconfigure(1, weight=1)
         from ..fileio.paths import get_real_desktop_path
 
         self.output = tk.StringVar(self.window, config.get("output_dir") or get_real_desktop_path())
         for row, text in enumerate(("用户数据", "论文保存目录", "浏览器缓存")):
-            ttk.Label(paths, text=text).grid(row=row, column=0, sticky=tk.W, padx=(0, 12), pady=6)
-        ttk.Label(paths, text=str(config_path.parent), wraplength=430).grid(row=0, column=1, columnspan=2, sticky=tk.W)
+            ttk.Label(paths, text=text, style="CardMuted.TLabel").grid(
+                row=row, column=0, sticky=tk.W,
+                padx=(0, scale_size(self.window, 12)), pady=scale_size(self.window, 5),
+            )
+        ttk.Label(paths, text=str(config_path.parent), style="Card.TLabel", wraplength=430).grid(
+            row=0, column=1, columnspan=2, sticky=tk.W,
+        )
         self._output_entry = ttk.Entry(paths, textvariable=self.output)
         self._output_entry.grid(row=1, column=1, sticky=tk.EW)
-        self._browse = ttk.Button(paths, text="浏览", command=self._choose_output, bootstyle="secondary")
-        self._browse.grid(row=1, column=2, padx=(8, 0))
-        ttk.Label(paths, text=str(browser_cache_directory()), wraplength=430).grid(row=2, column=1, columnspan=2, sticky=tk.W)
-        environment = ttk.Labelframe(body, text="运行环境", padding=12)
-        environment.pack(fill=tk.BOTH, expand=True, pady=14)
-        self.panel = EnvironmentPanel(environment, config_path.parent, lambda: Path(self.output.get()),
-                                      on_change=self._sync, show_actions=False, show_directories=False)
+        self._browse = ttk.Button(paths, text="浏览", command=self._choose_output, style="SoftCompact.TButton")
+        self._browse.grid(row=1, column=2, padx=(scale_size(self.window, 8), 0))
+        ttk.Label(paths, text=str(browser_cache_directory()), style="Card.TLabel", wraplength=430).grid(
+            row=2, column=1, columnspan=2, sticky=tk.W,
+        )
+
+        env_card = Card(body, padding=scale_size(self.window, (16, 12)))
+        env_card.pack(fill=tk.BOTH, expand=True, pady=(scale_size(self.window, 12), 0))
+        ttk.Label(env_card.body, text="运行环境", style="CardSection.TLabel").pack(
+            anchor=tk.W, pady=(0, scale_size(self.window, 8)),
+        )
+        self.panel = EnvironmentPanel(
+            env_card.body, config_path.parent, lambda: Path(self.output.get()),
+            on_change=self._sync, show_actions=False, show_directories=False, surface="card",
+        )
         self.panel.pack(fill=tk.BOTH, expand=True)
-        self._later = ttk.Button(footer, text="稍后设置", command=self._close, bootstyle="secondary-outline")
-        self._later.pack(side=tk.LEFT)
-        self._primary = ttk.Button(footer, text="开始检查", command=self._primary_action, width=16)
-        self._primary.pack(side=tk.RIGHT)
+
         self.window.update_idletasks()
-        width = min(680, parent.winfo_screenwidth() - 60)
-        height = min(max(610, self.window.winfo_reqheight()), parent.winfo_screenheight() - 60)
-        self.window.geometry(f"{width}x{height}")
-        self.window.minsize(min(540, width), min(560, height))
-        self.window.position_center()
+        place_toplevel(self.window, parent, 680, 620, min_width=540, min_height=540)
         self.window.deiconify()
         self.window.grab_set()
         self.window.after(100, self.panel.check)
@@ -240,7 +300,12 @@ class InitializationDialog:
         self._later.configure(state=tk.DISABLED if self.panel.busy else tk.NORMAL)
         self._output_entry.configure(state=tk.DISABLED if self.panel.busy else tk.NORMAL)
         self._browse.configure(state=tk.DISABLED if self.panel.busy else tk.NORMAL)
-        self._primary.configure(text="取消" if self.panel.busy else "开始使用" if self.panel.ready else "安装 Chromium" if self.panel.installable else "开始检查")
+        self._primary.configure(
+            text="取消" if self.panel.busy
+            else "开始使用" if self.panel.ready
+            else "安装 Chromium" if self.panel.installable
+            else "开始检查"
+        )
 
     def _primary_action(self) -> None:
         if self.panel.busy:
@@ -254,7 +319,10 @@ class InitializationDialog:
                 directory.mkdir(parents=True, exist_ok=True)
                 with TemporaryFile(dir=directory):
                     pass
-                config = save_config(self.config_path, {**self.config, "output_dir": str(directory), "linux_setup_completed": True})
+                config = save_config(
+                    self.config_path,
+                    {**self.config, "output_dir": str(directory), "linux_setup_completed": True},
+                )
             except (OSError, ValueError) as error:
                 messagebox.showerror("无法保存设置", str(error), parent=self.window)
                 return

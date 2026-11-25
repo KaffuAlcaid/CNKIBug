@@ -45,7 +45,7 @@ from ..workflow.state import (
 from .events import GuiEvent, GuiEventSink
 from . import dialogs as messagebox
 from .advanced import confirm_advanced_task
-from .appearance import apply_appearance
+from .appearance import Divider, apply_appearance, load_brand_logo, switch_theme
 from .settings import SettingsDialog
 from .task_form import GuiTaskRequest, TaskForm
 from .task_progress import TaskProgress
@@ -97,7 +97,9 @@ class CNKIBugApp:
         )
         self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.minsize(min(scale_size(self.root, 820), width), min(scale_size(self.root, 620), height))
+        self._icon_path = icon_path
         self._icon_image: tk.PhotoImage | None = None
+        self._logo_image: tk.PhotoImage | None = None
         self._set_window_icon(icon_path)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -236,13 +238,16 @@ class CNKIBugApp:
         self.runtime = replace(self.runtime, config=config.copy())
         logging.getLogger().setLevel(config["log_level"])
         style = self.root.style
-        if style.theme_use() != config["gui_theme"]:
-            style.theme_use(config["gui_theme"])
-        apply_appearance(self.root)
+        switch_theme(self.root, config["gui_theme"])
         self._task_progress.apply_theme(style)
         viewer = getattr(self, "_results_window", None)
         if viewer is not None:
             viewer.settings = self.settings
+            if viewer.window.winfo_exists() and hasattr(viewer, "apply_theme"):
+                viewer.apply_theme()
+        downloads = getattr(self, "_download_tasks_window", None)
+        if downloads is not None and downloads.window.winfo_exists() and hasattr(downloads, "apply_theme"):
+            downloads.apply_theme()
 
     def _open_log_directory(self) -> None:
         try:
@@ -287,49 +292,65 @@ class CNKIBugApp:
 
     def _build_ui(self) -> None:
         apply_appearance(self.root)
-        container = ttk.Frame(self.root, padding=scale_size(self.root, (24, 18, 24, 12)))
-        container.pack(fill=tk.BOTH, expand=True)
+        header_bar = ttk.Frame(
+            self.root, style="Header.TFrame", padding=scale_size(self.root, (22, 12, 22, 12)),
+        )
+        header_bar.pack(fill=tk.X)
 
-        header = ttk.Frame(container)
-        header.pack(fill=tk.X, pady=(0, 20))
-        ttk.Label(header, text="CNKIBug", style="Title.TLabel").pack(
-            side=tk.LEFT,
-            anchor=tk.NW,
+        brand = ttk.Frame(header_bar, style="Header.TFrame")
+        brand.pack(side=tk.LEFT)
+        self._logo_image = load_brand_logo(self.root, self._icon_path, size=26)
+        if self._logo_image is not None:
+            ttk.Label(brand, image=self._logo_image, style="Card.TLabel").pack(
+                side=tk.LEFT, padx=(0, scale_size(self.root, 10)),
+            )
+        ttk.Label(brand, text="CNKIBug", style="CardTitle.TLabel").pack(side=tk.LEFT)
+        ttk.Label(brand, text=f"v{APP_VERSION}", style="BadgeNeutral.TLabel").pack(
+            side=tk.LEFT, padx=(scale_size(self.root, 8), 0),
         )
-        header_actions = ttk.Frame(header)
-        header_actions.pack(side=tk.RIGHT)
-        toolbar = ttk.Frame(header_actions)
-        toolbar.pack(fill=tk.X)
-        self._maintenance_actions = ttk.Menubutton(toolbar, text="工具", bootstyle="secondary-outline")
-        self._maintenance_actions.pack(side=tk.RIGHT)
-        tools = tk.Menu(self._maintenance_actions, tearoff=False)
-        tools.add_command(label="打开日志文件夹", command=self._open_log_directory)
-        tools.add_command(label="清理日志与报告", command=self._cleanup_logs_and_reports)
-        tools.add_separator()
-        tools.add_command(label="关于 CNKIBug", command=self._show_info)
-        self._maintenance_actions.configure(menu=tools)
+
+        toolbar = ttk.Frame(header_bar, style="Header.TFrame")
+        toolbar.pack(side=tk.RIGHT)
+        nav_gap = scale_size(self.root, 4)
+        self._downloads_button = ttk.Button(
+            toolbar, text="下载任务", command=self._show_download_tasks, style="Ghost.TButton",
+        )
+        self._downloads_button.pack(side=tk.LEFT, padx=(0, nav_gap))
+        ttk.Button(
+            toolbar, text="论文结果", command=self._show_results, style="Ghost.TButton",
+        ).pack(side=tk.LEFT, padx=(0, nav_gap))
         self._settings_button = ttk.Button(
-            toolbar, text="设置", command=self._open_settings, bootstyle="secondary-outline",
+            toolbar, text="设置", command=self._open_settings, style="Ghost.TButton",
         )
-        self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
-        ttk.Button(toolbar, text="论文结果", command=self._show_results, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=(0, 8))
-        self._downloads_button = ttk.Button(toolbar, text="下载任务", command=self._show_download_tasks, bootstyle="secondary-outline")
-        self._downloads_button.pack(side=tk.RIGHT, padx=(0, 8))
+        self._settings_button.pack(side=tk.LEFT, padx=(0, nav_gap))
+        self._maintenance_actions = ttk.Menubutton(toolbar, text="工具", style="Ghost.TMenubutton")
+        self._maintenance_actions.pack(side=tk.LEFT)
+        self._tools_menu = tk.Menu(self._maintenance_actions, tearoff=False)
+        self._tools_menu.add_command(label="打开日志文件夹", command=self._open_log_directory)
+        self._tools_menu.add_command(label="清理日志与报告", command=self._cleanup_logs_and_reports)
+        self._tools_menu.add_separator()
+        self._tools_menu.add_command(label="内存：正在读取", state=tk.DISABLED)
+        self._memory_menu_index = self._tools_menu.index("end")
+        self._tools_menu.add_separator()
+        self._tools_menu.add_command(label="关于 CNKIBug", command=self._show_info)
+        self._maintenance_actions.configure(menu=self._tools_menu)
+
+        Divider(self.root).pack(fill=tk.X)
+
+        self._main_area = ttk.Frame(self.root, style="Canvas.TFrame")
+        self._main_area.pack(fill=tk.BOTH, expand=True)
 
         self._task_form = TaskForm(
-            container,
+            self._main_area,
             output_dir=self.runtime.config.get("output_dir", ""),
             on_review=self._review_task,
         )
         self._task_form.pack(fill=tk.BOTH, expand=True)
         self._task_progress = TaskProgress(
-            container, on_stop=self._request_stop, on_new_task=self._show_form,
+            self._main_area, on_stop=self._request_stop, on_new_task=self._show_form,
             on_resume=self._resume_task,
         )
-        self._footer = ttk.Frame(container)
-        self._footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
         self._memory_var = tk.StringVar(value="内存：正在读取")
-        ttk.Label(self._footer, textvariable=self._memory_var, bootstyle="secondary").pack(side=tk.RIGHT)
 
     # 从表单生成任务请求，预览、恢复和启动流程都以同一请求模型为边界。
     def _review_task(self) -> None:
@@ -720,7 +741,10 @@ class CNKIBugApp:
                     self._download_verification_prompt = DownloadVerificationPrompt(self.root, service)
                 self._download_verification_prompt.update(snapshot)
             pending = sum(batch["state"] != "completed" for batch in snapshot["batches"])
-            self._downloads_button.configure(text=f"下载任务 ({pending})" if pending else "下载任务")
+            self._downloads_button.configure(
+                text=f"下载任务 · {pending}" if pending else "下载任务",
+                style="Soft.TButton" if pending else "Ghost.TButton",
+            )
             viewer = self._results_window
             if viewer is not None and viewer.window.winfo_exists():
                 viewer.sync_download_tasks(snapshot)
@@ -764,8 +788,8 @@ class CNKIBugApp:
         if self._running or self._close_when_done:
             return
         self._task_progress.pack_forget()
-        self._task_form.show(self._footer)
-        self._settings_button.pack(side=tk.RIGHT, padx=(0, 8))
+        self._task_form.show()
+        self._settings_button.pack(side=tk.LEFT, padx=(0, scale_size(self.root, 4)), before=self._maintenance_actions)
         self._offer_star()
 
     def _offer_star(self) -> None:
@@ -819,7 +843,15 @@ class CNKIBugApp:
             return
 
     def _update_memory_status(self) -> None:
-        self._memory_var.set(format_memory(self._memory_sampler.sample()))
+        text = format_memory(self._memory_sampler.sample())
+        self._memory_var.set(text)
+        if hasattr(self, "_tools_menu") and self._memory_menu_index is not None:
+            try:
+                self._tools_menu.entryconfigure(self._memory_menu_index, label=text)
+            except tk.TclError:
+                pass
+        if hasattr(self, "_task_progress"):
+            self._task_progress.set_memory(text)
 
     # 停止和关闭都先通知工作线程收尾，避免丢失结果或留下浏览器进程。
     def _request_stop(self) -> None:
