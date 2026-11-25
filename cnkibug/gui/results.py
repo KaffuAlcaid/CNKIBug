@@ -8,38 +8,64 @@ from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
-from tkinter import filedialog
+from tkinter import filedialog, font
 
 import ttkbootstrap as ttk
 from ttkbootstrap.utility import scale_size
-from . import dialogs as messagebox
 
-from ..downloads.models import ITEM_LABELS, restore_paper, same_paper
 from ..cnki.details import fetch_selected_details
 from ..cnki.journals import fetch_journal_info
 from ..cnki.models import Paper, deduplicate_papers
+from ..downloads.models import ITEM_LABELS, restore_paper, same_paper
 from ..fileio.papers import associate_pdf, read_papers, save_papers, split_values
+from ..fileio.paths import get_real_desktop_path, open_directory
 from ..fileio.pdf_links import PdfIndex, associate_pdf_folder, pdf_problem, restore_pdf_links
 from ..fileio.zotero import send_papers_to_zotero
-from ..fileio.paths import get_real_desktop_path
-from .events import GuiEvent, GuiEventSink
+from . import dialogs as messagebox
+from .appearance import (
+    Card,
+    Divider,
+    TextView,
+    apply_zebra,
+    configure_window_surface,
+    get_checkbox_icons,
+    get_palette,
+    place_toplevel,
+    style_treeview,
+)
 from .download_dialog import DownloadDialog
+from .events import GuiEvent, GuiEventSink
 from .pdf_links import PdfFolderDialog, PdfLinksReviewDialog
-from .appearance import TextView
 from .zotero_review import ZoteroLibraryDialog, ZoteroReviewDialog
 
 
+_SEARCH_PLACEHOLDER = "搜索论文标题或作者..."
+_FORMAT_LABELS = (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris"), ("BibTeX", "bib"))
+
+
 class ResultsWindow:
-    def __init__(self, parent, papers: list[Paper], *, settings, paths, output_dir: Path | None = None,
-                 get_output_dir=None, initial_format="xlsx", can_run=lambda: True,
-                 prepare_browser=lambda: True, download_service=None, show_download_tasks=lambda: None,
-                 reserve_browser=lambda: True, release_browser=lambda: None):
+    def __init__(
+        self,
+        parent,
+        papers: list[Paper],
+        *,
+        settings,
+        paths,
+        output_dir: Path | None = None,
+        get_output_dir=None,
+        initial_format="xlsx",
+        can_run=lambda: True,
+        prepare_browser=lambda: True,
+        download_service=None,
+        show_download_tasks=lambda: None,
+        reserve_browser=lambda: True,
+        release_browser=lambda: None,
+    ):
         self.window = ttk.Toplevel(parent)
         self.window.title("CNKIBug - 论文结果")
-        width = min(1200, parent.winfo_screenwidth() - 70)
-        height = min(880, parent.winfo_screenheight() - 90)
-        self.window.geometry(f"{width}x{height}")
-        self.window.minsize(min(780, width), min(560, height))
+        self.window._cnkibug_surface = "canvas"
+        configure_window_surface(self.window, "canvas")
+        place_toplevel(self.window, parent, 1180, 820, min_width=820, min_height=560)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
         self.settings, self.paths = settings, paths
         self.output_dir = output_dir
@@ -78,6 +104,9 @@ class ResultsWindow:
         self._descending = True
         self._papers: list[Paper] = []
         self._visible: list[int] = []
+        self._placeholder_active = False
+        self._suppress_search = False
+        self._check_icons: dict[str, tk.PhotoImage] = {}
         self._build()
         self.set_papers(papers)
         self.window.bind("<FocusIn>", lambda _: self._show_output_dir())
@@ -85,39 +114,52 @@ class ResultsWindow:
         self.window.after(150, self._position_details)
 
     def _build(self):
-        body = ttk.Frame(self.window, padding=18)
-        body.pack(fill=tk.BOTH, expand=True)
-        footer = ttk.Frame(body)
-        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
-        toolbar = self._toolbar = ttk.Frame(body)
-        toolbar.pack(fill=tk.X, pady=(0, 10))
-        toolbar.columnconfigure(2, weight=1)
-        self._open_button = ttk.Button(toolbar, text="打开文件", command=self.open_file, bootstyle="secondary-outline")
-        self._open_button.grid(row=0, column=0, padx=(0, 12))
-        ttk.Label(toolbar, text="标题 / 作者").grid(row=0, column=1, padx=(0, 6))
+        # Top Header Toolbar Surface
+        self._top_surface = ttk.Frame(
+            self.window, style="Card.TFrame", padding=scale_size(self.window, (16, 10, 16, 10)),
+        )
+        self._top_surface.pack(fill=tk.X)
+
+        toolbar = self._toolbar = ttk.Frame(self._top_surface, style="Card.TFrame")
+        toolbar.pack(fill=tk.X, pady=(0, scale_size(self.window, 8)))
+        toolbar.columnconfigure(1, weight=1)
+        self._open_button = ttk.Button(toolbar, text="打开文件", command=self.open_file, style="SoftCompact.TButton")
+        self._open_button.grid(row=0, column=0, padx=(0, scale_size(self.window, 10)))
+
         self.search = tk.StringVar(self.window)
-        search = ttk.Entry(toolbar, textvariable=self.search, width=18)
-        search.grid(row=0, column=2, sticky="ew")
-        self.search.trace_add("write", lambda *_: self._populate())
+        self._search_entry = ttk.Entry(toolbar, textvariable=self.search, width=20)
+        self._search_entry.grid(row=0, column=1, sticky="ew")
+        self._search_entry.bind("<FocusIn>", self._on_search_focus_in)
+        self._search_entry.bind("<FocusOut>", self._on_search_focus_out)
+        self.search.trace_add("write", self._on_search_write)
+        self._set_search_placeholder()
+
         self.query = tk.StringVar(self.window, value="全部检索项")
         self._query_box = ttk.Combobox(toolbar, textvariable=self.query, state="readonly", width=18)
-        self._query_box.grid(row=0, column=3, padx=(8, 0))
+        self._query_box.grid(row=0, column=2, padx=(scale_size(self.window, 8), 0))
         self._query_box.bind("<<ComboboxSelected>>", lambda _: self._populate())
+
         self.kind = tk.StringVar(self.window, value="全部类型")
         self._kind_box = ttk.Combobox(toolbar, textvariable=self.kind, state="readonly", width=10)
-        self._kind_box.grid(row=0, column=4, padx=(8, 0))
+        self._kind_box.grid(row=0, column=3, padx=(scale_size(self.window, 8), 0))
         self._kind_box.bind("<<ComboboxSelected>>", lambda _: self._populate())
 
-        self._action_bar = ttk.Frame(body)
-        self._action_bar.pack(fill=tk.X, pady=(0, 10))
+        self._show_detail = tk.BooleanVar(self.window, value=True)
+        self._detail_toggle = ttk.Button(
+            toolbar, text="隐藏详情", command=self._toggle_details_clicked, style="GhostCompact.TButton",
+        )
+        self._detail_toggle.grid(row=0, column=4, padx=(scale_size(self.window, 8), 0))
+
+        # Row 2: Batch operations + Collapsed Export Menu
+        self._action_bar = ttk.Frame(self._top_surface, style="Card.TFrame")
+        self._action_bar.pack(fill=tk.X)
         self._action_bar.columnconfigure(0, weight=1)
-        self._selection_actions = ttk.Frame(self._action_bar)
+        self._selection_actions = ttk.Frame(self._action_bar, style="Card.TFrame")
         self._selection_actions.grid(row=0, column=0, sticky="w")
-        self._export_actions = ttk.Frame(self._action_bar)
+        self._export_actions = ttk.Frame(self._action_bar, style="Card.TFrame")
         self._export_actions.grid(row=0, column=1, sticky="e")
-        self._actions_wrapped: bool | None = None
-        self._action_bar.bind("<Configure>", self._arrange_actions)
-        self._selection_button = ttk.Menubutton(self._selection_actions, text="选择", bootstyle="secondary-outline")
+
+        self._selection_button = ttk.Menubutton(self._selection_actions, text="选择", style="SoftCompact.TMenubutton")
         self._selection_button.pack(side=tk.LEFT)
         selection_menu = tk.Menu(self._selection_button, tearoff=False)
         selection_menu.add_command(label="全选筛选结果", command=self._select_visible)
@@ -134,10 +176,14 @@ class ResultsWindow:
                 command=lambda kind=operation, failures=failed: self._select_by_status(kind, failures),
             )
         self._selection_button.configure(menu=selection_menu)
-        self._download_button = ttk.Button(self._selection_actions, text="下载 PDF", command=self._download, bootstyle="secondary-outline")
-        self._download_button.pack(side=tk.LEFT, padx=(8, 0))
-        self._paper_actions = ttk.Menubutton(self._selection_actions, text="论文操作", bootstyle="secondary-outline")
-        self._paper_actions.pack(side=tk.LEFT, padx=(8, 0))
+
+        self._download_button = ttk.Button(
+            self._selection_actions, text="下载 PDF", command=self._download, style="SoftCompact.TButton",
+        )
+        self._download_button.pack(side=tk.LEFT, padx=(scale_size(self.window, 6), 0))
+
+        self._paper_actions = ttk.Menubutton(self._selection_actions, text="论文操作", style="GhostCompact.TMenubutton")
+        self._paper_actions.pack(side=tk.LEFT, padx=(scale_size(self.window, 6), 0))
         self._paper_menu = tk.Menu(self._paper_actions, tearoff=False)
         self._paper_menu.add_command(label="补抓所选详情", command=self._fetch_details)
         self._paper_menu.add_command(label="查询所选期刊信息", command=self._query_journals)
@@ -149,148 +195,302 @@ class ResultsWindow:
         self._paper_menu.add_separator()
         self._paper_menu.add_command(label="发送到 Zotero", command=self._send_zotero)
         self._paper_actions.configure(menu=self._paper_menu)
-        self._export_button = ttk.Button(self._export_actions, text="导出所选", command=self._export, bootstyle="primary")
-        self._export_button.pack(side=tk.RIGHT)
-        self._include_pdf = tk.BooleanVar(self.window, value=False)
-        self._pdf_export_check = ttk.Checkbutton(self._export_actions, text="附带 PDF", variable=self._include_pdf)
-        self._pdf_export_check.pack(side=tk.RIGHT, padx=(0, 10), before=self._export_button)
+
+        # Collapsed Export Format Picker + Primary Export CTA
         self.export_formats = {
             extension: tk.BooleanVar(self.window, value=extension == self._initial_format)
-            for extension in ("xlsx", "csv", "ris", "bib")
+            for _label, extension in _FORMAT_LABELS
         }
-        formats = ttk.Frame(self._export_actions)
-        formats.pack(side=tk.RIGHT, padx=10)
-        for label, extension in (("Excel", "xlsx"), ("CSV", "csv"), ("RIS", "ris"), ("BibTeX", "bib")):
-            ttk.Checkbutton(
-                formats, text=label, variable=self.export_formats[extension],
-                command=self._sync_export_types, bootstyle="primary",
-            ).pack(side=tk.LEFT, padx=(0, 12))
+        self._include_pdf = tk.BooleanVar(self.window, value=False)
+        self._export_format_button = ttk.Menubutton(
+            self._export_actions, text="格式：Excel", style="GhostCompact.TMenubutton",
+        )
+        self._export_format_button.pack(side=tk.LEFT, padx=(0, scale_size(self.window, 8)))
+        self._export_format_menu = tk.Menu(self._export_format_button, tearoff=False)
+        for label, extension in _FORMAT_LABELS:
+            self._export_format_menu.add_checkbutton(
+                label=label, variable=self.export_formats[extension], command=self._sync_export_types,
+            )
+        self._export_format_menu.add_separator()
+        self._export_format_menu.add_checkbutton(
+            label="RIS 附带本地 PDF", variable=self._include_pdf, command=self._sync_export_types,
+        )
+        self._pdf_menu_index = self._export_format_menu.index("end")
+        self._export_format_button.configure(menu=self._export_format_menu)
+
+        self._export_button = ttk.Button(
+            self._export_actions, text="导出所选", command=self._export, style="PrimaryCompact.TButton",
+        )
+        self._export_button.pack(side=tk.LEFT)
         self._sync_export_types()
 
-        self._operation_bar = ttk.Frame(footer)
-        self._operation_bar.pack(fill=tk.X)
-        self._continue_button = ttk.Button(self._operation_bar, text="立即继续", command=self._continue.set, bootstyle="secondary-outline")
-        self._stop_button = ttk.Button(self._operation_bar, text="停止下载", command=self.cancel.set, state=tk.DISABLED, bootstyle="danger-outline")
-        self._show_detail = tk.BooleanVar(self.window, value=True)
+        self._top_divider = Divider(self.window)
+        self._top_divider.pack(fill=tk.X)
 
-        self._results_area = ttk.Frame(body)
-        self._results_area.pack(fill=tk.BOTH, expand=True)
-        self._results_area.columnconfigure(0, weight=1)
-        self._results_area.rowconfigure(0, weight=1)
-        self._empty_results = ttk.Frame(self._results_area)
-        self._empty_results.grid(row=0, column=0, sticky="nsew")
-        empty_content = ttk.Frame(self._empty_results)
-        empty_content.place(relx=.5, rely=.45, anchor=tk.CENTER)
-        self._empty_title = ttk.Label(empty_content, text="尚无论文结果", style="Heading.TLabel")
-        self._empty_title.pack()
-        self._empty_action = ttk.Button(
-            empty_content, text="打开结果文件", command=self.open_file, bootstyle="primary",
+        # Single-line Flush Bottom Status Bar
+        bottom_wrap = ttk.Frame(self.window, style="Card.TFrame")
+        bottom_wrap.pack(side=tk.BOTTOM, fill=tk.X)
+        Divider(bottom_wrap).pack(fill=tk.X)
+        footer = ttk.Frame(bottom_wrap, style="Card.TFrame", padding=scale_size(self.window, (16, 8)))
+        footer.pack(fill=tk.X)
+        footer.columnconfigure(1, weight=1)
+
+        self._summary = tk.StringVar(self.window)
+        ttk.Label(footer, textvariable=self._summary, style="CardMuted.TLabel").grid(
+            row=0, column=0, sticky="w",
         )
-        self._empty_action.pack(pady=(16, 0))
+
+        self._operation_bar = ttk.Frame(footer, style="Card.TFrame")
+        self._operation_bar.grid(row=0, column=1, sticky="ew", padx=scale_size(self.window, 14))
+        self._operation_status = tk.StringVar(self.window)
+        self._operation_label = ttk.Label(
+            self._operation_bar, textvariable=self._operation_status, style="CardMuted.TLabel",
+        )
+        self._operation_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._continue_button = ttk.Button(
+            self._operation_bar, text="立即继续", command=self._continue.set, style="SoftCompact.TButton",
+        )
+        self._stop_button = ttk.Button(
+            self._operation_bar, text="停止下载", command=self.cancel.set,
+            state=tk.DISABLED, style="DangerCompact.TButton",
+        )
+
+        self._output_text = tk.StringVar(self.window)
+        self._output_button = ttk.Button(
+            footer, textvariable=self._output_text, command=self._open_output_dir, style="GhostMuted.TButton",
+        )
+        self._output_button.grid(row=0, column=2, sticky="e")
+
+        # Main Workspace Area on Canvas
+        body = ttk.Frame(self.window, style="Canvas.TFrame", padding=scale_size(self.window, (16, 12, 16, 12)))
+        body.pack(fill=tk.BOTH, expand=True)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+        self._results_area = body
+
+        # Empty State Card
+        self._empty_results = Card(self._results_area)
+        self._empty_results.grid(row=0, column=0, sticky="nsew")
+        empty_content = ttk.Frame(self._empty_results.body, style="Card.TFrame")
+        empty_content.place(relx=0.5, rely=0.46, anchor=tk.CENTER)
+        self._empty_title = ttk.Label(empty_content, text="尚无论文结果", style="CardHeading.TLabel")
+        self._empty_title.pack()
+        self._empty_sub = ttk.Label(
+            empty_content, text="开始检索后结果将自动同步到此窗口，也可以直接打开已导出的 Excel 或 CSV 文件",
+            style="CardMuted.TLabel",
+        )
+        self._empty_sub.pack(pady=(scale_size(self.window, 6), 0))
+        self._empty_action = ttk.Button(
+            empty_content, text="打开结果文件", command=self.open_file, style="Primary.TButton",
+        )
+        self._empty_action.pack(pady=(scale_size(self.window, 16), 0))
+
+        # Panedwindow: Table Card (top) + Details Card (bottom)
         self._panes = ttk.Panedwindow(self._results_area, orient=tk.VERTICAL)
         self._panes.grid(row=0, column=0, sticky="nsew")
         self._detail_split_pending = True
         self._panes.bind("<Map>", self._position_details)
         self._panes.bind("<Configure>", self._position_details)
-        listing = ttk.Frame(self._panes)
-        self._panes.add(listing, weight=3)
+
+        listing_wrap = ttk.Frame(self._panes, style="Canvas.TFrame", padding=(0, 0, 0, scale_size(self.window, 4)))
+        self._panes.add(listing_wrap, weight=3)
+        listing_card = Card(listing_wrap)
+        listing_card.pack(fill=tk.BOTH, expand=True)
+        listing = listing_card.body
         listing.rowconfigure(0, weight=1)
         listing.columnconfigure(0, weight=1)
-        columns = ("checked", "title", "authors", "source", "publication_date", "status")
-        self.table = ttk.Treeview(listing, columns=columns, show="headings", selectmode="browse", height=10)
-        self.table.configure(style="Results.Treeview")
-        for key, label, size in (("checked", "勾选", 46), ("title", "论文标题", 470), ("authors", "作者", 130), ("source", "来源", 170), ("publication_date", "发表日期", 110), ("status", "状态", 120)):
-            anchor = tk.CENTER if key == "checked" else tk.W
-            self.table.heading(key, text=label, anchor=anchor, command=(lambda name=key: self._sort(name)))
+
+        self._check_icons = get_checkbox_icons(self.window)
+        columns = ("title", "authors", "source", "publication_date", "status")
+        self.table = ttk.Treeview(
+            listing, columns=columns, show="tree headings", selectmode="browse", height=10,
+        )
+        style_treeview(self.table)
+        self.table.heading("#0", text="选", anchor=tk.CENTER)
+        self.table.column(
+            "#0", width=scale_size(self.window, 48), minwidth=scale_size(self.window, 44),
+            stretch=False, anchor=tk.CENTER,
+        )
+        for key, label, size, min_w in (
+            ("title", "论文标题", 440, 200),
+            ("authors", "作者", 130, 88),
+            ("source", "来源", 160, 100),
+            ("publication_date", "发表日期", 104, 88),
+            ("status", "状态", 120, 88),
+        ):
+            self.table.heading(key, text=label, anchor=tk.W, command=(lambda name=key: self._sort(name)))
             self.table.column(
-                key, width=scale_size(self.window, size),
-                minwidth=scale_size(self.window, 40 if key == "checked" else 90),
-                stretch=key == "title", anchor=anchor,
+                key,
+                width=scale_size(self.window, size),
+                minwidth=scale_size(self.window, min_w),
+                stretch=key == "title",
+                anchor=tk.W,
             )
         self.table.grid(row=0, column=0, sticky="nsew")
-        vertical = ttk.Scrollbar(listing, orient=tk.VERTICAL, command=self.table.yview)
-        vertical.grid(row=0, column=1, sticky="ns")
-        horizontal = ttk.Scrollbar(listing, orient=tk.HORIZONTAL, command=self.table.xview)
-        horizontal.grid(row=1, column=0, sticky="ew")
-        self.table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        self._table_vscroll = ttk.Scrollbar(listing, orient=tk.VERTICAL, command=self.table.yview, bootstyle="secondary")
+        self._table_vscroll.grid(row=0, column=1, sticky="ns")
+        self._table_hscroll = ttk.Scrollbar(listing, orient=tk.HORIZONTAL, command=self.table.xview, bootstyle="secondary")
+        self._table_hscroll.grid(row=1, column=0, sticky="ew")
+        self.table.configure(yscrollcommand=self._on_table_vscroll, xscrollcommand=self._on_table_hscroll)
         self.table.bind("<Button-1>", self._click)
         self.table.bind("<space>", self._toggle_current)
         self.table.bind("<<TreeviewSelect>>", lambda _: self._show_paper())
 
-        self._details = ttk.Frame(self._panes, padding=(0, 8, 0, 0))
+        # Details Card Pane
+        self._details = ttk.Frame(self._panes, style="Canvas.TFrame", padding=(0, scale_size(self.window, 4), 0, 0))
         self._panes.add(self._details, weight=2)
-        self._title = ttk.Label(self._details, text="", style="Section.TLabel", wraplength=900)
+        detail_card = Card(self._details)
+        detail_card.pack(fill=tk.BOTH, expand=True)
+        detail_body = detail_card.body
+
+        self._detail_head = ttk.Frame(
+            detail_body, style="Card.TFrame", padding=scale_size(self.window, (16, 12, 14, 10)),
+        )
+        self._detail_head.pack(fill=tk.X)
+        self._detail_head.columnconfigure(0, weight=1)
+        head_text = ttk.Frame(self._detail_head, style="Card.TFrame")
+        head_text.grid(row=0, column=0, sticky="ew", padx=(0, scale_size(self.window, 12)))
+        self._title = ttk.Label(head_text, text="", style="CardSection.TLabel", wraplength=760)
         self._title.pack(fill=tk.X)
-        self._meta = ttk.Label(self._details, text="", wraplength=900)
-        self._meta.pack(fill=tk.X, pady=(4, 6))
+        self._meta = ttk.Label(head_text, text="", style="CardMuted.TLabel", wraplength=760)
+        self._meta.pack(fill=tk.X, pady=(scale_size(self.window, 3), 0))
+
+        # Contextual Paper Links placed right next to paper title
+        self._paper_links = ttk.Frame(self._detail_head, style="Card.TFrame")
+        self._paper_links.grid(row=0, column=1, sticky="ne")
+        ttk.Button(
+            self._paper_links, text="打开 DOI", command=self._open_doi, style="GhostCompact.TButton",
+        ).pack(side=tk.LEFT, padx=(0, scale_size(self.window, 6)))
+        ttk.Button(
+            self._paper_links, text="查看知网页面", command=self._open_url, style="SoftCompact.TButton",
+        ).pack(side=tk.LEFT)
+
         def resize_details(event):
-            width = max(200, event.width - 16)
+            width = max(200, event.width - scale_size(self.window, 240))
             self._title.configure(wraplength=width)
             self._meta.configure(wraplength=width)
 
-        self._details.bind("<Configure>", resize_details)
-        self._notebook = ttk.Notebook(self._details)
+        self._detail_head.bind("<Configure>", resize_details)
+        self._detail_divider = Divider(detail_body)
+        self._detail_divider.pack(fill=tk.X)
+
+        self._notebook = ttk.Notebook(detail_body)
         self._notebook.pack(fill=tk.BOTH, expand=True)
         self._texts = {}
+        default_font = font.nametofont("TkDefaultFont", root=self.window)
+        self._info_tab_stop = default_font.measure("命中检索项    ")
         for name, label in (("abstract", "摘要与关键词"), ("info", "详细信息"), ("citation", "引用格式"), ("journal", "期刊信息")):
-            frame = ttk.Frame(self._notebook)
+            frame = ttk.Frame(self._notebook, style="Card.TFrame")
             self._notebook.add(frame, text=label)
-            text_view = TextView(frame, state=tk.DISABLED)
+            text_view = TextView(frame, state=tk.DISABLED, bordered=False)
             text_view.pack(fill=tk.BOTH, expand=True)
             self._texts[name] = text_view.text
             if name == "journal":
-                ttk.Button(frame, text="查看期刊来源", command=self._open_journal_source, bootstyle="secondary-outline").pack(anchor=tk.E, pady=6)
-        bottom = ttk.Frame(footer)
-        bottom.pack(fill=tk.X)
-        self._summary = tk.StringVar(self.window)
-        ttk.Label(bottom, textvariable=self._summary).pack(side=tk.LEFT)
-        self._detail_toggle = ttk.Checkbutton(
-            bottom, text="显示详情", variable=self._show_detail, command=self._toggle_details,
-        )
-        self._detail_toggle.pack(side=tk.LEFT, padx=12)
-        self._paper_links = ttk.Frame(bottom)
-        self._paper_links.pack(side=tk.RIGHT)
-        ttk.Button(self._paper_links, text="查看知网页面", command=self._open_url, bootstyle="secondary-outline").pack(side=tk.RIGHT)
-        ttk.Button(self._paper_links, text="打开 DOI", command=self._open_doi, bootstyle="secondary-outline").pack(side=tk.RIGHT, padx=8)
-        self._operation_status = tk.StringVar(self.window)
-        self._operation_label = ttk.Label(footer, textvariable=self._operation_status, wraplength=1100)
-        self._operation_label.pack(fill=tk.X, pady=(5, 0))
-        self._output_text = tk.StringVar(self.window)
-        self._output_label = ttk.Label(footer, textvariable=self._output_text, wraplength=1100)
-        self._output_label.pack(fill=tk.X, pady=(4, 0))
-        def resize_footer(event):
-            width = max(200, event.width - 8)
-            self._output_label.configure(wraplength=width)
-            self._operation_label.configure(wraplength=width)
-
-        body.bind("<Configure>", resize_footer)
+                jbar = ttk.Frame(frame, style="Card.TFrame", padding=scale_size(self.window, (12, 6)))
+                jbar.pack(fill=tk.X)
+                ttk.Button(
+                    jbar, text="查看期刊来源", command=self._open_journal_source, style="SoftCompact.TButton",
+                ).pack(side=tk.RIGHT)
+        self._configure_detail_tags()
         self._show_output_dir()
 
-    def _arrange_actions(self, event):
-        gap = scale_size(self.window, 12)
-        required = self._selection_actions.winfo_reqwidth() + self._export_actions.winfo_reqwidth() + gap
-        wrapped = event.width < required
-        if wrapped == self._actions_wrapped:
+    def apply_theme(self) -> None:
+        configure_window_surface(self.window, "canvas")
+        self._check_icons = get_checkbox_icons(self.window)
+        self._configure_detail_tags()
+        if self._placeholder_active:
+            self._search_entry.configure(foreground=get_palette().muted)
+        else:
+            self._search_entry.configure(foreground=get_palette().fg)
+        self._refresh_checks()
+        self._show_paper()
+
+    def _configure_detail_tags(self) -> None:
+        p = get_palette()
+        for name in ("abstract", "info"):
+            widget = self._texts[name]
+            widget.tag_configure("field", tabs=(self._info_tab_stop,), lmargin2=self._info_tab_stop)
+            widget.tag_configure("field-label", foreground=p.muted)
+            widget.tag_raise(tk.SEL)
+
+    def _on_table_vscroll(self, first: str, last: str) -> None:
+        self._table_vscroll.set(first, last)
+        try:
+            needed = float(first) > 0.0 or float(last) < 1.0
+        except ValueError:
+            needed = True
+        if needed and not self._table_vscroll.winfo_ismapped():
+            self._table_vscroll.grid()
+        elif not needed and self._table_vscroll.winfo_ismapped():
+            self._table_vscroll.grid_remove()
+
+    def _on_table_hscroll(self, first: str, last: str) -> None:
+        self._table_hscroll.set(first, last)
+        try:
+            needed = float(first) > 0.0 or float(last) < 1.0
+        except ValueError:
+            needed = False
+        if needed and not self._table_hscroll.winfo_ismapped():
+            self._table_hscroll.grid()
+        elif not needed and self._table_hscroll.winfo_ismapped():
+            self._table_hscroll.grid_remove()
+
+    def _set_search_placeholder(self) -> None:
+        self._suppress_search = True
+        self._placeholder_active = True
+        self.search.set(_SEARCH_PLACEHOLDER)
+        self._search_entry.configure(foreground=get_palette().muted)
+        self._suppress_search = False
+
+    def _on_search_focus_in(self, _event=None) -> None:
+        if self._placeholder_active:
+            self._suppress_search = True
+            self._placeholder_active = False
+            self.search.set("")
+            self._search_entry.configure(foreground=get_palette().fg)
+            self._suppress_search = False
+
+    def _on_search_focus_out(self, _event=None) -> None:
+        if not self.search.get().strip():
+            self._set_search_placeholder()
+
+    def _on_search_write(self, *_args) -> None:
+        if self._suppress_search:
             return
-        self._actions_wrapped = wrapped
-        self._export_actions.grid(
-            row=1 if wrapped else 0, column=0 if wrapped else 1,
-            columnspan=2 if wrapped else 1, sticky="w" if wrapped else "e",
-            pady=(gap, 0) if wrapped else 0,
-        )
+        self._populate()
+
+    def _search_query(self) -> str:
+        if self._placeholder_active:
+            return ""
+        return self.search.get().strip().casefold()
 
     def _sync_export_types(self):
-        self._pdf_export_check.configure(state=tk.NORMAL if self.export_formats["ris"].get() else tk.DISABLED)
-        enabled = self._checked and not self.busy and any(value.get() for value in self.export_formats.values())
+        ris_enabled = self.export_formats["ris"].get()
+        self._export_format_menu.entryconfigure(
+            self._pdf_menu_index, state=tk.NORMAL if ris_enabled else tk.DISABLED,
+        )
+        chosen = [label for label, ext in _FORMAT_LABELS if self.export_formats[ext].get()]
+        suffix = " + PDF" if ris_enabled and self._include_pdf.get() else ""
+        summary = f"格式：{'、'.join(chosen)}{suffix}" if chosen else "格式：未选择"
+        self._export_format_button.configure(text=summary)
+        enabled = bool(self._checked) and not self.busy and bool(chosen)
         self._export_button.configure(state=tk.NORMAL if enabled else tk.DISABLED)
 
     def _show_output_dir(self):
-        self._output_text.set(f"保存位置：{self.get_output_dir()}")
+        path_text = str(self.get_output_dir())
+        short = path_text if len(path_text) <= 44 else f"...{path_text[-41:]}"
+        self._output_text.set(f"保存位置：{short}")
+
+    def _open_output_dir(self):
+        try:
+            open_directory(Path(self.get_output_dir()))
+        except OSError as error:
+            messagebox.showerror("打开保存目录失败", str(error), parent=self.window)
 
     def _destination(self) -> Path:
         directory = Path(self.get_output_dir()).expanduser().resolve()
         directory.mkdir(parents=True, exist_ok=True)
-        self._output_text.set(f"保存位置：{directory}")
+        self._show_output_dir()
         return directory
 
     def set_papers(self, papers: list[Paper], *, source_path: Path | None = None) -> None:
@@ -314,9 +514,13 @@ class ResultsWindow:
         self._restore_pdf_links()
         self.query.set("全部检索项")
         self.kind.set("全部类型")
-        self.search.set("")
-        self._query_box.configure(values=["全部检索项", *dict.fromkeys(query for paper in self._papers for query in paper.queries)])
-        self._kind_box.configure(values=["全部类型", *dict.fromkeys(paper.document_type for paper in self._papers if paper.document_type)])
+        self._set_search_placeholder()
+        self._query_box.configure(
+            values=["全部检索项", *dict.fromkeys(query for paper in self._papers for query in paper.queries)],
+        )
+        self._kind_box.configure(
+            values=["全部类型", *dict.fromkeys(paper.document_type for paper in self._papers if paper.document_type)],
+        )
         self._populate()
 
     def _values(self, index: int):
@@ -328,19 +532,30 @@ class ResultsWindow:
         status = attachment
         if operation and operation not in {attachment, "已下载", "已关联 PDF", "已有 PDF"}:
             status = f"{attachment}；{operation}" if attachment else operation
-        return ("☑" if index in self._checked else "☐", paper.title, display_authors, paper.source, paper.publication_date[:10], status)
+        return (paper.title, display_authors, paper.source, paper.publication_date[:10], status)
+
+    def _row_icon(self, index: int) -> tk.PhotoImage:
+        return self._check_icons["checked" if index in self._checked else "unchecked"]
 
     def _populate(self):
         selected = self.table.selection()
-        search = self.search.get().strip().casefold()
-        self._visible = [i for i, paper in enumerate(self._papers)
-                         if (not search or search in (paper.title + " " + paper.authors).casefold())
-                         and (self.query.get() == "全部检索项" or self.query.get() in paper.queries)
-                         and (self.kind.get() == "全部类型" or self.kind.get() == paper.document_type)]
-        self._visible.sort(key=lambda i: (str(getattr(self._papers[i], self._sort_key)).casefold(), i), reverse=self._descending)
+        search = self._search_query()
+        self._visible = [
+            i for i, paper in enumerate(self._papers)
+            if (not search or search in (paper.title + " " + paper.authors).casefold())
+            and (self.query.get() == "全部检索项" or self.query.get() in paper.queries)
+            and (self.kind.get() == "全部类型" or self.kind.get() == paper.document_type)
+        ]
+        self._visible.sort(
+            key=lambda i: (str(getattr(self._papers[i], self._sort_key)).casefold(), i),
+            reverse=self._descending,
+        )
         self.table.delete(*self.table.get_children())
         for index in self._visible:
-            self.table.insert("", tk.END, iid=str(index), values=self._values(index))
+            self.table.insert(
+                "", tk.END, iid=str(index), image=self._row_icon(index), values=self._values(index),
+            )
+        apply_zebra(self.table)
         if selected and int(selected[0]) in self._visible:
             self.table.selection_set(selected[0])
         elif self._visible:
@@ -351,23 +566,22 @@ class ResultsWindow:
 
     def _sync_empty_results(self):
         if self._papers:
-            self._toolbar.pack(fill=tk.X, pady=(0, 10), before=self._results_area)
-            self._action_bar.pack(fill=tk.X, pady=(0, 10), before=self._results_area)
-            self._detail_toggle.pack(side=tk.LEFT, padx=12)
+            if not self._top_surface.winfo_ismapped():
+                self._top_surface.pack(fill=tk.X, before=self._top_divider)
             self._detail_toggle.configure(state=tk.NORMAL if self._visible else tk.DISABLED)
         else:
-            self._toolbar.pack_forget()
-            self._action_bar.pack_forget()
-            self._detail_toggle.pack_forget()
+            self._top_surface.pack_forget()
         if self._visible:
             self._empty_results.grid_remove()
             self._panes.grid()
-            self._paper_links.pack(side=tk.RIGHT)
         else:
             self._panes.grid_remove()
             self._empty_results.grid()
-            self._paper_links.pack_forget()
             self._empty_title.configure(text="没有匹配的论文" if self._papers else "尚无论文结果")
+            self._empty_sub.configure(
+                text="请尝试调整搜索词或筛选条件" if self._papers
+                else "开始检索后结果将自动同步到此窗口，也可以直接打开已导出的 Excel 或 CSV 文件",
+            )
             self._empty_action.configure(
                 text="清除筛选" if self._papers else "打开结果文件",
                 command=self._clear_filters if self._papers else self.open_file,
@@ -377,17 +591,18 @@ class ResultsWindow:
     def _clear_filters(self):
         self.query.set("全部检索项")
         self.kind.set("全部类型")
-        self.search.set("")
+        self._set_search_placeholder()
+        self._populate()
 
     def _set_row_status(self, index: int, status: str) -> None:
         self._row_statuses[index] = status
         if self.table.exists(str(index)):
-            self.table.item(str(index), values=self._values(index))
+            self.table.item(str(index), image=self._row_icon(index), values=self._values(index))
         if self.table.selection() == (str(index),):
             self._show_paper()
 
     def _sort(self, name):
-        if name in {"checked", "status"}:
+        if name == "status":
             return
         self._descending = not self._descending if name == self._sort_key else False
         self._sort_key = name
@@ -395,7 +610,7 @@ class ResultsWindow:
 
     def _click(self, event):
         row = self.table.identify_row(event.y)
-        if row and self.table.identify_column(event.x) == "#1":
+        if row and self.table.identify_column(event.x) == "#0":
             self._toggle(int(row))
             return "break"
 
@@ -410,7 +625,7 @@ class ResultsWindow:
             self._checked.remove(index)
         else:
             self._checked.add(index)
-        self.table.item(str(index), values=self._values(index))
+        self.table.item(str(index), image=self._row_icon(index), values=self._values(index))
         self._update_summary()
 
     def _select_visible(self):
@@ -427,7 +642,11 @@ class ResultsWindow:
         if operation == "download":
             self._restore_pdf_links()
         statuses = self._statuses if operation == "download" else self._detail_statuses
-        excluded = {"已下载", "已关联 PDF", "已有 PDF", "下载中", "已停止"} if operation == "download" else {"详情已补齐", "无可补字段"}
+        excluded = (
+            {"已下载", "已关联 PDF", "已有 PDF", "下载中", "已停止"}
+            if operation == "download"
+            else {"详情已补齐", "无可补字段"}
+        )
         self._checked.clear()
         for index in self._visible:
             status = statuses.get(index, "")
@@ -441,12 +660,14 @@ class ResultsWindow:
 
     def _refresh_checks(self):
         for index in self._visible:
-            self.table.item(str(index), values=self._values(index))
+            if self.table.exists(str(index)):
+                self.table.item(str(index), image=self._row_icon(index), values=self._values(index))
         self._update_summary()
 
     def _update_summary(self):
-        self._summary.set(f"显示 {len(self._visible)} / {len(self._papers)} 篇，已勾选 {len(self._checked)} 篇")
+        self._summary.set(f"显示 {len(self._visible)} / {len(self._papers)} 篇 · 已勾选 {len(self._checked)} 篇")
         self._selection_button.configure(state=tk.DISABLED if self.busy else tk.NORMAL)
+        self._export_format_button.configure(state=tk.DISABLED if self.busy else tk.NORMAL)
         self._sync_export_types()
         self._download_button.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
         self._paper_actions.configure(state=tk.NORMAL if self._checked and not self.busy else tk.DISABLED)
@@ -462,57 +683,84 @@ class ResultsWindow:
     def _show_paper(self):
         paper = self._current()
         if paper:
-            self._title.pack(fill=tk.X, before=self._notebook)
-            self._meta.pack(fill=tk.X, pady=(4, 6), before=self._notebook)
+            if not self._detail_head.winfo_ismapped():
+                self._detail_head.pack(fill=tk.X, before=self._notebook)
+            if not self._detail_divider.winfo_ismapped():
+                self._detail_divider.pack(fill=tk.X, before=self._notebook)
         else:
-            self._title.pack_forget()
-            self._meta.pack_forget()
+            self._detail_head.pack_forget()
+            self._detail_divider.pack_forget()
         self._title.configure(text=paper.title if paper else "")
-        self._meta.configure(text=f"{paper.authors.replace(';', '；')}  |  {paper.source}  |  {paper.publication_date}" if paper else "", wraplength=max(200, self._details.winfo_width() - 16))
-        content = {"abstract": "", "info": "", "citation": "", "journal": "期刊信息未查询"}
+        self._meta.configure(
+            text=f"{paper.authors.replace(';', '；')}  ·  {paper.source}  ·  {paper.publication_date}" if paper else "",
+        )
+
+        for name, widget in self._texts.items():
+            widget.configure(state=tk.NORMAL)
+            widget.delete("1.0", tk.END)
+
         if paper:
-            content["abstract"] = f"关键词：{'；'.join(split_values(paper.paper_keywords)) or '未采集'}\n\n{paper.abstract or '摘要未采集'}"
-            content["citation"] = paper.citation or "引用格式未采集"
-            content["info"] = "\n\n".join(f"{label}：{value or '未采集'}" for label, value in (
+            selected = self.table.selection()
+            sel_idx = int(selected[0]) if selected else -1
+
+            abs_text = self._texts["abstract"]
+            abs_text.insert(tk.END, "关键词\t", ("field", "field-label"))
+            abs_text.insert(tk.END, f"{'；'.join(split_values(paper.paper_keywords)) or '未采集'}\n\n", ("field",))
+            abs_text.insert(tk.END, paper.abstract or "摘要未采集")
+
+            info_text = self._texts["info"]
+            info_rows = [
                 ("文献类型", paper.document_type), ("DOI", paper.doi), ("作者单位", paper.institutions),
                 ("基金", paper.funds), ("分类号", paper.classification), ("卷", paper.volume), ("期", paper.issue),
                 ("页码", paper.pages), ("被引次数", paper.citation_count), ("下载次数", paper.download_count),
-                ("命中检索项", "；".join(paper.queries)), ("详情链接", paper.detail_url),
-                ("本地 PDF", paper.pdf_path),
-            ))
-            selected = self.table.selection()
-            if selected and paper.pdf_path:
-                content["info"] += f"\n\n附件状态：{self._pdf_status(int(selected[0]))}"
-            status = self._statuses.get(int(selected[0]), "") if selected else ""
-            if status:
-                content["info"] += f"\n\n下载状态：{status}"
-            detail_status = self._detail_statuses.get(int(selected[0]), "") if selected else ""
-            if detail_status:
-                content["info"] += f"\n\n详情状态：{detail_status}"
-            zotero_status = self._zotero_statuses.get(int(selected[0]), "") if selected else ""
-            if zotero_status:
-                content["info"] += f"\n\nZotero：{zotero_status}"
-            journal = self._journal_infos.get(int(selected[0]), {}) if selected else {}
-            if journal:
-                if journal.get("error"):
-                    content["journal"] = journal["error"]
-                else:
-                    content["journal"] = "\n".join(f"{label}：{journal.get(key) or '页面未提供'}" for key, label in (
-                        ("name", "期刊"), ("issn", "ISSN"), ("cn", "CN"), ("sponsor", "主办单位"), ("frequency", "出版周期"),
-                    ))
-                    content["journal"] += "\n\n页面收录信息：\n" + (journal.get("indexing") or "页面未提供，不能据此判断未收录")
-                    content["journal"] += "\n\n影响因子（页面原文）：\n" + ("\n".join(journal.get("metrics", [])) or "页面未提供")
+                ("命中检索项", "；".join(paper.queries)), ("详情链接", paper.detail_url), ("本地 PDF", paper.pdf_path),
+            ]
+            if sel_idx >= 0 and paper.pdf_path:
+                info_rows.append(("附件状态", self._pdf_status(sel_idx)))
+            if sel_idx >= 0 and self._statuses.get(sel_idx):
+                info_rows.append(("下载状态", self._statuses[sel_idx]))
+            if sel_idx >= 0 and self._detail_statuses.get(sel_idx):
+                info_rows.append(("详情状态", self._detail_statuses[sel_idx]))
+            if sel_idx >= 0 and self._zotero_statuses.get(sel_idx):
+                info_rows.append(("Zotero", self._zotero_statuses[sel_idx]))
+            for label, value in info_rows:
+                info_text.insert(tk.END, f"{label}\t", ("field", "field-label"))
+                info_text.insert(tk.END, f"{value or '未采集'}\n", ("field",))
+
+            self._texts["citation"].insert("1.0", paper.citation or "引用格式未采集")
+
+            journal = self._journal_infos.get(sel_idx, {}) if sel_idx >= 0 else {}
+            if not journal:
+                journal_text = "期刊信息未查询"
+            elif journal.get("error"):
+                journal_text = journal["error"]
+            else:
+                journal_text = "\n".join(
+                    f"{label}：{journal.get(key) or '页面未提供'}"
+                    for key, label in (
+                        ("name", "期刊"), ("issn", "ISSN"), ("cn", "CN"),
+                        ("sponsor", "主办单位"), ("frequency", "出版周期"),
+                    )
+                )
+                journal_text += "\n\n页面收录信息：\n" + (journal.get("indexing") or "页面未提供，不能据此判断未收录")
+                journal_text += "\n\n影响因子（页面原文）：\n" + ("\n".join(journal.get("metrics", [])) or "页面未提供")
                 if journal.get("source_url"):
-                    content["journal"] += f"\n\n来源：{journal['source_url']}"
+                    journal_text += f"\n\n来源：{journal['source_url']}"
                 if journal.get("queried_at"):
-                    content["journal"] += f"\n查询时间：{journal['queried_at']}"
-        for name, text in self._texts.items():
-            text.configure(state=tk.NORMAL)
-            text.delete("1.0", tk.END)
-            text.insert("1.0", content[name])
-            text.configure(state=tk.DISABLED)
+                    journal_text += f"\n查询时间：{journal['queried_at']}"
+            self._texts["journal"].insert("1.0", journal_text)
+        else:
+            self._texts["journal"].insert("1.0", "期刊信息未查询")
+
+        for widget in self._texts.values():
+            widget.configure(state=tk.DISABLED)
+
+    def _toggle_details_clicked(self):
+        self._show_detail.set(not self._show_detail.get())
+        self._toggle_details()
 
     def _toggle_details(self):
+        self._detail_toggle.configure(text="隐藏详情" if self._show_detail.get() else "显示详情")
         visible = any(str(pane) == str(self._details) for pane in self._panes.panes())
         if self._visible and self._show_detail.get() and not visible:
             self._panes.add(self._details, weight=2)
@@ -522,9 +770,13 @@ class ResultsWindow:
             self._panes.forget(self._details)
 
     def _position_details(self, _event=None):
-        if (self._detail_split_pending and self._panes.winfo_ismapped()
-                and self._panes.winfo_height() > 1 and len(self._panes.panes()) > 1):
-            self._panes.sashpos(0, int(self._panes.winfo_height() * .55))
+        if (
+            self._detail_split_pending
+            and self._panes.winfo_ismapped()
+            and self._panes.winfo_height() > 1
+            and len(self._panes.panes()) > 1
+        ):
+            self._panes.sashpos(0, int(self._panes.winfo_height() * 0.56))
             self._detail_split_pending = False
 
     def open_file(self):
@@ -533,7 +785,11 @@ class ResultsWindow:
         if not self.can_run():
             messagebox.showinfo("任务正在运行", "请在当前任务结束后打开其他结果文件", parent=self.window)
             return
-        path = filedialog.askopenfilename(parent=self.window, title="打开论文结果", filetypes=[("CNKIBug 结果", "*.xlsx *.csv"), ("Excel", "*.xlsx"), ("CSV", "*.csv")])
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="打开论文结果",
+            filetypes=[("CNKIBug 结果", "*.xlsx *.csv"), ("Excel", "*.xlsx"), ("CSV", "*.csv")],
+        )
         if path:
             try:
                 papers = read_papers(path)
@@ -606,7 +862,11 @@ class ResultsWindow:
             message = "\n".join(failures)
             if saved:
                 self._operation_status.set(f"已导出 {len(saved)} 种格式，{len(failures)} 种格式失败")
-                messagebox.showwarning("部分导出失败", "已生成：" + "、".join(path.name for path in saved) + "\n\n" + message, parent=self.window)
+                messagebox.showwarning(
+                    "部分导出失败",
+                    "已生成：" + "、".join(path.name for path in saved) + "\n\n" + message,
+                    parent=self.window,
+                )
             else:
                 messagebox.showerror("导出失败", message, parent=self.window)
 
@@ -715,7 +975,9 @@ class ResultsWindow:
             )
         except (OSError, ValueError) as error:
             messagebox.showwarning(
-                "PDF 关联尚未保存", f"当前关联已更新，但无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存这些关联", parent=self.window,
+                "PDF 关联尚未保存",
+                f"当前关联已更新，但无法自动保存：\n{error}\n\n请导出 Excel 或 CSV 保存这些关联",
+                parent=self.window,
             )
             return False
         self._unsaved_pdf_links.discard(index)
@@ -741,7 +1003,7 @@ class ResultsWindow:
         self._operation_status.set(label)
         self._open_button.configure(state=tk.DISABLED)
         self._stop_button.configure(text="停止处理", state=tk.NORMAL)
-        self._stop_button.pack(side=tk.RIGHT)
+        self._stop_button.pack(side=tk.RIGHT, padx=(scale_size(self.window, 6), 0))
         self._update_summary()
 
         def worker():
@@ -811,8 +1073,10 @@ class ResultsWindow:
             messagebox.showerror("保存位置不可用", str(error), parent=self.window)
             return
         papers = [copy.deepcopy(self._papers[i]) for i in indices]
-        self.download_service.submit(papers, directory, self.settings, dialog.webvpn_url, force=force,
-                                     source=self._source_path.stem if self._source_path else "论文下载")
+        self.download_service.submit(
+            papers, directory, self.settings, dialog.webvpn_url, force=force,
+            source=self._source_path.stem if self._source_path else "论文下载",
+        )
         self._operation_status.set(f"已提交 {len(papers)} 篇论文，请在下载任务中查看进度")
         self.show_download_tasks()
 
@@ -843,7 +1107,9 @@ class ResultsWindow:
                 for key in paper_keys(value):
                     indexed.setdefault(key, []).append((item, value))
         for index, paper in enumerate(self._papers):
-            candidates = [entry for key in paper_keys(paper) for entry in indexed.get(key, []) if same_paper(paper, entry[1])]
+            candidates = [
+                entry for key in paper_keys(paper) for entry in indexed.get(key, []) if same_paper(paper, entry[1])
+            ]
             if not candidates:
                 continue
             item, _ = max(candidates, key=lambda entry: entry[0]["updated"])
@@ -913,33 +1179,45 @@ class ResultsWindow:
                 elif event.name == "download_preparing":
                     remaining = payload["remaining"]
                     self._continue_button.configure(text="立即继续")
-                    self._operation_status.set("正在打开机构 WebVPN" if payload.get("webvpn") else "正在打开知网首页" if remaining is None else f"知网首页等待：{remaining} 秒")
+                    self._operation_status.set(
+                        "正在打开机构 WebVPN" if payload.get("webvpn")
+                        else "正在打开知网首页" if remaining is None
+                        else f"知网首页等待：{remaining} 秒"
+                    )
                     if remaining is not None:
-                        self._continue_button.pack(side=tk.LEFT, padx=(8, 0), before=self._stop_button)
+                        self._continue_button.pack(side=tk.RIGHT, padx=(scale_size(self.window, 6), 0))
                 elif event.name == "download_webvpn_login":
                     self._operation_status.set("请在浏览器中完成机构 WebVPN 登录")
                     self._continue_button.configure(text="登录完成，继续")
-                    self._continue_button.pack(side=tk.LEFT, padx=(8, 0), before=self._stop_button)
+                    self._continue_button.pack(side=tk.RIGHT, padx=(scale_size(self.window, 6), 0))
                 elif event.name == "download_manual_access":
                     self._operation_status.set("请留意浏览器中的登录或安全验证，完成后点击继续")
                     self._continue_button.configure(text="继续")
-                    self._continue_button.pack(side=tk.LEFT, padx=(8, 0), before=self._stop_button)
+                    self._continue_button.pack(side=tk.RIGHT, padx=(scale_size(self.window, 6), 0))
                 elif event.name == "download_prepared":
                     self._continue_button.pack_forget()
                     self._operation_status.set("正在下载所选论文")
                 elif event.name == "confirm_requested":
-                    answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel("请确认", payload["prompt"], parent=self.window)
+                    answer = False if self._closing or self.cancel.is_set() else messagebox.askokcancel(
+                        "请确认", payload["prompt"], parent=self.window,
+                    )
                     payload["response_queue"].put(answer)
                 elif event.name in {"zotero_review_requested", "zotero_library_requested", "pdf_links_review_requested"}:
                     answer = None
                     try:
                         if not (self._closing or self.cancel.is_set()):
                             if event.name == "pdf_links_review_requested":
-                                dialog = PdfLinksReviewDialog(self.window, payload["directory"], payload["rows"], payload["warnings"], self.cancel)
+                                dialog = PdfLinksReviewDialog(
+                                    self.window, payload["directory"], payload["rows"], payload["warnings"], self.cancel,
+                                )
                             elif event.name == "zotero_review_requested":
-                                dialog = ZoteroReviewDialog(self.window, payload["destination"], payload["rows"], self.cancel)
+                                dialog = ZoteroReviewDialog(
+                                    self.window, payload["destination"], payload["rows"], self.cancel,
+                                )
                             else:
-                                dialog = ZoteroLibraryDialog(self.window, payload["destination"], payload["libraries"], self.cancel)
+                                dialog = ZoteroLibraryDialog(
+                                    self.window, payload["destination"], payload["libraries"], self.cancel,
+                                )
                             answer = dialog.show()
                     except Exception:
                         logging.getLogger("cnkibug.gui.results").exception("无法显示论文操作确认窗口")
@@ -957,7 +1235,9 @@ class ResultsWindow:
                     self._stop_button.pack_forget()
                     self._open_button.configure(state=tk.NORMAL)
                     message = payload.get("message", "下载已停止" if payload.get("stopped") else "本批下载结束")
-                    self._operation_status.set(f"已停止；{message}" if event.name == "paper_task_finished" and payload.get("stopped") else message)
+                    self._operation_status.set(
+                        f"已停止；{message}" if event.name == "paper_task_finished" and payload.get("stopped") else message
+                    )
                     self._update_summary()
                     if self._closing:
                         self.window.destroy()
